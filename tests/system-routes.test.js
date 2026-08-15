@@ -2720,6 +2720,214 @@ test('/api/admin/system-data/import canonicalizes Payment identity and rejects m
   });
 });
 
+test('/api/admin/system-data/import guards allocated Payment and Rental replacements against cross relations and orphans', async () => {
+  const collections = {
+    counterparties: [
+      { id: 'CP-A', legalName: 'A', shortName: 'A', status: 'active', roles: ['customer'] },
+      { id: 'CP-B', legalName: 'B', shortName: 'B', status: 'active', roles: ['customer'] },
+    ],
+    clients: [
+      { id: 'C-A', counterpartyId: 'CP-A', company: 'A' },
+      { id: 'C-B', counterpartyId: 'CP-B', company: 'B' },
+    ],
+    payments: [{ id: 'P-1', clientId: 'C-A', counterpartyId: 'CP-A', amount: 1000 }],
+    rentals: [{ id: 'R-1', clientId: 'C-A', counterpartyId: 'CP-A', status: 'active' }],
+    gantt_rentals: [],
+    payment_allocations: [{ id: 'PA-1', paymentId: 'P-1', rentalId: 'R-1', amount: 1000, status: 'active' }],
+  };
+  const batches = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeDataBatch(entries) {
+      batches.push(structuredClone(entries));
+      for (const entry of entries) collections[entry.name] = entry.value;
+    },
+    jsonCollections: Object.keys(collections),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const samePayment = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        payments: [{ id: 'P-1', clientId: 'C-A', counterpartyId: 'CP-A', amount: 1200 }],
+      },
+    });
+    assert.equal(samePayment.status, 200, JSON.stringify(samePayment.body));
+    assert.equal(collections.payments[0].amount, 1200);
+
+    for (const [name, nextList, expectedCode] of [
+      ['payments', [{ id: 'P-1', clientId: 'C-B', counterpartyId: 'CP-B', amount: 1200 }], 'COUNTERPARTY_RELATION_MISMATCH'],
+      ['payments', [], 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND'],
+      ['rentals', [{ id: 'R-1', clientId: 'C-B', counterpartyId: 'CP-B', status: 'active' }], 'COUNTERPARTY_RELATION_MISMATCH'],
+      ['rentals', [], 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND'],
+    ]) {
+      const before = structuredClone(collections);
+      const batchCount = batches.length;
+      const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+        confirm: true,
+        collections: { [name]: nextList },
+      });
+      assert.equal(rejected.status, 400, JSON.stringify(rejected.body));
+      assert.match(JSON.stringify(rejected.body.errors), new RegExp(expectedCode));
+      assert.equal(batches.length, batchCount);
+      assert.deepEqual(collections, before);
+    }
+
+    const coordinated = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        payments: [{ id: 'P-1', clientId: 'C-B', counterpartyId: 'CP-B', amount: 1200 }],
+        rentals: [{ id: 'R-1', clientId: 'C-B', counterpartyId: 'CP-B', status: 'active' }],
+      },
+    });
+    assert.equal(coordinated.status, 200, JSON.stringify(coordinated.body));
+    assert.equal(collections.payments[0].counterpartyId, 'CP-B');
+    assert.equal(collections.rentals[0].counterpartyId, 'CP-B');
+
+    const stagedDependencies = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        counterparties: [{
+          id: 'CP-C',
+          type: 'legal_entity',
+          legalName: 'C',
+          shortName: 'C',
+          inn: '7707083893',
+          status: 'active',
+          roles: ['customer'],
+        }],
+        clients: [{ id: 'C-C', counterpartyId: 'CP-C', company: 'C', inn: '7707083893' }],
+        payments: [{ id: 'P-1', clientId: 'C-C', counterpartyId: 'CP-C', amount: 1200 }],
+        rentals: [{ id: 'R-1', clientId: 'C-C', counterpartyId: 'CP-C', status: 'active' }],
+      },
+    });
+    assert.equal(stagedDependencies.status, 200, JSON.stringify(stagedDependencies.body));
+    assert.equal(collections.payments[0].counterpartyId, 'CP-C');
+    assert.equal(collections.rentals[0].counterpartyId, 'CP-C');
+
+    const beforeClientRemoval = structuredClone(collections);
+    const clientRemovalBatchCount = batches.length;
+    const clientRemoval = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: { clients: [] },
+    });
+    assert.equal(clientRemoval.status, 400, JSON.stringify(clientRemoval.body));
+    assert.match(JSON.stringify(clientRemoval.body.errors), /COUNTERPARTY_RELATION_CLIENT_NOT_FOUND/);
+    assert.equal(batches.length, clientRemovalBatchCount);
+    assert.deepEqual(collections, beforeClientRemoval);
+  });
+});
+
+test('/api/admin/system-data/import rejects missing-id Classic and Gantt rows that make an allocated alias ambiguous', async () => {
+  const collections = {
+    counterparties: [
+      { id: 'CP-A', legalName: 'A', shortName: 'A', status: 'active', roles: ['customer'] },
+    ],
+    counterparty_role_assignments: [],
+    clients: [],
+    payments: [{ id: 'P-A', rentalId: 'X', counterpartyId: 'CP-A', amount: 1000 }],
+    rentals: [{ id: 'R-A', rentalId: 'X', counterpartyId: 'CP-A', status: 'active' }],
+    gantt_rentals: [],
+    payment_allocations: [{ id: 'PA-X', paymentId: 'P-A', rentalId: 'X', amount: 1000, status: 'active' }],
+  };
+  const batches = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeDataBatch(entries) {
+      batches.push(structuredClone(entries));
+      for (const entry of entries) collections[entry.name] = entry.value;
+    },
+    jsonCollections: Object.keys(collections),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const before = structuredClone(collections);
+    for (const [name, value] of [
+      ['rentals', [
+        ...collections.rentals,
+        { rentalId: 'X', counterpartyId: 'CP-A', status: 'active' },
+      ]],
+      ['gantt_rentals', [
+        { sourceRentalId: 'X', counterpartyId: 'CP-A', status: 'active' },
+      ]],
+    ]) {
+      const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+        confirm: true,
+        collections: { [name]: value },
+      });
+
+      assert.equal(rejected.status, 400, JSON.stringify(rejected.body));
+      assert.match(JSON.stringify(rejected.body.errors), /COUNTERPARTY_RELATION_AMBIGUOUS/);
+      assert.equal(batches.length, 0);
+      assert.deepEqual(collections, before);
+    }
+  });
+});
+
+test('/api/sync guards allocated Payment replacement and removal before its single batch write', async () => {
+  await withLegacySyncEnabled(async () => {
+    const initial = {
+      counterparties: [
+        { id: 'CP-A', legalName: 'A', shortName: 'A', status: 'active', roles: ['customer'] },
+        { id: 'CP-B', legalName: 'B', shortName: 'B', status: 'active', roles: ['customer'] },
+      ],
+      clients: [{ id: 'C-A', counterpartyId: 'CP-A', company: 'A' }],
+      payments: [{ id: 'P-1', clientId: 'C-A', counterpartyId: 'CP-A', amount: 1000 }],
+      rentals: [{ id: 'R-1', clientId: 'C-A', counterpartyId: 'CP-A', status: 'active' }],
+      gantt_rentals: [],
+      payment_allocations: [{ id: 'PA-1', paymentId: 'P-1', rentalId: 'R-1', amount: 1000, status: 'active' }],
+    };
+    const { app, batches, collections, writes } = createLegacySyncStore(initial);
+
+    await withServer(app, async (baseUrl) => {
+      const sameCounterparty = await postJson(baseUrl, '/api/sync', {
+        payments: [{ id: 'P-1', counterpartyId: 'CP-A', amount: 1100 }],
+      });
+      assert.equal(sameCounterparty.status, 200, JSON.stringify(sameCounterparty.body));
+      assert.equal(collections.payments[0].amount, 1100);
+      assert.equal(batches.length, 1);
+      assert.equal(writes.length, 0);
+
+      const beforeClientSync = structuredClone(collections);
+      const clientBatchCount = batches.length;
+      const rejectedClientRemoval = await postJson(baseUrl, '/api/sync', { clients: [] });
+      assert.equal(rejectedClientRemoval.status, 409, JSON.stringify(rejectedClientRemoval.body));
+      assert.equal(rejectedClientRemoval.body.code, 'COUNTERPARTY_RELATION_CLIENT_NOT_FOUND');
+      assert.equal(batches.length, clientBatchCount);
+      assert.equal(writes.length, 0);
+      assert.deepEqual(collections, beforeClientSync);
+
+      for (const nextPayments of [
+        [{ id: 'P-1', counterpartyId: 'CP-B', amount: 1100 }],
+        [],
+      ]) {
+        const before = structuredClone(collections);
+        const batchCount = batches.length;
+        const rejected = await postJson(baseUrl, '/api/sync', { payments: nextPayments });
+        assert.equal(rejected.status, 409, JSON.stringify(rejected.body));
+        assert.equal(
+          ['COUNTERPARTY_RELATION_MISMATCH', 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND'].includes(rejected.body.code),
+          true,
+        );
+        assert.equal(batches.length, batchCount);
+        assert.equal(writes.length, 0);
+        assert.deepEqual(collections, before);
+      }
+
+      const beforeRentalSync = structuredClone(collections);
+      const rentalBatchCount = batches.length;
+      const rejectedRental = await postJson(baseUrl, '/api/sync', {
+        rentals: [{ id: 'R-1', counterpartyId: 'CP-B', status: 'active' }],
+      });
+      assert.equal(rejectedRental.status, 409, JSON.stringify(rejectedRental.body));
+      assert.equal(rejectedRental.body.code, 'RENTAL_LIFECYCLE_SYNC_DISABLED');
+      assert.equal(batches.length, rentalBatchCount);
+      assert.equal(writes.length, 0);
+      assert.deepEqual(collections, beforeRentalSync);
+    });
+  });
+});
+
 test('/api/admin/system-data import/export preserves canonical Delivery customer and contractor identities', async () => {
   const collections = {
     counterparties: [

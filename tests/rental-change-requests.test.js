@@ -185,6 +185,237 @@ test('resolveRentalForChangeRequest returns useful errors for missing and unknow
   assert.equal(unknown.details.fallbackCandidateCount, 0);
 });
 
+test('Rental writers preserve existing allocation Counterparty identity and reject reassignment or removal before writes', async () => {
+  const { app, state, events } = createApprovalApp();
+  state.counterparties = [
+    { id: 'CP-A', legalName: 'A', shortName: 'A', roles: ['customer'], status: 'active', archivedAt: null },
+    { id: 'CP-B', legalName: 'B', shortName: 'B', roles: ['customer'], status: 'active', archivedAt: null },
+  ];
+  state.clients = [
+    { id: 'C-A1', counterpartyId: 'CP-A', company: 'A1' },
+    { id: 'C-A2', counterpartyId: 'CP-A', company: 'A2' },
+    { id: 'C-B', counterpartyId: 'CP-B', company: 'B' },
+  ];
+  Object.assign(state.rentals[0], { clientId: 'C-A1', counterpartyId: 'CP-A' });
+  Object.assign(state.gantt_rentals[0], { clientId: 'C-A1', counterpartyId: 'CP-A' });
+  state.payments = [{ id: 'P-A', clientId: 'C-A1', counterpartyId: 'CP-A', amount: 1000, paidAmount: 1000 }];
+  state.payment_allocations = [{ id: 'PA-1', paymentId: 'P-A', rentalId: 'R-1', amount: 1000, status: 'active' }];
+
+  await withServer(app, async (baseUrl) => {
+    const sameCounterparty = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'admin-token', {
+      clientId: 'C-A2',
+      counterpartyId: 'CP-A',
+    });
+    assert.equal(sameCounterparty.status, 200, JSON.stringify(sameCounterparty.body));
+    assert.equal(state.rentals[0].clientId, 'C-A2');
+
+    const beforeCross = structuredClone({
+      rentals: state.rentals,
+      gantt_rentals: state.gantt_rentals,
+      payments: state.payments,
+      payment_allocations: state.payment_allocations,
+    });
+    const batchCount = events.batches.length;
+    const crossCounterparty = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'admin-token', {
+      clientId: 'C-B',
+      counterpartyId: 'CP-B',
+    });
+    assert.equal(crossCounterparty.status, 409, JSON.stringify(crossCounterparty.body));
+    assert.equal(crossCounterparty.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
+    assert.equal(events.batches.length, batchCount);
+    assert.deepEqual({
+      rentals: state.rentals,
+      gantt_rentals: state.gantt_rentals,
+      payments: state.payments,
+      payment_allocations: state.payment_allocations,
+    }, beforeCross);
+
+    const beforeDelete = structuredClone(state);
+    const deleteBatchCount = events.batches.length;
+    const removed = await request(baseUrl, 'DELETE', '/api/rentals/R-1', 'admin-token');
+    assert.equal(removed.status, 409, JSON.stringify(removed.body));
+    assert.equal(removed.body.code, 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND');
+    assert.equal(events.batches.length, deleteBatchCount);
+    assert.deepEqual(state, beforeDelete);
+
+    const beforeBulk = structuredClone(state);
+    const bulkBatchCount = events.batches.length;
+    const bulkRemoved = await request(
+      baseUrl,
+      'PUT',
+      '/api/rentals',
+      'admin-token',
+      state.rentals
+        .filter(item => item.id !== 'R-1')
+        .map(({ history: _history, ...item }) => item),
+    );
+    assert.equal(bulkRemoved.status, 409, JSON.stringify(bulkRemoved.body));
+    assert.equal(bulkRemoved.body.code, 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND');
+    assert.equal(events.batches.length, bulkBatchCount);
+    assert.deepEqual(state, beforeBulk);
+
+    state.payment_allocations[0] = { ...state.payment_allocations[0], rentalId: 'GR-1' };
+    const beforeGanttBulk = structuredClone(state);
+    const ganttBulkBatchCount = events.batches.length;
+    const ganttRemoved = await request(
+      baseUrl,
+      'PUT',
+      '/api/gantt_rentals',
+      'admin-token',
+      [],
+    );
+    assert.equal(ganttRemoved.status, 409, JSON.stringify(ganttRemoved.body));
+    assert.equal(ganttRemoved.body.code, 'GANTT_PROJECTION_READ_ONLY');
+    assert.equal(events.batches.length, ganttBulkBatchCount);
+    assert.deepEqual(state, beforeGanttBulk);
+  });
+});
+
+test('Rental bulk PUT rejects missing-id and canonical-id stable-alias collisions before writes', async () => {
+  const { app, state, events } = createApprovalApp();
+  state.counterparties = [
+    { id: 'CP-A', legalName: 'A', shortName: 'A', roles: ['customer'], status: 'active', archivedAt: null },
+  ];
+  state.clients = [{ id: 'C-A', counterpartyId: 'CP-A', company: 'A' }];
+  state.client_objects = [{ id: 'OBJ-A', clientId: 'C-A', name: 'Объект A', status: 'active' }];
+  state.client_contracts = [{ id: 'CTR-A', clientId: 'C-A', objectId: 'OBJ-A', number: 'Д-A', status: 'active' }];
+  Object.assign(state.rentals[0], { rentalId: 'X', clientId: 'C-A', counterpartyId: 'CP-A' });
+  Object.assign(state.gantt_rentals[0], { clientId: 'C-A', counterpartyId: 'CP-A' });
+  state.payments = [{ id: 'P-A', rentalId: 'X', clientId: 'C-A', counterpartyId: 'CP-A', amount: 1000 }];
+  state.payment_allocations = [{ id: 'PA-X', paymentId: 'P-A', rentalId: 'X', amount: 1000, status: 'active' }];
+
+  await withServer(app, async (baseUrl) => {
+    const before = structuredClone(state);
+    const batchCount = events.batches.length;
+    const nextRentals = [
+      ...state.rentals.map(({ history: _history, ...item }) => item),
+      {
+        rentalId: 'X',
+        clientId: 'C-A',
+        counterpartyId: 'CP-A',
+        objectId: 'OBJ-A',
+        contractId: 'CTR-A',
+        client: 'A',
+        startDate: '2027-01-10',
+        plannedReturnDate: '2027-01-12',
+        equipmentId: 'EQ-032',
+        equipment: ['03291436'],
+        manager: 'Руслан',
+        managerId: 'U-manager',
+        status: 'created',
+        price: 1000,
+        discount: 0,
+      },
+    ];
+    const rejected = await request(baseUrl, 'PUT', '/api/rentals', 'admin-token', nextRentals);
+
+    assert.equal(rejected.status, 409, JSON.stringify(rejected.body));
+    assert.equal(rejected.body.code, 'COUNTERPARTY_RELATION_ID_REQUIRED', JSON.stringify(rejected.body));
+    assert.equal(events.batches.length, batchCount);
+    assert.deepEqual(state, before);
+
+    const collidingWithId = await request(baseUrl, 'PUT', '/api/rentals', 'admin-token', [
+      ...state.rentals.map(({ history: _history, ...item }) => item),
+      { ...nextRentals.at(-1), id: 'R-alias-collision' },
+    ]);
+    assert.equal(collidingWithId.status, 409, JSON.stringify(collidingWithId.body));
+    assert.equal(collidingWithId.body.code, 'COUNTERPARTY_RELATION_AMBIGUOUS', JSON.stringify(collidingWithId.body));
+    assert.equal(events.batches.length, batchCount);
+    assert.deepEqual(state, before);
+  });
+});
+
+test('Rental change-request approval cannot create a cross-Counterparty allocation', async () => {
+  const { app, state, events } = createApprovalApp();
+  state.counterparties = [
+    { id: 'CP-A', legalName: 'A', shortName: 'A', roles: ['customer'], status: 'active', archivedAt: null },
+    { id: 'CP-B', legalName: 'B', shortName: 'B', roles: ['customer'], status: 'active', archivedAt: null },
+  ];
+  state.clients = [
+    { id: 'C-A', counterpartyId: 'CP-A', company: 'A' },
+    { id: 'C-B', counterpartyId: 'CP-B', company: 'B' },
+  ];
+  Object.assign(state.rentals[0], { clientId: 'C-A', counterpartyId: 'CP-A' });
+  Object.assign(state.gantt_rentals[0], { clientId: 'C-A', counterpartyId: 'CP-A' });
+  state.payments = [{ id: 'P-A', clientId: 'C-A', counterpartyId: 'CP-A', amount: 1000, paidAmount: 1000 }];
+  state.payment_allocations = [{ id: 'PA-1', paymentId: 'P-A', rentalId: 'R-1', amount: 1000, status: 'active' }];
+
+  await withServer(app, async (baseUrl) => {
+    const requested = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'manager-token', {
+      clientId: 'C-B',
+    });
+    assert.equal(requested.status, 200, JSON.stringify(requested.body));
+    const changeRequest = state.rental_change_requests.find(item => item.field === 'clientId');
+    assert.ok(changeRequest);
+    assert.equal(state.rentals[0].counterpartyId, 'CP-A');
+
+    const before = structuredClone({
+      rentals: state.rentals,
+      gantt_rentals: state.gantt_rentals,
+      payment_allocations: state.payment_allocations,
+      requests: state.rental_change_requests,
+    });
+    const batchCount = events.batches.length;
+    const approved = await request(
+      baseUrl,
+      'POST',
+      `/api/rental_change_requests/${changeRequest.id}/approve`,
+      'admin-token',
+      {},
+    );
+    assert.equal(approved.status, 409, JSON.stringify(approved.body));
+    assert.equal(approved.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
+    assert.equal(events.batches.length, batchCount);
+    assert.deepEqual({
+      rentals: state.rentals,
+      gantt_rentals: state.gantt_rentals,
+      payment_allocations: state.payment_allocations,
+      requests: state.rental_change_requests,
+    }, before);
+  });
+});
+
+test('Rental change-request approval rejects a new stable-alias collision before writes', async () => {
+  const { app, state, events } = createApprovalApp();
+  state.counterparties = [
+    { id: 'CP-A', legalName: 'A', shortName: 'A', roles: ['customer'], status: 'active', archivedAt: null },
+  ];
+  state.clients = [{ id: 'C-A', counterpartyId: 'CP-A', company: 'A' }];
+  Object.assign(state.rentals[0], { rentalId: 'X', clientId: 'C-A', counterpartyId: 'CP-A' });
+  Object.assign(state.rentals[1], { clientId: 'C-A', counterpartyId: 'CP-A' });
+  Object.assign(state.gantt_rentals[0], { clientId: 'C-A', counterpartyId: 'CP-A' });
+  Object.assign(state.gantt_rentals[1], { clientId: 'C-A', counterpartyId: 'CP-A' });
+  state.payments = [{ id: 'P-A', rentalId: 'X', clientId: 'C-A', counterpartyId: 'CP-A', amount: 1000 }];
+  state.payment_allocations = [{ id: 'PA-X', paymentId: 'P-A', rentalId: 'X', amount: 1000, status: 'active' }];
+  state.rental_change_requests = [{
+    id: 'RCR-alias-collision',
+    entityType: 'rental',
+    rentalId: 'R-2',
+    field: 'rentalId',
+    fieldLabel: 'Legacy Rental reference',
+    oldValue: '',
+    newValue: 'X',
+    status: 'pending',
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const before = structuredClone(state);
+    const batchCount = events.batches.length;
+    const rejected = await request(
+      baseUrl,
+      'POST',
+      '/api/rental_change_requests/RCR-alias-collision/approve',
+      'admin-token',
+      {},
+    );
+
+    assert.equal(rejected.status, 409, JSON.stringify(rejected.body));
+    assert.equal(rejected.body.code, 'COUNTERPARTY_RELATION_AMBIGUOUS', JSON.stringify(rejected.body));
+    assert.equal(events.batches.length, batchCount);
+    assert.deepEqual(state, before);
+  });
+});
+
 test('resolveRentalForChangeRequest reports when a GR id is not present in gantt_rentals', () => {
   const result = resolveRentalForChangeRequest({
     rentalId: 'GR-missing',

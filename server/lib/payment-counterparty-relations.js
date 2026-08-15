@@ -230,6 +230,346 @@ function assertPaymentRentalCounterpartyMatch(payment, rental, data, {
   };
 }
 
+function isEffectivePaymentAllocation(allocation) {
+  return relationId(allocation?.status).toLowerCase() !== 'cancelled';
+}
+
+const PAYMENT_ALLOCATION_IDENTITY_FIELDS = Object.freeze([
+  'id',
+  'clientId',
+  'counterpartyId',
+  'rentalId',
+  'ganttRentalId',
+  'classicRentalId',
+]);
+
+const RENTAL_ALLOCATION_IDENTITY_FIELDS = Object.freeze([
+  'id',
+  'clientId',
+  'counterpartyId',
+  'rentalId',
+  'sourceRentalId',
+  'originalRentalId',
+]);
+
+function identitySignatures(list, fields, domain = '') {
+  return (Array.isArray(list) ? list : [])
+    .map(record => JSON.stringify([
+      domain,
+      ...fields.map(field => record?.[field] ?? null),
+    ]))
+    .sort();
+}
+
+function allocationRentalCandidates(state, referenceIds) {
+  const ids = new Set([...referenceIds].map(relationId).filter(Boolean));
+  const matches = (name, list) => (Array.isArray(list) ? list : [])
+    .filter(rental => rentalReferenceIds(rental).some(id => ids.has(id)))
+    .map(rental => ({ name, rental }));
+  return [
+    ...matches('rentals', state.rentals),
+    ...matches('gantt_rentals', state.gantt_rentals),
+  ];
+}
+
+/**
+ * Captures every authoritative input that can change resolution of an existing
+ * allocation. Missing-id Rental rows are deliberately retained because their
+ * stable aliases can turn a unique legacy reference into an ambiguous one.
+ */
+function allocationResolutionInputs(allocation, state) {
+  const paymentId = relationId(allocation?.paymentId);
+  const payments = (Array.isArray(state.payments) ? state.payments : [])
+    .filter(payment => relationId(payment?.id) === paymentId);
+  const rentalReferenceId = relationId(allocation?.rentalId);
+  const rentalReferenceIds = new Set([
+    rentalReferenceId,
+    ...payments.map(paymentRentalId),
+  ].filter(Boolean));
+  const rentalCandidates = allocationRentalCandidates(state, rentalReferenceIds);
+  const endpoints = [
+    ...payments,
+    ...rentalCandidates.map(candidate => candidate.rental),
+  ];
+  const clientIds = new Set(endpoints.map(item => relationId(item?.clientId)).filter(Boolean));
+  const clients = readCollection(state, 'clients')
+    .filter(client => clientIds.has(relationId(client?.id)));
+  const counterpartyIds = new Set([
+    ...endpoints.map(item => relationId(item?.counterpartyId)),
+    ...clients.map(client => relationId(client?.counterpartyId)),
+  ].filter(Boolean));
+  const counterparties = readCollection(state, 'counterparties')
+    .filter(counterparty => counterpartyIds.has(relationId(counterparty?.id)));
+  const assignments = readCollection(state, 'counterparty_role_assignments')
+    .filter(assignment => counterpartyIds.has(relationId(assignment?.counterpartyId)));
+
+  return {
+    payments: identitySignatures(payments, PAYMENT_ALLOCATION_IDENTITY_FIELDS),
+    rentals: rentalCandidates
+      .map(({ name, rental }) => JSON.stringify([
+        name,
+        ...RENTAL_ALLOCATION_IDENTITY_FIELDS.map(field => rental?.[field] ?? null),
+      ]))
+      .sort(),
+    clients: identitySignatures(clients, ['id', 'counterpartyId']),
+    counterparties: identitySignatures(counterparties, ['id', 'status', 'archivedAt', 'roles']),
+    counterpartyRoleAssignments: identitySignatures(assignments, [
+      'id',
+      'counterpartyId',
+      'roleCode',
+      'status',
+      'validFrom',
+      'validTo',
+    ]),
+  };
+}
+
+function findUniquePaymentEndpoint(payments, paymentId, allocation) {
+  const id = relationId(paymentId);
+  if (!id) {
+    throw counterpartyError(
+      COUNTERPARTY_RELATION_CODES.ID_REQUIRED,
+      'PaymentAllocation.paymentId обязателен.',
+      409,
+      { allocationId: relationId(allocation?.id) || null, endpoint: 'Payment', field: 'paymentId' },
+    );
+  }
+  const matches = (Array.isArray(payments) ? payments : [])
+    .filter(payment => relationId(payment?.id) === id);
+  if (matches.length > 1) {
+    throw counterpartyError(
+      COUNTERPARTY_RELATION_CODES.AMBIGUOUS,
+      `PaymentAllocation ссылается на неоднозначный Payment ${id}.`,
+      409,
+      { allocationId: relationId(allocation?.id) || null, endpoint: 'Payment', id, matches: matches.length },
+    );
+  }
+  if (matches.length === 0) {
+    throw counterpartyError(
+      COUNTERPARTY_RELATION_CODES.ENDPOINT_NOT_FOUND,
+      `PaymentAllocation ссылается на отсутствующий Payment ${id}.`,
+      409,
+      { allocationId: relationId(allocation?.id) || null, endpoint: 'Payment', id },
+    );
+  }
+  return matches[0];
+}
+
+function findUniqueRentalEndpoint(rentals, ganttRentals, rentalId, allocation) {
+  const id = relationId(rentalId);
+  if (!id) {
+    throw counterpartyError(
+      COUNTERPARTY_RELATION_CODES.ID_REQUIRED,
+      'PaymentAllocation.rentalId обязателен.',
+      409,
+      { allocationId: relationId(allocation?.id) || null, endpoint: 'Rental', field: 'rentalId' },
+    );
+  }
+  const domains = [
+    ['rentals', Array.isArray(rentals) ? rentals : []],
+    ['gantt_rentals', Array.isArray(ganttRentals) ? ganttRentals : []],
+  ];
+  const exact = domains.flatMap(([domain, list]) => list
+    .filter(rental => relationId(rental?.id) === id)
+    .map(rental => ({ domain, rental })));
+  if (exact.length > 1) {
+    throw counterpartyError(
+      COUNTERPARTY_RELATION_CODES.AMBIGUOUS,
+      `PaymentAllocation ссылается на неоднозначный Rental ${id}.`,
+      409,
+      { allocationId: relationId(allocation?.id) || null, endpoint: 'Rental', id, matches: exact.length },
+    );
+  }
+  if (exact.length === 1) return exact[0].rental;
+
+  const aliases = domains.flatMap(([domain, list]) => list
+    .filter(rental => rentalReferenceIds(rental).includes(id))
+    .map(rental => ({ domain, rental })));
+  if (aliases.length > 1) {
+    throw counterpartyError(
+      COUNTERPARTY_RELATION_CODES.AMBIGUOUS,
+      `PaymentAllocation ссылается на неоднозначный Rental reference ${id}.`,
+      409,
+      { allocationId: relationId(allocation?.id) || null, endpoint: 'Rental', id, matches: aliases.length },
+    );
+  }
+  if (aliases.length === 0) {
+    throw counterpartyError(
+      COUNTERPARTY_RELATION_CODES.ENDPOINT_NOT_FOUND,
+      `PaymentAllocation ссылается на отсутствующий Rental ${id}.`,
+      409,
+      { allocationId: relationId(allocation?.id) || null, endpoint: 'Rental', id },
+    );
+  }
+  return aliases[0].rental;
+}
+
+function assertAllocationCanonicalInState(allocation, state, phase) {
+  try {
+    const payment = findUniquePaymentEndpoint(state.payments, allocation?.paymentId, allocation);
+    const rental = findUniqueRentalEndpoint(
+      state.rentals,
+      state.gantt_rentals,
+      allocation?.rentalId,
+      allocation,
+    );
+    return assertPaymentRentalCounterpartyMatch(payment, rental, state, { allowArchived: true });
+  } catch (error) {
+    error.details = {
+      ...(error?.details || {}),
+      allocationId: relationId(allocation?.id) || null,
+      paymentId: relationId(allocation?.paymentId) || null,
+      rentalId: relationId(allocation?.rentalId) || null,
+      phase,
+    };
+    throw error;
+  }
+}
+
+function allocationState(data, overrides) {
+  return {
+    ...overrides,
+    readData(name) {
+      if (Object.prototype.hasOwnProperty.call(overrides, name)) return overrides[name];
+      return readCollection(data, name);
+    },
+  };
+}
+
+function captureAllocationResolution(allocation, state, phase) {
+  const inputs = allocationResolutionInputs(allocation, state);
+  try {
+    const relation = assertAllocationCanonicalInState(allocation, state, phase);
+    return {
+      inputs,
+      outcome: {
+        status: 'valid',
+        counterpartyId: relation.counterpartyId,
+        payment: {
+          source: relation.payment?.source || null,
+          clientId: relation.payment?.clientId || null,
+          counterpartyId: relation.payment?.counterpartyId || null,
+        },
+        rental: {
+          clientId: relation.rental?.clientId || null,
+          counterpartyId: relation.rental?.counterpartyId || null,
+        },
+      },
+    };
+  } catch (error) {
+    const details = { ...(error?.details || {}) };
+    delete details.phase;
+    return {
+      inputs,
+      outcome: {
+        status: 'error',
+        code: error?.code || null,
+        details,
+      },
+    };
+  }
+}
+
+/**
+ * Prevents a persisted allocation from becoming cross-Counterparty, unresolved,
+ * ambiguous or orphaned when either endpoint or one of its authoritative
+ * identity dependencies is replaced. Display snapshots are never inspected.
+ */
+function assertExistingPaymentAllocationsRemainCanonical({
+  currentPayments = [],
+  nextPayments = currentPayments,
+  currentRentals = [],
+  nextRentals = currentRentals,
+  currentGanttRentals = [],
+  nextGanttRentals = currentGanttRentals,
+  currentData = {},
+  nextData = currentData,
+  currentClients = readCollection(currentData, 'clients'),
+  nextClients = readCollection(nextData, 'clients'),
+  currentCounterparties = readCollection(currentData, 'counterparties'),
+  nextCounterparties = readCollection(nextData, 'counterparties'),
+  currentCounterpartyRoleAssignments = readCollection(currentData, 'counterparty_role_assignments'),
+  nextCounterpartyRoleAssignments = readCollection(nextData, 'counterparty_role_assignments'),
+  allocations = [],
+} = {}) {
+  const currentState = allocationState(currentData, {
+    payments: currentPayments,
+    rentals: currentRentals,
+    gantt_rentals: currentGanttRentals,
+    clients: currentClients,
+    counterparties: currentCounterparties,
+    counterparty_role_assignments: currentCounterpartyRoleAssignments,
+  });
+  const nextState = allocationState(nextData, {
+    payments: nextPayments,
+    rentals: nextRentals,
+    gantt_rentals: nextGanttRentals,
+    clients: nextClients,
+    counterparties: nextCounterparties,
+    counterparty_role_assignments: nextCounterpartyRoleAssignments,
+  });
+  let checked = 0;
+  const affectedPaymentIds = new Set();
+  const affectedRentalIds = new Set();
+  for (const allocation of Array.isArray(allocations) ? allocations : []) {
+    if (!isEffectivePaymentAllocation(allocation)) continue;
+    const currentResolution = captureAllocationResolution(allocation, currentState, 'current');
+    const nextResolution = captureAllocationResolution(allocation, nextState, 'next');
+    if (JSON.stringify(currentResolution) === JSON.stringify(nextResolution)) continue;
+    const paymentId = relationId(allocation?.paymentId);
+    const rentalId = relationId(allocation?.rentalId);
+    if (paymentId) affectedPaymentIds.add(paymentId);
+    if (rentalId) affectedRentalIds.add(rentalId);
+    // An already-invalid relation must not be silently repaired or worsened by an
+    // affected endpoint mutation. It requires a separate controlled workflow.
+    assertAllocationCanonicalInState(allocation, currentState, 'current');
+    assertAllocationCanonicalInState(allocation, nextState, 'next');
+    checked += 1;
+  }
+  return {
+    checked,
+    affectedPaymentIds: [...affectedPaymentIds],
+    affectedRentalIds: [...affectedRentalIds],
+  };
+}
+
+function assertPaymentAllocationPersistenceEntriesSafe(entries, { readData }) {
+  const list = (Array.isArray(entries) ? entries : [])
+    .filter(entry => entry && typeof entry.name === 'string');
+  const staged = new Map(list.map(entry => [entry.name, entry.value]));
+  if (![
+    'payments',
+    'rentals',
+    'gantt_rentals',
+    'clients',
+    'counterparties',
+    'counterparty_role_assignments',
+  ].some(name => staged.has(name))) {
+    return { checked: 0, affectedPaymentIds: [], affectedRentalIds: [] };
+  }
+  const current = name => readData(name) || [];
+  const next = name => staged.has(name) ? (staged.get(name) || []) : current(name);
+  const currentData = { readData: current };
+  const nextData = { readData: next };
+  return assertExistingPaymentAllocationsRemainCanonical({
+    currentPayments: current('payments'),
+    nextPayments: next('payments'),
+    currentRentals: current('rentals'),
+    nextRentals: next('rentals'),
+    currentGanttRentals: current('gantt_rentals'),
+    nextGanttRentals: next('gantt_rentals'),
+    currentClients: current('clients'),
+    nextClients: next('clients'),
+    currentCounterparties: current('counterparties'),
+    nextCounterparties: next('counterparties'),
+    currentCounterpartyRoleAssignments: current('counterparty_role_assignments'),
+    nextCounterpartyRoleAssignments: next('counterparty_role_assignments'),
+    allocations: current('payment_allocations'),
+    currentData,
+    nextData,
+  });
+}
+
 function canonicalizePaymentCounterpartyRelation(payment, data, options = {}) {
   const relation = resolvePaymentCounterpartyRelation(payment, data, options);
   const next = {
@@ -499,6 +839,8 @@ function repairPaymentCounterpartyRelations({
 module.exports = {
   PAYMENT_METADATA_FIELDS,
   PAYMENT_RELATION_CLASSIFICATIONS,
+  assertExistingPaymentAllocationsRemainCanonical,
+  assertPaymentAllocationPersistenceEntriesSafe,
   assertPaymentRentalCounterpartyMatch,
   auditPaymentCounterpartyRelations,
   canonicalizePaymentCounterpartyRelation,

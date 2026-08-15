@@ -44,7 +44,10 @@ const {
 const { rentalServerOwnedAuditFields } = require('../lib/rental-data-integrity');
 const { validateTerminalRentalTransition } = require('../lib/rental-lifecycle');
 const { canonicalizeRentalCounterpartyRelation } = require('../lib/rental-counterparty-relations');
-const { canonicalizePaymentCounterpartyRelation } = require('../lib/payment-counterparty-relations');
+const {
+  assertPaymentAllocationPersistenceEntriesSafe,
+  canonicalizePaymentCounterpartyRelation,
+} = require('../lib/payment-counterparty-relations');
 const {
   canonicalizeDeliveryCarrierCounterpartyRelation,
   canonicalizeDeliveryCounterpartyRelations,
@@ -1319,6 +1322,17 @@ function analyzeSystemDataImport(payload, readData) {
     }
   }
 
+  try {
+    assertPaymentAllocationPersistenceEntriesSafe(
+      Object.entries(sanitizedCollections)
+        .filter(([, value]) => Array.isArray(value))
+        .map(([name, value]) => ({ name, value })),
+      { readData },
+    );
+  } catch (error) {
+    integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+  }
+
   if (Array.isArray(sanitizedCollections.delivery_carriers)) {
     const stagedData = {
       readData(name) {
@@ -1763,23 +1777,26 @@ function registerSystemRoutes(app, deps) {
         if (collection === 'rentals') normalizedRentals = normalized;
         else normalizedGanttRentals = normalized;
       }
-      if (equipment) writeData('equipment', equipment);
-      if (normalizedRentals) writeData('rentals', normalizedRentals);
-      if (normalizedGanttRentals) writeData('gantt_rentals', normalizedGanttRentals);
-      if (service) writeData('service', service);
+      const syncWrites = [];
+      if (Array.isArray(equipment)) syncWrites.push({ name: 'equipment', value: equipment });
+      if (Array.isArray(normalizedRentals)) syncWrites.push({ name: 'rentals', value: normalizedRentals });
+      if (Array.isArray(normalizedGanttRentals)) syncWrites.push({ name: 'gantt_rentals', value: normalizedGanttRentals });
+      if (Array.isArray(service)) syncWrites.push({ name: 'service', value: service });
       if (clients) {
-        persistDataBatch(clientRoleBoundaryEntries || [
+        syncWrites.push(...(clientRoleBoundaryEntries || [
           { name: 'counterparties', value: normalizedCounterparties },
           { name: 'clients', value: normalizedClients },
-        ]);
+        ]));
       }
-      if (normalizedClientContracts) writeData('client_contracts', normalizedClientContracts);
-      if (normalizedPayments) writeData('payments', normalizedPayments);
-      if (company_expenses) writeData('company_expenses', company_expenses);
-      if (users) writeData('users', users);
-      if (normalizedDocuments) writeData('documents', normalizedDocuments);
-      if (mechanic_documents) writeData('mechanic_documents', mechanic_documents);
-      if (shipping_photos) writeData('shipping_photos', shipping_photos);
+      if (Array.isArray(normalizedClientContracts)) syncWrites.push({ name: 'client_contracts', value: normalizedClientContracts });
+      if (Array.isArray(normalizedPayments)) syncWrites.push({ name: 'payments', value: normalizedPayments });
+      if (Array.isArray(company_expenses)) syncWrites.push({ name: 'company_expenses', value: company_expenses });
+      if (Array.isArray(users)) syncWrites.push({ name: 'users', value: users });
+      if (Array.isArray(normalizedDocuments)) syncWrites.push({ name: 'documents', value: normalizedDocuments });
+      if (Array.isArray(mechanic_documents)) syncWrites.push({ name: 'mechanic_documents', value: mechanic_documents });
+      if (Array.isArray(shipping_photos)) syncWrites.push({ name: 'shipping_photos', value: shipping_photos });
+      assertPaymentAllocationPersistenceEntriesSafe(syncWrites, { readData });
+      if (syncWrites.length > 0) persistDataBatch(syncWrites);
 
       const notifications = [];
 

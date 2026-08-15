@@ -1,6 +1,9 @@
 const express = require('express');
 const { syncGanttRentalPaymentStatuses } = require('../lib/payment-status-sync');
-const { canonicalizePaymentCounterpartyRelation } = require('../lib/payment-counterparty-relations');
+const {
+  assertPaymentAllocationPersistenceEntriesSafe,
+  canonicalizePaymentCounterpartyRelation,
+} = require('../lib/payment-counterparty-relations');
 const {
   RENTAL_CHANGE_REQUEST_STATUS,
   appendRentalHistory,
@@ -84,9 +87,9 @@ function registerRentalChangeRequestRoutes(deps) {
     return false;
   }
 
-  function syncPaymentStatuses(payments) {
+  function nextPaymentStatusProjection(payments) {
     const currentGanttRentals = readData('gantt_rentals') || [];
-    writeData('gantt_rentals', syncGanttRentalPaymentStatuses(currentGanttRentals, payments));
+    return syncGanttRentalPaymentStatuses(currentGanttRentals, payments, readData('payment_allocations') || []);
   }
 
   function sameId(left, right) {
@@ -179,6 +182,19 @@ function registerRentalChangeRequestRoutes(deps) {
     const idx = resolution.rentalIndex;
     rentals[idx] = appendRentalHistory(rentals[idx], [entry]);
     writeData('rentals', rentals);
+  }
+
+  function relatedRentalHistoryWrite(rentalId, entry) {
+    if (!rentalId || !entry) return null;
+    const rentals = [...(readData('rentals') || [])];
+    const resolution = resolveRentalForChangeRequest({
+      rentalId,
+      rentals,
+      ganttRentals: readData('gantt_rentals') || [],
+    });
+    if (!resolution.ok) return null;
+    rentals[resolution.rentalIndex] = appendRentalHistory(rentals[resolution.rentalIndex], [entry]);
+    return { name: 'rentals', value: rentals };
   }
 
   function applyRentalRequest(request, adminName) {
@@ -334,7 +350,7 @@ function registerRentalChangeRequestRoutes(deps) {
     };
   }
   function applyPaymentRequest(request, adminName) {
-    const payments = readData('payments') || [];
+    const payments = [...(readData('payments') || [])];
     const paymentId = request.entityId || request.paymentId;
     const paymentIdx = payments.findIndex(item => item.id === paymentId);
     if (paymentIdx === -1) {
@@ -369,13 +385,18 @@ function registerRentalChangeRequestRoutes(deps) {
       }
     }
 
-    writeData('payments', payments);
-    syncPaymentStatuses(payments);
-    appendRelatedRentalHistory(
+    const historyWrite = relatedRentalHistoryWrite(
       request.rentalId,
       createRentalHistoryEntry(adminName, `Согласовано и применено: ${request.type}`),
     );
-    return { ok: true };
+    return {
+      ok: true,
+      writes: [
+        { name: 'payments', value: payments },
+        { name: 'gantt_rentals', value: nextPaymentStatusProjection(payments) },
+        ...(historyWrite ? [historyWrite] : []),
+      ],
+    };
   }
 
   function applyDocumentRequest(request, adminName) {
@@ -449,12 +470,19 @@ function registerRentalChangeRequestRoutes(deps) {
     };
     if (Array.isArray(applied.writes)) {
       try {
-        persistDataBatch([
+        const writes = [
           ...applied.writes,
           { name: collection, value: requests },
-        ]);
+        ];
+        assertPaymentAllocationPersistenceEntriesSafe(writes, { readData });
+        persistDataBatch(writes);
       } catch (error) {
-        return res.status(500).json({ ok: false, error: error.message || 'Не удалось атомарно применить согласование.' });
+        return res.status(error?.status || 500).json({
+          ok: false,
+          code: error?.code,
+          error: error.message || 'Не удалось атомарно применить согласование.',
+          ...(error?.details ? { details: error.details } : {}),
+        });
       }
     } else {
       writeRequests(requests);

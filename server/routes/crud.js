@@ -84,6 +84,7 @@ const {
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 const { equipmentProjectionForState, reconcileEquipmentRentalProjection } = require('../lib/rental-lifecycle');
 const {
+  assertPaymentAllocationPersistenceEntriesSafe,
   assertPaymentRentalCounterpartyMatch,
   canonicalizePaymentCounterpartyRelation,
   decoratePaymentCounterparty,
@@ -380,7 +381,7 @@ function registerCrudRoutes(deps) {
       });
       if (collection === 'payment_allocations') validatePaymentAllocationRecord(normalized, existing);
       if (collection === 'payments') {
-        return canonicalizePaymentCounterpartyRelation(normalized, { readData });
+        return canonicalizePaymentCounterpartyRelation(normalized, { readData: readDataOverride });
       }
       return normalized;
     }
@@ -1024,8 +1025,6 @@ function registerCrudRoutes(deps) {
     'paidAmount',
     'status',
     'rentalId',
-    'clientId',
-    'counterpartyId',
     'objectId',
     'contractId',
   ]);
@@ -2221,6 +2220,11 @@ function registerCrudRoutes(deps) {
                   userRole: data[idx].userRole,
                 }
               : nextItem);
+          if (collection === 'payments') {
+            assertPaymentAllocationPersistenceEntriesSafe([
+              { name: 'payments', value: data },
+            ], { readData });
+          }
           if (collection === 'clients') {
             const prepared = prepareClientCompatibilityUpdate({
               previousClient: previousItem,
@@ -2846,6 +2850,11 @@ function registerCrudRoutes(deps) {
             })
             .map(item => item.id);
           assertEquipmentLifecycleProjection(normalizedList, lifecycleChangedIds);
+        }
+        if (collection === 'payments') {
+          assertPaymentAllocationPersistenceEntriesSafe([
+            { name: 'payments', value: normalizedList },
+          ], { readData });
         }
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {

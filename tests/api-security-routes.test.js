@@ -2528,7 +2528,7 @@ test('payments API rejects dangerous patch fields without mutating existing paym
   });
 });
 
-test('payments API blocks high-risk direct edits when payment has allocations', async () => {
+test('payments API blocks monetary and workflow edits when payment has allocations', async () => {
   const { app, state } = createSecurityApp();
   state.counterparties.push({ id: 'CP-1', legalName: 'ООО Свой', shortName: 'ООО Свой', roles: ['customer'], status: 'active', archivedAt: null });
   state.clients = [{ id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Свой' }];
@@ -2558,7 +2558,6 @@ test('payments API blocks high-risk direct edits when payment has allocations', 
       ['status', 'reversed'],
       ['status', 'closed'],
       ['rentalId', 'GR-other'],
-      ['clientId', 'C-2'],
       ['objectId', 'OBJ-2'],
       ['contractId', 'CTR-2'],
     ];
@@ -2583,6 +2582,91 @@ test('payments API blocks high-risk direct edits when payment has allocations', 
     assert.equal(lowRisk.body.invoiceNumber, 'INV-2');
     assert.equal(lowRisk.body.dueDate, '2026-05-24');
     assert.equal(lowRisk.body.paidDate, '2026-05-24');
+  });
+});
+
+test('payments API guards existing allocations against identity mutation, replacement, removal, and mixed batches', async () => {
+  const { app, state } = createSecurityApp();
+  state.counterparties = [
+    { id: 'CP-A', legalName: 'A', shortName: 'A', roles: ['customer'], status: 'active', archivedAt: null },
+    { id: 'CP-B', legalName: 'B', shortName: 'B', roles: ['customer'], status: 'active', archivedAt: null },
+  ];
+  state.clients = [
+    { id: 'C-A1', counterpartyId: 'CP-A', company: 'A1' },
+    { id: 'C-A2', counterpartyId: 'CP-A', company: 'A2' },
+    { id: 'C-B', counterpartyId: 'CP-B', company: 'B' },
+  ];
+  state.gantt_rentals = [
+    { id: 'GR-A', clientId: 'C-A1', counterpartyId: 'CP-A', amount: 1000 },
+    { id: 'GR-B', clientId: 'C-B', counterpartyId: 'CP-B', amount: 1000 },
+  ];
+  state.payments = [
+    { id: 'P-1', clientId: 'C-A1', counterpartyId: 'CP-A', amount: 1000, paidAmount: 1000, status: 'paid' },
+    { id: 'P-2', clientId: 'C-A1', counterpartyId: 'CP-A', amount: 500, paidAmount: 500, status: 'paid' },
+  ];
+  state.payment_allocations = [
+    { id: 'PA-1', paymentId: 'P-1', rentalId: 'GR-A', amount: 1000, status: 'active' },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    const sameCounterparty = await request(baseUrl, 'PATCH', '/api/payments/P-1', 'admin-token', {
+      clientId: 'C-A2',
+      counterpartyId: 'CP-A',
+    });
+    assert.equal(sameCounterparty.status, 200, JSON.stringify(sameCounterparty.body));
+    assert.equal(state.payments[0].clientId, 'C-A2');
+
+    const beforeCrossPatch = structuredClone({
+      payments: state.payments,
+      payment_allocations: state.payment_allocations,
+      gantt_rentals: state.gantt_rentals,
+    });
+    const crossPatch = await request(baseUrl, 'PATCH', '/api/payments/P-1', 'admin-token', {
+      clientId: 'C-B',
+      counterpartyId: 'CP-B',
+    });
+    assert.equal(crossPatch.status, 409);
+    assert.equal(crossPatch.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
+    assert.deepEqual({
+      payments: state.payments,
+      payment_allocations: state.payment_allocations,
+      gantt_rentals: state.gantt_rentals,
+    }, beforeCrossPatch);
+
+    const sameCounterpartyBulk = await request(baseUrl, 'PUT', '/api/payments', 'admin-token', [
+      { ...state.payments[0], clientId: 'C-A1', counterpartyId: 'CP-A' },
+      state.payments[1],
+    ]);
+    assert.equal(sameCounterpartyBulk.status, 200, JSON.stringify(sameCounterpartyBulk.body));
+
+    for (const replacement of [
+      [
+        { ...state.payments[0], clientId: 'C-B', counterpartyId: 'CP-B' },
+        state.payments[1],
+      ],
+      [state.payments[1]],
+      [
+        { ...state.payments[0], clientId: 'C-B', counterpartyId: 'CP-B' },
+        { ...state.payments[1], comment: 'otherwise safe row' },
+      ],
+    ]) {
+      const before = structuredClone({
+        payments: state.payments,
+        payment_allocations: state.payment_allocations,
+        gantt_rentals: state.gantt_rentals,
+      });
+      const rejected = await request(baseUrl, 'PUT', '/api/payments', 'admin-token', replacement);
+      assert.equal(rejected.status, 409, JSON.stringify(rejected.body));
+      assert.equal(
+        ['COUNTERPARTY_RELATION_MISMATCH', 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND'].includes(rejected.body.code),
+        true,
+      );
+      assert.deepEqual({
+        payments: state.payments,
+        payment_allocations: state.payment_allocations,
+        gantt_rentals: state.gantt_rentals,
+      }, before);
+    }
   });
 });
 
@@ -2836,6 +2920,55 @@ test('rental change request payment approval rejects a Counterparty relation mis
     assert.equal(response.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
     assert.equal(JSON.stringify(state.payments), before);
     assert.equal(state.rental_change_requests[0].status, 'pending');
+  });
+});
+
+test('allocated Payment approval rejects staged cross-Counterparty mutation with zero writes', async () => {
+  const { app, state } = createSecurityApp();
+  state.payments = [{ id: 'P-allocated', counterpartyId: 'CP-own', amount: 1000, paidAmount: 1000, status: 'paid' }];
+  state.payment_allocations = [{
+    id: 'PA-allocated',
+    paymentId: 'P-allocated',
+    rentalId: 'R-own',
+    amount: 1000,
+    status: 'active',
+  }];
+  state.rental_change_requests = [{
+    id: 'RCR-allocated-cross',
+    entityType: 'payment',
+    entityId: 'P-allocated',
+    paymentId: 'P-allocated',
+    rentalId: 'R-own',
+    operation: 'update',
+    type: 'Корректировка allocated Payment',
+    status: 'pending',
+    newValue: { counterpartyId: 'CP-other' },
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const before = structuredClone({
+      payments: state.payments,
+      payment_allocations: state.payment_allocations,
+      rentals: state.rentals,
+      gantt_rentals: state.gantt_rentals,
+      requests: state.rental_change_requests,
+    });
+    const response = await request(
+      baseUrl,
+      'POST',
+      '/api/rental_change_requests/RCR-allocated-cross/approve',
+      'admin-token',
+      {},
+    );
+    assert.equal(response.status, 409, JSON.stringify(response.body));
+    assert.equal(response.body.code, 'COUNTERPARTY_RELATION_MISMATCH');
+    assert.deepEqual({
+      payments: state.payments,
+      payment_allocations: state.payment_allocations,
+      rentals: state.rentals,
+      gantt_rentals: state.gantt_rentals,
+      requests: state.rental_change_requests,
+    }, before);
   });
 });
 

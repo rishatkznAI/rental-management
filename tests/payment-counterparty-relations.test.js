@@ -15,6 +15,9 @@ const { buildRentalDebtRows } = serverRequire('./lib/finance-core');
 const { registerCrudRoutes } = serverRequire('./routes/crud');
 const {
   PAYMENT_RELATION_CLASSIFICATIONS,
+  assertExistingPaymentAllocationsRemainCanonical,
+  assertPaymentAllocationPersistenceEntriesSafe,
+  assertPaymentRentalCounterpartyMatch,
   auditPaymentCounterpartyRelations,
   canonicalizePaymentCounterpartyRelation,
   repairPaymentCounterpartyRelations,
@@ -135,6 +138,320 @@ test('Rental to Payment uses authoritative Rental.counterpartyId and compatibili
   relationError(
     () => canonicalizePaymentCounterpartyRelation({ rentalId: 'R-1', counterpartyId: 'CP-S' }, store),
     'COUNTERPARTY_RELATION_MISMATCH',
+  );
+});
+
+test('Payment allocation Counterparty assertion accepts stable legacy chains and rejects every unresolved or conflicting relation', () => {
+  const store = state({
+    counterparties: [counterparty('CP-A', ['customer']), counterparty('CP-B', ['customer'])],
+    clients: [
+      { id: 'C-A', counterpartyId: 'CP-A', company: 'Same display name' },
+      { id: 'C-B', counterpartyId: 'CP-B', company: 'Same display name' },
+    ],
+  });
+
+  assert.equal(
+    assertPaymentRentalCounterpartyMatch(
+      { id: 'P-direct', counterpartyId: 'CP-A' },
+      { id: 'R-direct', counterpartyId: 'CP-A' },
+      store,
+    ).counterpartyId,
+    'CP-A',
+  );
+  assert.equal(
+    assertPaymentRentalCounterpartyMatch(
+      { id: 'P-client', clientId: 'C-A' },
+      { id: 'R-client', clientId: 'C-A' },
+      store,
+    ).counterpartyId,
+    'CP-A',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-cross', counterpartyId: 'CP-A', client: 'Same display name' },
+      { id: 'R-cross', counterpartyId: 'CP-B', client: 'Same display name' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_MISMATCH',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-dual', clientId: 'C-B', counterpartyId: 'CP-A' },
+      { id: 'R-A', counterpartyId: 'CP-A' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_MISMATCH',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-A', counterpartyId: 'CP-A' },
+      { id: 'R-dual', clientId: 'C-B', counterpartyId: 'CP-A' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_MISMATCH',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-unresolved', client: 'Same display name' },
+      { id: 'R-A', counterpartyId: 'CP-A' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_ID_REQUIRED',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-A', counterpartyId: 'CP-A' },
+      { id: 'R-unresolved', client: 'Same display name' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_ID_REQUIRED',
+  );
+});
+
+test('existing allocation mutation guard validates staged-next endpoint identity and deletion atomically', () => {
+  const current = state({
+    counterparties: [counterparty('CP-A', ['customer']), counterparty('CP-B', ['customer'])],
+    clients: [
+      { id: 'C-A', counterpartyId: 'CP-A' },
+      { id: 'C-A2', counterpartyId: 'CP-A' },
+      { id: 'C-B', counterpartyId: 'CP-B' },
+    ],
+    payments: [{ id: 'P-1', clientId: 'C-A', counterpartyId: 'CP-A' }],
+    rentals: [{ id: 'R-1', clientId: 'C-A', counterpartyId: 'CP-A' }],
+    payment_allocations: [{ id: 'PA-1', paymentId: 'P-1', rentalId: 'R-1', status: 'active' }],
+  });
+
+  assert.equal(assertExistingPaymentAllocationsRemainCanonical({
+    currentPayments: current.payments,
+    nextPayments: [{ id: 'P-1', clientId: 'C-A2', counterpartyId: 'CP-A' }],
+    currentRentals: current.rentals,
+    allocations: current.payment_allocations,
+    currentData: current,
+    nextData: current,
+  }).checked, 1);
+
+  for (const nextPayments of [
+    [{ id: 'P-1', clientId: 'C-B', counterpartyId: 'CP-B' }],
+    [],
+    [{ id: 'P-1', counterpartyId: 'CP-A' }, { id: 'P-1', counterpartyId: 'CP-A' }],
+    [{ id: 'P-1', clientId: 'C-A', counterpartyId: 'CP-B' }],
+    [{ id: 'P-1', counterpartyId: 'CP-missing' }],
+    [{ id: 'P-1', client: 'metadata only' }],
+  ]) {
+    assert.throws(() => assertExistingPaymentAllocationsRemainCanonical({
+      currentPayments: current.payments,
+      nextPayments,
+      currentRentals: current.rentals,
+      allocations: current.payment_allocations,
+      currentData: current,
+      nextData: current,
+    }), error => String(error.code || '').startsWith('COUNTERPARTY_RELATION_'));
+  }
+
+  for (const nextRentals of [
+    [{ id: 'R-1', clientId: 'C-B', counterpartyId: 'CP-B' }],
+    [],
+    [{ id: 'R-1', counterpartyId: 'CP-A' }, { id: 'R-1', counterpartyId: 'CP-A' }],
+    [{ id: 'R-1', clientId: 'C-A', counterpartyId: 'CP-B' }],
+    [{ id: 'R-1', counterpartyId: 'CP-missing' }],
+    [{ id: 'R-1', client: 'metadata only' }],
+  ]) {
+    assert.throws(() => assertExistingPaymentAllocationsRemainCanonical({
+      currentPayments: current.payments,
+      currentRentals: current.rentals,
+      nextRentals,
+      allocations: current.payment_allocations,
+      currentData: current,
+      nextData: current,
+    }), error => String(error.code || '').startsWith('COUNTERPARTY_RELATION_'));
+  }
+});
+
+test('persistence-entry guard uses the complete staged batch and ignores cancelled allocation history', () => {
+  const current = state({
+    counterparties: [counterparty('CP-A', ['customer']), counterparty('CP-B', ['customer'])],
+    payments: [{ id: 'P-1', counterpartyId: 'CP-A' }],
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-A' }],
+    payment_allocations: [
+      { id: 'PA-active', paymentId: 'P-1', rentalId: 'R-1', status: 'active' },
+      { id: 'PA-cancelled', paymentId: 'P-old', rentalId: 'R-old', status: 'cancelled' },
+    ],
+  });
+  const readData = name => current[name] || [];
+
+  assert.equal(assertPaymentAllocationPersistenceEntriesSafe([
+    { name: 'payments', value: [{ id: 'P-1', counterpartyId: 'CP-B' }] },
+    { name: 'rentals', value: [{ id: 'R-1', counterpartyId: 'CP-B' }] },
+  ], { readData }).checked, 1);
+
+  relationError(
+    () => assertPaymentAllocationPersistenceEntriesSafe([
+      { name: 'payments', value: [{ id: 'P-1', counterpartyId: 'CP-B' }] },
+    ], { readData }),
+    'COUNTERPARTY_RELATION_MISMATCH',
+  );
+});
+
+test('persistence-entry guard checks changed effective allocation-only rows', () => {
+  const current = state({
+    counterparties: [counterparty('CP-A', ['customer'])],
+    payments: [{ id: 'P-1', counterpartyId: 'CP-A' }],
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-A' }],
+    payment_allocations: [{
+      id: 'PA-1',
+      paymentId: 'P-1',
+      rentalId: 'R-1',
+      amount: 100,
+      status: 'active',
+    }],
+  });
+  const readData = name => current[name] || [];
+
+  const checked = assertPaymentAllocationPersistenceEntriesSafe([{
+    name: 'payment_allocations',
+    value: [{ ...current.payment_allocations[0], comment: 'changed allocation-only row' }],
+  }], { readData });
+  assert.equal(checked.checked, 1);
+  assert.deepEqual(checked.affectedPaymentIds, ['P-1']);
+  assert.deepEqual(checked.affectedRentalIds, ['R-1']);
+
+  relationError(
+    () => assertPaymentAllocationPersistenceEntriesSafe([{
+      name: 'payment_allocations',
+      value: [{ ...current.payment_allocations[0], rentalId: null }],
+    }], { readData }),
+    'COUNTERPARTY_RELATION_ID_REQUIRED',
+  );
+  relationError(
+    () => assertPaymentAllocationPersistenceEntriesSafe([{
+      name: 'payment_allocations',
+      value: [{ ...current.payment_allocations[0], paymentId: '' }],
+    }], { readData }),
+    'COUNTERPARTY_RELATION_ID_REQUIRED',
+  );
+
+  assert.equal(assertPaymentAllocationPersistenceEntriesSafe([{
+    name: 'payment_allocations',
+    value: [{ id: 'PA-history', status: 'cancelled' }],
+  }], { readData }).checked, 0);
+});
+
+test('persistence-entry guard covers authoritative Client, Counterparty, and role dependency mutations', () => {
+  const current = state({
+    counterparties: [counterparty('CP-A', ['customer'])],
+    counterparty_role_assignments: [{
+      id: 'A-A',
+      counterpartyId: 'CP-A',
+      roleCode: 'customer',
+      status: 'active',
+      validTo: null,
+    }],
+    clients: [{ id: 'C-A', counterpartyId: 'CP-A', company: 'A' }],
+    payments: [{ id: 'P-1', clientId: 'C-A', counterpartyId: 'CP-A' }],
+    rentals: [{ id: 'R-1', clientId: 'C-A', counterpartyId: 'CP-A' }],
+    payment_allocations: [{ id: 'PA-1', paymentId: 'P-1', rentalId: 'R-1', status: 'active' }],
+  });
+  const readData = name => current[name] || [];
+
+  assert.equal(assertPaymentAllocationPersistenceEntriesSafe([
+    { name: 'clients', value: [{ ...current.clients[0], company: 'Renamed' }] },
+    { name: 'counterparties', value: [{ ...current.counterparties[0], shortName: 'Renamed' }] },
+  ], { readData }).checked, 0);
+
+  for (const entries of [
+    [{ name: 'clients', value: [] }],
+    [{ name: 'counterparties', value: [] }],
+    [{
+      name: 'counterparty_role_assignments',
+      value: [{ ...current.counterparty_role_assignments[0], status: 'inactive', validTo: '2026-08-15' }],
+    }],
+  ]) {
+    assert.throws(
+      () => assertPaymentAllocationPersistenceEntriesSafe(entries, { readData }),
+      error => String(error.code || '').startsWith('COUNTERPARTY_RELATION_'),
+    );
+  }
+});
+
+test('affected historically invalid allocation fails closed even when next state would repair it', () => {
+  const current = state({
+    counterparties: [counterparty('CP-A', ['customer'])],
+    payments: [],
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-A' }],
+    payment_allocations: [{ id: 'PA-orphan', paymentId: 'P-1', rentalId: 'R-1', status: 'active' }],
+  });
+  relationError(
+    () => assertPaymentAllocationPersistenceEntriesSafe([
+      { name: 'payments', value: [{ id: 'P-1', counterpartyId: 'CP-A' }] },
+    ], { readData: name => current[name] || [] }),
+    'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND',
+  );
+});
+
+test('resolution-impact scan does not block an unrelated mutation because of unchanged invalid history', () => {
+  const current = state({
+    counterparties: [counterparty('CP-A', ['customer'])],
+    payments: [],
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-A' }],
+    payment_allocations: [{ id: 'PA-orphan', paymentId: 'P-missing', rentalId: 'R-1', status: 'active' }],
+  });
+  const result = assertPaymentAllocationPersistenceEntriesSafe([{
+    name: 'counterparties',
+    value: [...current.counterparties, counterparty('CP-unrelated', ['supplier'])],
+  }], { readData: name => current[name] || [] });
+
+  assert.equal(result.checked, 0);
+});
+
+test('allocation guard detects missing-id classic and Gantt Rental alias collisions by resolution impact', () => {
+  const current = state({
+    counterparties: [counterparty('CP-A', ['customer'])],
+    payments: [{ id: 'P-A', rentalId: 'X', counterpartyId: 'CP-A' }],
+    rentals: [{ id: 'R-A', rentalId: 'X', counterpartyId: 'CP-A' }],
+    gantt_rentals: [],
+    payment_allocations: [{ id: 'PA-X', paymentId: 'P-A', rentalId: 'X', status: 'active' }],
+  });
+  const readData = name => current[name] || [];
+
+  for (const [name, value] of [
+    ['rentals', [...current.rentals, { rentalId: 'X', counterpartyId: 'CP-A' }]],
+    ['gantt_rentals', [{ sourceRentalId: 'X', counterpartyId: 'CP-A' }]],
+  ]) {
+    assert.throws(
+      () => assertPaymentAllocationPersistenceEntriesSafe([{ name, value }], { readData }),
+      error => {
+        assert.equal(error.code, 'COUNTERPARTY_RELATION_AMBIGUOUS');
+        assert.equal(error.details?.allocationId, 'PA-X');
+        assert.equal(error.details?.phase, 'next');
+        return true;
+      },
+    );
+  }
+});
+
+test('Payment endpoint identity is exact-id-only while a duplicate exact ID remains fail-closed', () => {
+  const current = state({
+    counterparties: [counterparty('CP-A', ['customer'])],
+    payments: [{ id: 'P-A', counterpartyId: 'CP-A' }],
+    rentals: [{ id: 'R-A', counterpartyId: 'CP-A' }],
+    payment_allocations: [{ id: 'PA-A', paymentId: 'P-A', rentalId: 'R-A', status: 'active' }],
+  });
+  const readData = name => current[name] || [];
+
+  const noIdWithPaymentLikeAlias = assertPaymentAllocationPersistenceEntriesSafe([{
+    name: 'payments',
+    value: [...current.payments, { paymentId: 'P-A', counterpartyId: 'CP-A' }],
+  }], { readData });
+  assert.equal(noIdWithPaymentLikeAlias.checked, 0);
+
+  assert.throws(
+    () => assertPaymentAllocationPersistenceEntriesSafe([{
+      name: 'payments',
+      value: [...current.payments, { id: 'P-A', counterpartyId: 'CP-A' }],
+    }], { readData }),
+    error => error.code === 'COUNTERPARTY_RELATION_AMBIGUOUS'
+      && error.details?.allocationId === 'PA-A'
+      && error.details?.phase === 'next',
   );
 });
 

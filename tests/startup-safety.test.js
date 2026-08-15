@@ -11,6 +11,7 @@ const {
   isStartupBusinessMaintenanceEnabled,
   startServer,
 } = serverRequire('./lib/startup');
+const { backfillPaymentAllocations } = serverRequire('./lib/finance-core');
 
 function createStartupDeps(state, events) {
   const readData = name => state[name];
@@ -90,9 +91,24 @@ function createStartupDeps(state, events) {
       recordCall('migrateLegacyRepairFacts');
       writeData('repair_part_items', [{ id: 'RP-startup' }]);
     },
-    backfillPaymentAllocations: () => {
+    backfillPaymentAllocations: input => {
       recordCall('backfillPaymentAllocations');
-      return { created: 1, allocations: [{ id: 'PA-startup', paymentId: 'P-1', rentalId: 'R-1' }] };
+      events.backfillInput = input;
+      return {
+        created: 1,
+        allocations: [{ id: 'PA-startup', paymentId: 'P-1', rentalId: 'R-1' }],
+        summary: {
+          created: 1,
+          alreadyAllocated: 0,
+          notEligible: 0,
+          unresolvedPayment: 0,
+          unresolvedRental: 0,
+          ambiguous: 0,
+          crossCounterparty: 0,
+          missingEndpoint: 0,
+          otherBlockers: 0,
+        },
+      };
     },
     backfillServiceTicketCreatedAt: () => ({ stats: { missingCreatedAt: 0 } }),
     normalizeClientLinks: () => {
@@ -120,17 +136,19 @@ function createStartupDeps(state, events) {
   };
 }
 
-async function startAndClose({ state, envValue, logger }) {
+async function startAndClose({ state, envValue, logger, configureDeps }) {
   const previous = process.env[STARTUP_BUSINESS_MAINTENANCE_ENV];
   if (envValue === undefined) delete process.env[STARTUP_BUSINESS_MAINTENANCE_ENV];
   else process.env[STARTUP_BUSINESS_MAINTENANCE_ENV] = envValue;
 
   const events = { calls: [], writes: [] };
   const app = express();
+  const deps = createStartupDeps(state, events);
+  configureDeps?.(deps, events);
   const server = await startServer({
     app,
     port: 0,
-    deps: createStartupDeps(state, events),
+    deps,
     logger,
   });
 
@@ -272,4 +290,62 @@ test('STARTUP_BUSINESS_MAINTENANCE=apply does not run Counterparty identity auto
   assert.equal(events.writes.some(event => event.name === 'gantt_rentals'), false);
   assert.deepEqual(state.crm_deals, []);
   assert.equal(state.app_settings[0].value.status, 'deleted');
+});
+
+test('STARTUP_BUSINESS_MAINTENANCE=apply passes canonical authority and persists only safe allocation candidates', async () => {
+  const state = {
+    rentals: [
+      { id: 'R-A', counterpartyId: 'CP-A' },
+      { id: 'R-B', counterpartyId: 'CP-B' },
+    ],
+    gantt_rentals: [],
+    payments: [
+      { id: 'P-SAFE', rentalId: 'R-A', counterpartyId: 'CP-A', amount: 100, paidAmount: 100, status: 'paid' },
+      { id: 'P-CROSS', rentalId: 'R-B', counterpartyId: 'CP-A', amount: 100, paidAmount: 100, status: 'paid' },
+    ],
+    payment_allocations: [],
+    documents: [],
+    clients: [],
+    counterparties: [
+      { id: 'CP-A', roles: ['customer'], status: 'active' },
+      { id: 'CP-B', roles: ['customer'], status: 'active' },
+    ],
+    counterparty_role_assignments: [],
+    crm_deals: [],
+    service: [],
+    warranty_claims: [],
+    app_settings: [],
+    knowledge_base_progress: [],
+  };
+  const warnings = [];
+
+  const events = await startAndClose({
+    state,
+    envValue: 'apply',
+    logger: {
+      log: () => {},
+      warn: message => warnings.push(String(message)),
+    },
+    configureDeps(deps, startupEvents) {
+      deps.backfillPaymentAllocations = input => {
+        startupEvents.calls.push('backfillPaymentAllocations');
+        startupEvents.backfillInput = input;
+        return backfillPaymentAllocations(input);
+      };
+    },
+  });
+
+  assert.deepEqual(state.payment_allocations.map(item => [item.paymentId, item.rentalId]), [
+    ['P-SAFE', 'R-A'],
+  ]);
+  assert.equal(events.writes.filter(event => event.name === 'payment_allocations').length, 1);
+  assert.equal(events.backfillInput.rentals, state.rentals);
+  assert.equal(events.backfillInput.ganttRentals, state.gantt_rentals);
+  assert.equal(events.backfillInput.clients, state.clients);
+  assert.equal(events.backfillInput.counterparties, state.counterparties);
+  assert.equal(events.backfillInput.counterpartyRoleAssignments, state.counterparty_role_assignments);
+  assert.equal(warnings.some(message => (
+    message.includes('payment_allocations backfill summary: created=1')
+    && message.includes('crossCounterparty=1')
+  )), true);
 });

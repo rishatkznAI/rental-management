@@ -13,7 +13,9 @@ const receivablesCore = require('../server/lib/receivables-core.js');
 function createApp() {
   let idCounter = 0;
   const state = {
+    counterparties: [],
     clients: [],
+    rentals: [],
     gantt_rentals: [],
     payments: [],
     payment_allocations: [],
@@ -316,10 +318,15 @@ test('finance endpoints do not expose amounts to roles without finance access', 
 
 test('payment allocation preview is read-only and apply caps allocations by payment amount', async () => {
   const { app, state } = createApp();
-  state.clients = [{ id: 'c-1', company: 'Клиент' }];
+  state.counterparties = [{ id: 'CP-1', legalName: 'Клиент', shortName: 'Клиент', roles: ['customer'], status: 'active' }];
+  state.clients = [{ id: 'c-1', counterpartyId: 'CP-1', company: 'Клиент' }];
+  state.rentals = [
+    { id: 'classic-1', clientId: 'c-1', counterpartyId: 'CP-1' },
+    { id: 'classic-2', clientId: 'c-1', counterpartyId: 'CP-1' },
+  ];
   state.gantt_rentals = [
-    { id: 'r-1', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-1', client: 'Клиент', equipmentInv: '1', manager: 'Руслан', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
-    { id: 'r-2', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-2', client: 'Клиент', equipmentInv: '2', manager: 'Анна', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
+    { id: 'r-1', rentalId: 'classic-1', clientId: 'c-1', counterpartyId: 'CP-1', contractId: 'ct-1', objectId: 'o-1', client: 'Клиент', equipmentInv: '1', manager: 'Руслан', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
+    { id: 'r-2', rentalId: 'classic-2', clientId: 'c-1', counterpartyId: 'CP-1', contractId: 'ct-1', objectId: 'o-2', client: 'Клиент', equipmentInv: '2', manager: 'Анна', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
   ];
   state.payments = [{ id: 'p-1', clientId: 'c-1', contractId: 'ct-1', amount: 120000, paidAmount: 150000, status: 'paid' }];
 
@@ -343,9 +350,11 @@ test('payment allocation preview is read-only and apply caps allocations by paym
 
 test('payment allocation preview apply validates documentId before creating allocations', async () => {
   const { app, state } = createApp();
-  state.clients = [{ id: 'c-1', company: 'Клиент' }];
+  state.counterparties = [{ id: 'CP-1', legalName: 'Клиент', shortName: 'Клиент', roles: ['customer'], status: 'active' }];
+  state.clients = [{ id: 'c-1', counterpartyId: 'CP-1', company: 'Клиент' }];
+  state.rentals = [{ id: 'classic-1', clientId: 'c-1', counterpartyId: 'CP-1' }];
   state.gantt_rentals = [
-    { id: 'r-1', clientId: 'c-1', contractId: 'ct-1', objectId: 'o-1', client: 'Клиент', equipmentInv: '1', manager: 'Руслан', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
+    { id: 'r-1', rentalId: 'classic-1', clientId: 'c-1', counterpartyId: 'CP-1', contractId: 'ct-1', objectId: 'o-1', client: 'Клиент', equipmentInv: '1', manager: 'Руслан', startDate: '2026-05-01', endDate: '2026-05-10', amount: 100000, status: 'active' },
   ];
   state.payments = [{ id: 'p-1', clientId: 'c-1', contractId: 'ct-1', amount: 100000, paidAmount: 100000, status: 'paid' }];
   state.documents = [{ id: 'd-1', clientId: 'c-1', rentalId: 'r-1', type: 'invoice' }];
@@ -369,5 +378,156 @@ test('payment allocation preview apply validates documentId before creating allo
     assert.equal(validDocument.json.allocations.length, 1);
     assert.equal(validDocument.json.allocations[0].documentId, 'd-1');
     assert.equal(state.payment_allocations.length, 1);
+  });
+});
+
+function seedCounterpartyAllocationState(state) {
+  state.counterparties = [
+    { id: 'CP-A', legalName: 'Одинаковое имя', shortName: 'Одинаковое имя', roles: ['customer'], status: 'active' },
+    { id: 'CP-B', legalName: 'Одинаковое имя', shortName: 'Одинаковое имя', roles: ['customer'], status: 'active' },
+  ];
+  state.clients = [
+    { id: 'C-A', counterpartyId: 'CP-A', company: 'Одинаковое имя' },
+    { id: 'C-B', counterpartyId: 'CP-B', company: 'Одинаковое имя' },
+  ];
+  state.rentals = [
+    { id: 'classic-a', counterpartyId: 'CP-A' },
+    { id: 'classic-a-legacy', clientId: 'C-A' },
+    { id: 'classic-b', counterpartyId: 'CP-B' },
+    { id: 'classic-dual', counterpartyId: 'CP-A' },
+    { id: 'classic-unresolved' },
+  ];
+  const rentalBase = {
+    objectId: 'object-1',
+    client: 'Одинаковое имя',
+    equipmentInv: '1',
+    manager: 'Менеджер',
+    startDate: '2026-05-01',
+    endDate: '2026-05-10',
+    amount: 10000,
+    status: 'active',
+  };
+  state.gantt_rentals = [
+    { ...rentalBase, id: 'r-a', rentalId: 'classic-a', counterpartyId: 'CP-A' },
+    { ...rentalBase, id: 'r-a-legacy', rentalId: 'classic-a-legacy', clientId: 'C-A' },
+    { ...rentalBase, id: 'r-b', rentalId: 'classic-b', counterpartyId: 'CP-B' },
+    { ...rentalBase, id: 'r-dual', rentalId: 'classic-dual', clientId: 'C-B', counterpartyId: 'CP-A' },
+    { ...rentalBase, id: 'r-unresolved', rentalId: 'classic-unresolved' },
+  ];
+  state.payments = [
+    { id: 'p-direct', counterpartyId: 'CP-A', amount: 100000, paidAmount: 100000, status: 'paid' },
+    { id: 'p-legacy', clientId: 'C-A', amount: 100000, paidAmount: 100000, status: 'paid' },
+    { id: 'p-dual', clientId: 'C-B', counterpartyId: 'CP-A', amount: 100000, paidAmount: 100000, status: 'paid' },
+    { id: 'p-unresolved', client: 'Одинаковое имя', amount: 100000, paidAmount: 100000, status: 'paid' },
+    { id: 'p-batch', counterpartyId: 'CP-A', amount: 100000, paidAmount: 100000, status: 'paid' },
+  ];
+}
+
+test('allocation preview uses canonical Counterparty identity for direct and legacy relations', async () => {
+  const { app, state } = createApp();
+  seedCounterpartyAllocationState(state);
+
+  await withServer(app, async (baseUrl) => {
+    const direct = await request(baseUrl, 'POST', '/api/finance/payments/p-direct/allocation-preview', 'office', {});
+    assert.equal(direct.response.status, 200);
+    assert.deepEqual(direct.json.suggestedAllocations.map(item => item.rentalId), ['r-a', 'r-a-legacy']);
+    assert.equal(state.payment_allocations.length, 0);
+
+    const legacy = await request(baseUrl, 'POST', '/api/finance/payments/p-legacy/allocation-preview', 'office', {});
+    assert.equal(legacy.response.status, 200);
+    assert.deepEqual(legacy.json.suggestedAllocations.map(item => item.rentalId), ['r-a', 'r-a-legacy']);
+
+    const appliedDirect = await request(baseUrl, 'POST', '/api/finance/payments/p-direct/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'r-a', amount: 1000 }],
+    });
+    assert.equal(appliedDirect.response.status, 201);
+
+    const appliedLegacy = await request(baseUrl, 'POST', '/api/finance/payments/p-legacy/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'r-a-legacy', amount: 1000 }],
+    });
+    assert.equal(appliedLegacy.response.status, 201);
+  });
+});
+
+test('allocation preview and crafted apply fail closed for foreign or unresolved identity', async () => {
+  const { app, state } = createApp();
+  seedCounterpartyAllocationState(state);
+
+  await withServer(app, async (baseUrl) => {
+    const beforeForeign = financeCore.buildRentalDebtRows(state.gantt_rentals, state.payments, {
+      paymentAllocations: state.payment_allocations,
+    }).find(row => row.rentalId === 'r-b');
+    const foreign = await request(baseUrl, 'POST', '/api/finance/payments/p-direct/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'r-b', amount: 1000 }],
+    });
+    assert.equal(foreign.response.status, 409);
+    assert.match(foreign.json.error, /different counterparties/);
+    assert.equal(state.payment_allocations.length, 0);
+    const afterForeign = financeCore.buildRentalDebtRows(state.gantt_rentals, state.payments, {
+      paymentAllocations: state.payment_allocations,
+    }).find(row => row.rentalId === 'r-b');
+    assert.equal(afterForeign.paidAmount, beforeForeign.paidAmount);
+    assert.equal(afterForeign.outstanding, beforeForeign.outstanding);
+
+    const missingRental = await request(baseUrl, 'POST', '/api/finance/payments/p-direct/apply-allocation-preview', 'office', {
+      allocations: [{ amount: 1000 }],
+    });
+    assert.equal(missingRental.response.status, 409);
+    assert.equal(missingRental.json.code, 'COUNTERPARTY_RELATION_ID_REQUIRED');
+    assert.equal(state.payment_allocations.length, 0);
+
+    const unknownRental = await request(baseUrl, 'POST', '/api/finance/payments/p-direct/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'r-missing', amount: 1000 }],
+    });
+    assert.equal(unknownRental.response.status, 409);
+    assert.equal(unknownRental.json.code, 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND');
+    assert.equal(state.payment_allocations.length, 0);
+
+    const unresolvedPaymentPreview = await request(baseUrl, 'POST', '/api/finance/payments/p-unresolved/allocation-preview', 'office', {});
+    assert.equal(unresolvedPaymentPreview.response.status, 400);
+    const unresolvedPaymentApply = await request(baseUrl, 'POST', '/api/finance/payments/p-unresolved/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'r-a', amount: 1000 }],
+    });
+    assert.equal(unresolvedPaymentApply.response.status, 400);
+
+    const unresolvedRental = await request(baseUrl, 'POST', '/api/finance/payments/p-direct/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'r-unresolved', amount: 1000 }],
+    });
+    assert.equal(unresolvedRental.response.status, 400);
+
+    const paymentMismatch = await request(baseUrl, 'POST', '/api/finance/payments/p-dual/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'r-a', amount: 1000 }],
+    });
+    assert.equal(paymentMismatch.response.status, 409);
+
+    const rentalMismatch = await request(baseUrl, 'POST', '/api/finance/payments/p-direct/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'r-dual', amount: 1000 }],
+    });
+    assert.equal(rentalMismatch.response.status, 409);
+    assert.equal(state.payment_allocations.length, 0);
+  });
+});
+
+test('allocation apply validates the whole batch before the first write', async () => {
+  const { app, state } = createApp();
+  seedCounterpartyAllocationState(state);
+  const before = financeCore.buildRentalDebtRows(state.gantt_rentals, state.payments, {
+    paymentAllocations: state.payment_allocations,
+  }).find(row => row.rentalId === 'r-a');
+
+  await withServer(app, async (baseUrl) => {
+    const result = await request(baseUrl, 'POST', '/api/finance/payments/p-batch/apply-allocation-preview', 'office', {
+      allocations: [
+        { rentalId: 'r-a', amount: 1000 },
+        { rentalId: 'r-b', amount: 1000 },
+      ],
+    });
+    assert.equal(result.response.status, 409);
+    assert.equal(state.payment_allocations.length, 0);
+    const after = financeCore.buildRentalDebtRows(state.gantt_rentals, state.payments, {
+      paymentAllocations: state.payment_allocations,
+    }).find(row => row.rentalId === 'r-a');
+    assert.equal(after.paidAmount, before.paidAmount);
+    assert.equal(after.outstanding, before.outstanding);
   });
 });

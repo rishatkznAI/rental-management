@@ -87,6 +87,9 @@ const {
   auditCounterpartyRelations,
 } = require('./lib/counterparty-relations');
 const {
+  assertPaymentAllocationPersistenceEntriesSafe,
+} = require('./lib/payment-counterparty-relations');
+const {
   auditCounterpartyRoleProfiles,
 } = require('./lib/counterparty-role-profiles');
 const {
@@ -442,7 +445,9 @@ function writeData(name, data) {
   const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
   const serviceEntries = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
   const warrantyEntries = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
-  const [entry] = canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData });
+  const finalEntries = canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData });
+  assertPaymentAllocationPersistenceEntriesSafe(finalEntries, { readData });
+  const [entry] = finalEntries;
   setData(entry.name, entry.value);
 }
 
@@ -451,7 +456,9 @@ function writeDataBatch(entries) {
   const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
   const serviceEntries = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
   const warrantyEntries = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
-  setDataBatch(canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData }));
+  const finalEntries = canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData });
+  assertPaymentAllocationPersistenceEntriesSafe(finalEntries, { readData });
+  setDataBatch(finalEntries);
 }
 
 const accessControl = createAccessControl({ readData });

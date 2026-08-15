@@ -9,6 +9,12 @@ const {
   buildLeasingSummary,
 } = require('./leasing-core');
 const { calculateRentalBilling, getRentalBillingAmount } = require('./rental-billing');
+const {
+  assertPaymentAllocationCandidateCanonical,
+  assertPaymentRentalCounterpartyMatch,
+  resolvePaymentCounterpartyRelation,
+} = require('./payment-counterparty-relations');
+const { COUNTERPARTY_RELATION_CODES } = require('./counterparty-relations');
 
 function toNumber(value) {
   const numeric = Number(value);
@@ -508,16 +514,28 @@ function buildUnallocatedPayments(payments, paymentAllocations) {
     .sort((a, b) => b.unallocatedAmount - a.unallocatedAmount || String(a.paymentId || '').localeCompare(String(b.paymentId || '')));
 }
 
-function buildAllocationPreview({ payments, paymentAllocations, rentals }, paymentId) {
+function buildAllocationPreview({ payments, paymentAllocations, rentals, relationData }, paymentId) {
   const id = String(paymentId || '').trim();
   const payment = (payments || []).find(item => getRecordId(item) === id);
   if (!payment || !shouldCountPayment(payment)) return { paymentId: id, unallocatedAmount: 0, suggestedAllocations: [] };
+  const paymentRelation = resolvePaymentCounterpartyRelation(payment, relationData);
+  const eligibleRentalIds = new Set();
+  for (const rental of rentals || []) {
+    try {
+      assertPaymentRentalCounterpartyMatch(payment, rental, relationData, { paymentRelation });
+      const rentalId = getRecordId(rental);
+      if (rentalId) eligibleRentalIds.add(rentalId);
+    } catch {
+      // A foreign, unresolved, or internally inconsistent Rental is not eligible.
+    }
+  }
   const existing = buildUnallocatedPayments([payment], paymentAllocations)[0];
   const unallocatedAmount = existing?.unallocatedAmount || 0;
   const clientId = getStableClientId(payment);
   const contractId = String(payment.contractId || '').trim();
   const candidateRows = buildRentalDebtRows(rentals || [], payments || [], { paymentAllocations })
-    .filter(row => (!clientId || row.clientId === clientId) && (!contractId || row.contractId === contractId))
+    .filter(row => eligibleRentalIds.has(String(row.rentalId || '').trim()))
+    .filter(row => !contractId || row.contractId === contractId)
     .filter(row => row.outstanding > 0);
   let remaining = unallocatedAmount;
   const suggestedAllocations = [];
@@ -537,32 +555,151 @@ function buildAllocationPreview({ payments, paymentAllocations, rentals }, payme
   return { paymentId: id, unallocatedAmount, suggestedAllocations };
 }
 
-function resolveRentalForAllocation(payment, rentals, documentsById) {
+function resolveRentalReferenceForAllocation(payment, documentsById) {
   const directRentalId = String(payment?.rentalId || '').trim();
-  if (directRentalId) return (rentals || []).find(item => String(item?.id || '').trim() === directRentalId) || { id: directRentalId };
+  if (directRentalId) return { rentalId: directRentalId, source: 'payment_rental' };
   const documentId = String(payment?.documentId || payment?.document || '').trim();
   if (!documentId) return null;
-  const document = documentsById.get(documentId);
+  const matches = documentsById.get(documentId) || [];
+  if (matches.length > 1) {
+    const error = new Error(`Document stable ID ${documentId} is ambiguous.`);
+    error.code = COUNTERPARTY_RELATION_CODES.AMBIGUOUS;
+    error.details = { phase: 'document_endpoint', documentId, matches: matches.length };
+    throw error;
+  }
+  const document = matches[0];
+  if (!document) {
+    const error = new Error(`Document ${documentId} was not found.`);
+    error.code = COUNTERPARTY_RELATION_CODES.ENDPOINT_NOT_FOUND;
+    error.details = { phase: 'document_endpoint', documentId };
+    throw error;
+  }
   const documentRentalId = String(document?.rentalId || document?.rental || '').trim();
-  if (!documentRentalId) return null;
-  return (rentals || []).find(item => String(item?.id || '').trim() === documentRentalId) || { id: documentRentalId };
+  if (!documentRentalId) {
+    const error = new Error(`Document ${documentId} has no Rental reference.`);
+    error.code = COUNTERPARTY_RELATION_CODES.ENDPOINT_NOT_FOUND;
+    error.details = { phase: 'document_rental_endpoint', documentId };
+    throw error;
+  }
+  return { rentalId: documentRentalId, source: 'document_rental', documentId };
 }
 
-function backfillPaymentAllocations({ payments = [], paymentAllocations = [], rentals = [], documents = [], nowIso = () => new Date().toISOString(), generateId } = {}) {
+function createPaymentAllocationBackfillSummary() {
+  return {
+    scanned: 0,
+    created: 0,
+    alreadyAllocated: 0,
+    notEligible: 0,
+    unresolvedPayment: 0,
+    unresolvedRental: 0,
+    ambiguous: 0,
+    crossCounterparty: 0,
+    missingEndpoint: 0,
+    otherBlockers: 0,
+  };
+}
+
+function classifyPaymentAllocationBackfillError(error) {
+  const phase = String(error?.details?.phase || '').trim();
+  if (error?.code === COUNTERPARTY_RELATION_CODES.AMBIGUOUS) return 'ambiguous';
+  if (error?.code === COUNTERPARTY_RELATION_CODES.ENDPOINT_NOT_FOUND) return 'missingEndpoint';
+  if (phase === 'counterparty_match' && error?.code === COUNTERPARTY_RELATION_CODES.MISMATCH) {
+    return 'crossCounterparty';
+  }
+  if (phase === 'payment_endpoint' || phase === 'payment_identity') return 'unresolvedPayment';
+  if (phase === 'rental_endpoint' || phase === 'rental_identity') return 'unresolvedRental';
+  return 'otherBlockers';
+}
+
+function paymentAllocationBackfillIssue(payment, reference, error, classification) {
+  return {
+    paymentId: getRecordId(payment) || null,
+    rentalId: String(reference?.rentalId || error?.details?.rentalId || '').trim() || null,
+    documentId: String(reference?.documentId || error?.details?.documentId || '').trim() || null,
+    source: reference?.source || null,
+    classification,
+    code: String(error?.code || COUNTERPARTY_RELATION_CODES.REPAIR_FAILED),
+    phase: String(error?.details?.phase || '').trim() || null,
+  };
+}
+
+function backfillPaymentAllocations({
+  payments = [],
+  paymentAllocations = [],
+  rentals = [],
+  ganttRentals = [],
+  documents = [],
+  clients = [],
+  counterparties = [],
+  counterpartyRoleAssignments = [],
+  nowIso = () => new Date().toISOString(),
+  generateId,
+} = {}) {
   const allocations = Array.isArray(paymentAllocations) ? paymentAllocations : [];
   const existingPaymentIds = new Set(allocations.map(item => String(item?.paymentId || '').trim()).filter(Boolean));
-  const documentsById = new Map((documents || []).filter(item => item?.id).map(item => [String(item.id), item]));
+  const documentsById = new Map();
+  for (const document of documents || []) {
+    const id = String(document?.id || '').trim();
+    if (!id) continue;
+    const matches = documentsById.get(id) || [];
+    matches.push(document);
+    documentsById.set(id, matches);
+  }
   const next = [...allocations];
-  let created = 0;
+  const summary = createPaymentAllocationBackfillSummary();
+  const issues = [];
+  const relationData = {
+    payments,
+    rentals,
+    gantt_rentals: ganttRentals,
+    clients,
+    counterparties,
+    counterparty_role_assignments: counterpartyRoleAssignments,
+  };
 
   for (const payment of payments || []) {
+    summary.scanned += 1;
     const paymentId = getRecordId(payment);
-    if (!paymentId || existingPaymentIds.has(paymentId) || !shouldCountPayment(payment)) continue;
+    if (paymentId && existingPaymentIds.has(paymentId)) {
+      summary.alreadyAllocated += 1;
+      continue;
+    }
+    if (!shouldCountPayment(payment)) {
+      summary.notEligible += 1;
+      continue;
+    }
     const amount = getPaymentAllocationCap(payment);
-    if (amount <= 0) continue;
-    const rental = resolveRentalForAllocation(payment, rentals, documentsById);
-    const rentalId = String(rental?.id || '').trim();
-    if (!rentalId) continue;
+    if (amount <= 0) {
+      summary.notEligible += 1;
+      continue;
+    }
+
+    let reference;
+    try {
+      reference = resolveRentalReferenceForAllocation(payment, documentsById);
+    } catch (error) {
+      const classification = classifyPaymentAllocationBackfillError(error);
+      summary[classification] += 1;
+      issues.push(paymentAllocationBackfillIssue(payment, null, error, classification));
+      continue;
+    }
+    if (!reference) {
+      summary.notEligible += 1;
+      continue;
+    }
+
+    const candidate = { paymentId, rentalId: reference.rentalId };
+    let relation;
+    try {
+      relation = assertPaymentAllocationCandidateCanonical(candidate, relationData);
+    } catch (error) {
+      const classification = classifyPaymentAllocationBackfillError(error);
+      summary[classification] += 1;
+      issues.push(paymentAllocationBackfillIssue(payment, reference, error, classification));
+      continue;
+    }
+
+    const rental = relation.rentalRecord;
     const documentId = String(payment?.documentId || payment?.document || '').trim() || undefined;
     const id = typeof generateId === 'function'
       ? generateId('PA')
@@ -570,10 +707,10 @@ function backfillPaymentAllocations({ payments = [], paymentAllocations = [], re
     next.push({
       id,
       paymentId,
-      clientId: getStableClientId(payment) || getStableClientId(rental) || undefined,
+      clientId: relation.payment.clientId || relation.rental.clientId || undefined,
       objectId: payment.objectId || rental.objectId || undefined,
       contractId: payment.contractId || rental.contractId || undefined,
-      rentalId,
+      rentalId: reference.rentalId,
       documentId,
       amount,
       status: 'active',
@@ -581,10 +718,10 @@ function backfillPaymentAllocations({ payments = [], paymentAllocations = [], re
       createdAt: nowIso(),
     });
     existingPaymentIds.add(paymentId);
-    created += 1;
+    summary.created += 1;
   }
 
-  return { allocations: next, created };
+  return { allocations: next, created: summary.created, summary, issues };
 }
 
 function buildFinanceReport({ clients, rentals, payments, paymentAllocations, clientObjects, leasingContracts, leasingPaymentSchedule }, today = new Date().toISOString().slice(0, 10)) {

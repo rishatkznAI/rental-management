@@ -84,8 +84,12 @@ const {
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 const { equipmentProjectionForState, reconcileEquipmentRentalProjection } = require('../lib/rental-lifecycle');
 const {
+  assertPaymentAllocationCandidateCanonical,
+  assertPaymentAllocationPersistenceEntriesSafe,
+  assertPaymentRentalCounterpartyMatch,
   canonicalizePaymentCounterpartyRelation,
   decoratePaymentCounterparty,
+  resolvePaymentAllocationEndpoints,
 } = require('../lib/payment-counterparty-relations');
 const {
   canonicalizeDeliveryCarrierCounterpartyRelation,
@@ -379,7 +383,7 @@ function registerCrudRoutes(deps) {
       });
       if (collection === 'payment_allocations') validatePaymentAllocationRecord(normalized, existing);
       if (collection === 'payments') {
-        return canonicalizePaymentCounterpartyRelation(normalized, { readData });
+        return canonicalizePaymentCounterpartyRelation(normalized, { readData: readDataOverride });
       }
       return normalized;
     }
@@ -1023,8 +1027,6 @@ function registerCrudRoutes(deps) {
     'paidAmount',
     'status',
     'rentalId',
-    'clientId',
-    'counterpartyId',
     'objectId',
     'contractId',
   ]);
@@ -1075,23 +1077,16 @@ function registerCrudRoutes(deps) {
     if (!paymentId) throw new Error('Для распределения платежа укажите paymentId');
     const amount = parsePaymentMoney(record?.amount, 'Сумма распределения', { required: true });
     if (amount <= 0) throw new Error('Сумма распределения должна быть больше 0');
-    const payment = (readData('payments') || []).find(item => String(item?.id || '').trim() === paymentId);
-    if (!payment) throw new Error('Платёж для распределения не найден');
-    const rentalId = String(record?.rentalId || '').trim();
-    if (rentalId) {
-      const rental = [...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
-        .find(item => String(item?.id || '').trim() === rentalId);
-      if (!rental) throw new Error('Аренда для распределения не найдена');
-      const paymentCounterpartyId = String(payment?.counterpartyId || '').trim();
-      const rentalCounterpartyId = String(rental?.counterpartyId || '').trim();
-      const legacyClientMismatch = !paymentCounterpartyId && !rentalCounterpartyId
-        && String(payment?.clientId || '').trim()
-        && String(rental?.clientId || '').trim()
-        && String(payment.clientId).trim() !== String(rental.clientId).trim();
-      if ((paymentCounterpartyId || rentalCounterpartyId) && paymentCounterpartyId !== rentalCounterpartyId) {
-        throw new Error('Платёж и аренда относятся к разным контрагентам');
+    const effective = String(record?.status || '').trim().toLowerCase() !== 'cancelled';
+    let payment;
+    if (effective) {
+      payment = assertPaymentAllocationCandidateCanonical(record, { readData }).paymentRecord;
+    } else {
+      const endpoints = resolvePaymentAllocationEndpoints(record, { readData }, { requireRental: false });
+      payment = endpoints.paymentRecord;
+      if (endpoints.rentalRecord) {
+        assertPaymentRentalCounterpartyMatch(payment, endpoints.rentalRecord, { readData });
       }
-      if (legacyClientMismatch) throw new Error('Платёж и аренда относятся к разным клиентам');
     }
     const documentId = String(record?.documentId || '').trim();
     if (documentId) {
@@ -1112,9 +1107,6 @@ function registerCrudRoutes(deps) {
     const paymentsById = new Map((readData('payments') || [])
       .map(item => [String(item?.id || '').trim(), item])
       .filter(([id]) => id));
-    const rentalsById = new Map([...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
-      .map(item => [String(item?.id || '').trim(), item])
-      .filter(([id]) => id));
     const documentIds = new Set((readData('documents') || [])
       .map(item => String(item?.id || '').trim())
       .filter(Boolean));
@@ -1122,28 +1114,26 @@ function registerCrudRoutes(deps) {
     for (const record of records || []) {
       const paymentId = String(record?.paymentId || '').trim();
       if (!paymentId) throw new Error('Для распределения платежа укажите paymentId');
-      if (!paymentsById.has(paymentId)) throw new Error('Платёж для распределения не найден');
-      const rentalId = String(record?.rentalId || '').trim();
-      if (rentalId && !rentalsById.has(rentalId)) throw new Error('Аренда для распределения не найдена');
-      if (rentalId) {
-        const payment = paymentsById.get(paymentId);
-        const rental = rentalsById.get(rentalId);
-        const paymentCounterpartyId = String(payment?.counterpartyId || '').trim();
-        const rentalCounterpartyId = String(rental?.counterpartyId || '').trim();
-        const legacyClientMismatch = !paymentCounterpartyId && !rentalCounterpartyId
-          && String(payment?.clientId || '').trim()
-          && String(rental?.clientId || '').trim()
-          && String(payment.clientId).trim() !== String(rental.clientId).trim();
-        if ((paymentCounterpartyId || rentalCounterpartyId) && paymentCounterpartyId !== rentalCounterpartyId) {
-          throw new Error('Платёж и аренда относятся к разным контрагентам');
+      const effective = String(record?.status || '').trim().toLowerCase() !== 'cancelled';
+      if (effective) {
+        assertPaymentAllocationCandidateCanonical(record, { readData });
+      } else {
+        const endpoints = resolvePaymentAllocationEndpoints(record, { readData }, { requireRental: false });
+        if (endpoints.rentalRecord) {
+          assertPaymentRentalCounterpartyMatch(
+            endpoints.paymentRecord,
+            endpoints.rentalRecord,
+            { readData },
+          );
         }
-        if (legacyClientMismatch) throw new Error('Платёж и аренда относятся к разным клиентам');
       }
       const documentId = String(record?.documentId || '').trim();
       if (documentId && !documentIds.has(documentId)) throw new Error('Документ для распределения не найден');
-      if (String(record?.status || '').trim().toLowerCase() === 'cancelled') continue;
+      if (!effective) continue;
       const amount = Number(record?.amount);
-      if (!Number.isFinite(amount) || amount <= 0) continue;
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Сумма распределения должна быть больше 0');
+      }
       totalsByPaymentId.set(paymentId, (totalsByPaymentId.get(paymentId) || 0) + amount);
     }
     for (const [paymentId, amount] of totalsByPaymentId) {
@@ -1930,6 +1920,11 @@ function registerCrudRoutes(deps) {
           newItem = clientCompatibilityWrite.state.clients
             .find(client => String(client?.id || '') === String(newItem.id)) || newItem;
         }
+        if (collection === 'payment_allocations') {
+          assertPaymentAllocationPersistenceEntriesSafe([
+            { name: 'payment_allocations', value: [...data, newItem] },
+          ], { readData });
+        }
         if (collection === 'service' && typeof applyServiceTicketCreationEffects === 'function') {
           const lifecycleResult = applyServiceTicketCreationEffects(newItem, req.user.userName, {
             persistService: true,
@@ -2232,6 +2227,11 @@ function registerCrudRoutes(deps) {
                   userRole: data[idx].userRole,
                 }
               : nextItem);
+          if (collection === 'payments') {
+            assertPaymentAllocationPersistenceEntriesSafe([
+              { name: 'payments', value: data },
+            ], { readData });
+          }
           if (collection === 'clients') {
             const prepared = prepareClientCompatibilityUpdate({
               previousClient: previousItem,
@@ -2255,6 +2255,11 @@ function registerCrudRoutes(deps) {
             });
             data = clientCompatibilityWrite.state.clients;
           }
+        }
+        if (collection === 'payment_allocations') {
+          assertPaymentAllocationPersistenceEntriesSafe([
+            { name: 'payment_allocations', value: data },
+          ], { readData });
         }
         if (collection === 'service' && typeof persistServiceTicketUpdate === 'function') {
           data[idx] = persistServiceTicketUpdate(data[idx], req.user.userName);
@@ -2697,6 +2702,9 @@ function registerCrudRoutes(deps) {
           for (const item of list) validateCrmDealRecord(item);
         }
       } catch (error) {
+        if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
+          return sendCounterpartyCompatibilityError(res, error);
+        }
         if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
           return sendClientInnError(res, error);
         }
@@ -2857,6 +2865,16 @@ function registerCrudRoutes(deps) {
             })
             .map(item => item.id);
           assertEquipmentLifecycleProjection(normalizedList, lifecycleChangedIds);
+        }
+        if (collection === 'payments') {
+          assertPaymentAllocationPersistenceEntriesSafe([
+            { name: 'payments', value: normalizedList },
+          ], { readData });
+        }
+        if (collection === 'payment_allocations') {
+          assertPaymentAllocationPersistenceEntriesSafe([
+            { name: 'payment_allocations', value: normalizedList },
+          ], { readData });
         }
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {

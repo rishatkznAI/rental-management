@@ -25,6 +25,7 @@ const {
   stripRentalServerOwnedAuditFields,
 } = require('../lib/rental-data-integrity');
 const { buildClientFinancialSnapshots } = require('../lib/finance-core');
+const { assertPaymentAllocationPersistenceEntriesSafe } = require('../lib/payment-counterparty-relations');
 const { rentalMatchesEquipment } = require('../lib/rental-validation');
 const {
   affectedEquipmentIdsForRentals,
@@ -438,13 +439,32 @@ function registerRentalRoutes(deps) {
     auditLog,
     botNotifications = null,
     reconcileEquipmentRentalProjection: reconcileEquipmentRentalProjectionForWrite = reconcileEquipmentRentalProjection,
-    writeDataBatch: persistDataBatch = entries => {
+    writeDataBatch: persistDataBatchUnsafe = entries => {
       for (const entry of entries || []) writeData(entry.name, entry.value);
     },
     nowIso = () => new Date().toISOString(),
   } = deps;
 
   const router = express.Router();
+
+  function assertAllocationSafeEntries(entries) {
+    return assertPaymentAllocationPersistenceEntriesSafe(entries, { readData });
+  }
+
+  function persistDataBatch(entries) {
+    assertAllocationSafeEntries(entries);
+    return persistDataBatchUnsafe(entries);
+  }
+
+  function sendRentalPersistenceError(res, error, fallbackCode, fallbackMessage) {
+    const relationError = String(error?.code || '').startsWith('COUNTERPARTY_RELATION_');
+    return res.status(error?.status || (relationError ? 409 : 500)).json({
+      ok: false,
+      code: error?.code || fallbackCode,
+      error: error?.message || fallbackMessage,
+      ...(error?.details ? { details: error.details } : {}),
+    });
+  }
   const requiredAccessMethods = ['filterCollectionByScope', 'canAccessEntity', 'assertCanUpdateEntity', 'assertSafeAdminBulkReplaceInput', 'splitForbiddenRentalManagerPatch'];
   const missingAccessMethods = !accessControl
     ? requiredAccessMethods
@@ -1923,7 +1943,12 @@ function registerRentalRoutes(deps) {
           writeData(collection, [...data, newItem]);
         }
       } catch (error) {
-        return res.status(error?.status || 500).json({ ok: false, error: error.message || 'Не удалось сохранить аренду.' });
+        return sendRentalPersistenceError(
+          res,
+          error,
+          'RENTAL_CREATE_PERSISTENCE_FAILED',
+          'Не удалось сохранить аренду.',
+        );
       }
       auditLog?.(req, {
         action: `${collection}.create`,
@@ -2199,7 +2224,12 @@ function registerRentalRoutes(deps) {
           try {
             persistDataBatch(writes);
           } catch (error) {
-            return res.status(500).json({ ok: false, error: error.message || 'Не удалось атомарно обновить аренду.' });
+            return sendRentalPersistenceError(
+              res,
+              error,
+              'RENTAL_UPDATE_PERSISTENCE_FAILED',
+              'Не удалось атомарно обновить аренду.',
+            );
           }
           auditLog?.(req, {
             action: 'rentals.update',
@@ -2353,13 +2383,19 @@ function registerRentalRoutes(deps) {
         reason: `Изменение ${collection} ${nextItem.id}`,
       });
       try {
-        persistDataBatch([
+        const writes = [
           { name: collection, value: data },
           ...(linkedGanttUpdate ? [{ name: 'gantt_rentals', value: nextGanttRentals }] : []),
           ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
-        ]);
+        ];
+        persistDataBatch(writes);
       } catch (error) {
-        return res.status(500).json({ ok: false, error: error.message || 'Не удалось атомарно обновить аренду.' });
+        return sendRentalPersistenceError(
+          res,
+          error,
+          'RENTAL_UPDATE_PERSISTENCE_FAILED',
+          'Не удалось атомарно обновить аренду.',
+        );
       }
       auditLog?.(req, {
         action: `${collection}.update`,
@@ -2528,11 +2564,12 @@ function registerRentalRoutes(deps) {
             ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
           ]);
         } catch (error) {
-          return res.status(500).json({
-            ok: false,
-            code: 'RENTAL_DOWNTIME_PERSISTENCE_FAILED',
-            error: error?.message || 'Не удалось атомарно сохранить простой аренды.',
-          });
+          return sendRentalPersistenceError(
+            res,
+            error,
+            'RENTAL_DOWNTIME_PERSISTENCE_FAILED',
+            'Не удалось атомарно сохранить простой аренды.',
+          );
         }
         auditLog?.(req, {
           action: 'rentals.downtime',
@@ -2836,7 +2873,12 @@ function registerRentalRoutes(deps) {
         try {
           persistDataBatch(extensionWrites);
         } catch (error) {
-          return res.status(500).json({ ok: false, error: error.message || 'Не удалось атомарно продлить аренду.' });
+          return sendRentalPersistenceError(
+            res,
+            error,
+            'RENTAL_EXTENSION_PERSISTENCE_FAILED',
+            'Не удалось атомарно продлить аренду.',
+          );
         }
 
         const auditMetadata = {
@@ -3033,11 +3075,12 @@ function registerRentalRoutes(deps) {
             ...(createdServiceTicket ? [{ name: 'service', value: nextService }] : []),
           ]);
         } catch (error) {
-          return res.status(500).json({
-            ok: false,
-            code: 'RENTAL_RETURN_PERSISTENCE_FAILED',
-            error: error?.message || 'Не удалось атомарно оформить возврат.',
-          });
+          return sendRentalPersistenceError(
+            res,
+            error,
+            'RENTAL_RETURN_PERSISTENCE_FAILED',
+            'Не удалось атомарно оформить возврат.',
+          );
         }
 
         const returnedRental = classicRental
@@ -3142,17 +3185,19 @@ function registerRentalRoutes(deps) {
         reason: `Удаление ${collection} ${removed.id}`,
       });
       try {
-        persistDataBatch([
+        const writes = [
           { name: collection, value: collection === 'rentals' ? nextRentals : nextGanttRentals },
           ...(collection === 'rentals' ? [{ name: 'gantt_rentals', value: nextGanttRentals }] : []),
           ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
-        ]);
+        ];
+        persistDataBatch(writes);
       } catch (error) {
-        return res.status(500).json({
-          ok: false,
-          code: 'RENTAL_DELETE_PERSISTENCE_FAILED',
-          error: error?.message || 'Не удалось атомарно удалить аренду.',
-        });
+        return sendRentalPersistenceError(
+          res,
+          error,
+          'RENTAL_DELETE_PERSISTENCE_FAILED',
+          'Не удалось атомарно удалить аренду.',
+        );
       }
       auditLog?.(req, {
         action: `${collection}.delete`,
@@ -3393,17 +3438,19 @@ function registerRentalRoutes(deps) {
         reason: `Массовая замена ${collection}`,
       });
       try {
-        persistDataBatch([
+        const writes = [
           { name: collection, value: nextList },
           ...(collection === 'rentals' ? [{ name: 'gantt_rentals', value: nextGanttRentals }] : []),
           ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
-        ]);
+        ];
+        persistDataBatch(writes);
       } catch (error) {
-        return res.status(500).json({
-          ok: false,
-          code: 'RENTAL_BULK_REPLACE_PERSISTENCE_FAILED',
-          error: error.message || 'Не удалось атомарно заменить аренды.',
-        });
+        return sendRentalPersistenceError(
+          res,
+          error,
+          'RENTAL_BULK_REPLACE_PERSISTENCE_FAILED',
+          'Не удалось атомарно заменить аренды.',
+        );
       }
       auditLog?.(req, {
         action: `${collection}.bulk_replace`,

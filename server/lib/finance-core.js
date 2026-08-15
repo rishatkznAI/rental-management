@@ -9,6 +9,10 @@ const {
   buildLeasingSummary,
 } = require('./leasing-core');
 const { calculateRentalBilling, getRentalBillingAmount } = require('./rental-billing');
+const {
+  assertPaymentRentalCounterpartyMatch,
+  resolvePaymentCounterpartyRelation,
+} = require('./payment-counterparty-relations');
 
 function toNumber(value) {
   const numeric = Number(value);
@@ -508,16 +512,28 @@ function buildUnallocatedPayments(payments, paymentAllocations) {
     .sort((a, b) => b.unallocatedAmount - a.unallocatedAmount || String(a.paymentId || '').localeCompare(String(b.paymentId || '')));
 }
 
-function buildAllocationPreview({ payments, paymentAllocations, rentals }, paymentId) {
+function buildAllocationPreview({ payments, paymentAllocations, rentals, relationData }, paymentId) {
   const id = String(paymentId || '').trim();
   const payment = (payments || []).find(item => getRecordId(item) === id);
   if (!payment || !shouldCountPayment(payment)) return { paymentId: id, unallocatedAmount: 0, suggestedAllocations: [] };
+  const paymentRelation = resolvePaymentCounterpartyRelation(payment, relationData);
+  const eligibleRentalIds = new Set();
+  for (const rental of rentals || []) {
+    try {
+      assertPaymentRentalCounterpartyMatch(payment, rental, relationData, { paymentRelation });
+      const rentalId = getRecordId(rental);
+      if (rentalId) eligibleRentalIds.add(rentalId);
+    } catch {
+      // A foreign, unresolved, or internally inconsistent Rental is not eligible.
+    }
+  }
   const existing = buildUnallocatedPayments([payment], paymentAllocations)[0];
   const unallocatedAmount = existing?.unallocatedAmount || 0;
   const clientId = getStableClientId(payment);
   const contractId = String(payment.contractId || '').trim();
   const candidateRows = buildRentalDebtRows(rentals || [], payments || [], { paymentAllocations })
-    .filter(row => (!clientId || row.clientId === clientId) && (!contractId || row.contractId === contractId))
+    .filter(row => eligibleRentalIds.has(String(row.rentalId || '').trim()))
+    .filter(row => !contractId || row.contractId === contractId)
     .filter(row => row.outstanding > 0);
   let remaining = unallocatedAmount;
   const suggestedAllocations = [];

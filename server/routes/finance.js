@@ -11,7 +11,11 @@ const {
 const { getRentalBillingAmount } = require('../lib/rental-billing');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 const { normalizeDateOnly } = require('../lib/date-only');
-const { decoratePaymentCounterparty } = require('../lib/payment-counterparty-relations');
+const {
+  assertPaymentRentalCounterpartyMatch,
+  decoratePaymentCounterparty,
+  resolvePaymentCounterpartyRelation,
+} = require('../lib/payment-counterparty-relations');
 
 function registerFinanceRoutes(router, deps) {
   const {
@@ -114,6 +118,14 @@ function registerFinanceRoutes(router, deps) {
 
   function collectionList(name) {
     return Array.isArray(readData(name)) ? readData(name) : [];
+  }
+
+  function findPaymentAllocationRental(rentalId) {
+    const id = text(rentalId);
+    if (!id) return null;
+    return collectionList('gantt_rentals').find(item => text(item?.id) === id)
+      || collectionList('rentals').find(item => text(item?.id) === id)
+      || null;
   }
 
   function syncPaymentStatusesAfterAllocationWrite() {
@@ -876,27 +888,68 @@ function registerFinanceRoutes(router, deps) {
   });
 
   router.post('/finance/payments/:id/allocation-preview', requireAuth, requireRead('finance_operations'), (req, res) => {
-    const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
-    return res.json(buildAllocationPreview({ payments, paymentAllocations, rentals }, req.params.id));
+    try {
+      const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
+      return res.json(buildAllocationPreview({
+        payments,
+        paymentAllocations,
+        rentals,
+        relationData: { readData },
+      }, req.params.id));
+    } catch (error) {
+      return res.status(error?.status || 400).json({
+        ok: false,
+        error: error?.message || 'Не удалось построить распределение платежа',
+      });
+    }
   });
 
   router.post('/finance/payments/:id/apply-allocation-preview', requireAuth, requireWrite('payment_allocations'), (req, res) => {
     try {
       const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
-      const payment = payments.find(item => text(item?.id) === text(req.params.id));
-      if (!payment) return res.status(404).json({ ok: false, error: 'Платёж не найден' });
-      const rentalIds = new Set(
-        [...collectionList('gantt_rentals'), ...collectionList('rentals')]
-          .map(item => text(item?.id))
-          .filter(Boolean)
-      );
+      const scopedPayment = payments.find(item => text(item?.id) === text(req.params.id));
+      if (!scopedPayment) return res.status(404).json({ ok: false, error: 'Платёж не найден' });
+      const payment = collectionList('payments')
+        .find(item => text(item?.id) === text(req.params.id)) || scopedPayment;
       const documentIds = new Set(
         collectionList('documents')
           .map(item => text(item?.id))
           .filter(Boolean)
       );
-      const preview = buildAllocationPreview({ payments, paymentAllocations, rentals }, req.params.id);
+      const relationData = { readData };
+      const preview = buildAllocationPreview({
+        payments: payments.map(item => text(item?.id) === text(req.params.id) ? payment : item),
+        paymentAllocations,
+        rentals,
+        relationData,
+      }, req.params.id);
       const requested = Array.isArray(req.body?.allocations) ? req.body.allocations : preview.suggestedAllocations;
+      const paymentRelation = resolvePaymentCounterpartyRelation(payment, relationData);
+      const validated = requested.map(item => {
+        const requestedAmount = money(item?.amount);
+        if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+          const error = new Error('Сумма распределения должна быть больше нуля.');
+          error.status = 400;
+          throw error;
+        }
+        const rentalId = text(item?.rentalId);
+        if (rentalId) {
+          const rental = findPaymentAllocationRental(rentalId);
+          if (!rental) {
+            const error = new Error('Аренда для распределения не найдена');
+            error.status = 400;
+            throw error;
+          }
+          assertPaymentRentalCounterpartyMatch(payment, rental, relationData, { paymentRelation });
+        }
+        const documentId = text(item?.documentId);
+        if (documentId && !documentIds.has(documentId)) {
+          const error = new Error('Invalid allocation documentId. Document does not exist.');
+          error.status = 400;
+          throw error;
+        }
+        return { item, requestedAmount, rentalId, documentId };
+      });
       const allocations = collectionList('payment_allocations');
       const now = nowIso();
       const existingAllocated = allocations
@@ -904,18 +957,9 @@ function registerFinanceRoutes(router, deps) {
         .reduce((sum, item) => sum + (Number.isFinite(Number(item?.amount)) && Number(item.amount) > 0 ? Number(item.amount) : 0), 0);
       let remaining = Math.max(0, getPaymentAllocationCap(payment) - existingAllocated);
       const created = [];
-      for (const item of requested) {
+      for (const entry of validated) {
         if (remaining <= 0) break;
-        const requestedAmount = money(item?.amount);
-        if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) continue;
-        const rentalId = text(item.rentalId);
-        if (rentalId && !rentalIds.has(rentalId)) {
-          return res.status(400).json({ ok: false, error: 'Аренда для распределения не найдена' });
-        }
-        const documentId = text(item.documentId);
-        if (documentId && !documentIds.has(documentId)) {
-          return res.status(400).json({ ok: false, error: 'Invalid allocation documentId. Document does not exist.' });
-        }
+        const { item, requestedAmount, rentalId, documentId } = entry;
         const amount = Math.min(requestedAmount, remaining);
         created.push({
           id: text(item.id) || generateId(idPrefixes.payment_allocations || 'PA'),

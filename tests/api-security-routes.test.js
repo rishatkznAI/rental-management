@@ -2608,8 +2608,11 @@ test('payments API blocks physical delete when payment has allocations', async (
 
 test('payment allocations API validates existence cap and syncs rental payment status', async () => {
   const { app, state } = createSecurityApp();
-  state.payments = [{ id: 'P-paid', amount: 1000, paidAmount: 1000, status: 'paid' }];
-  state.gantt_rentals = [{ id: 'GR-own', amount: 1000, paymentStatus: 'unpaid' }];
+  state.payments = [{ id: 'P-paid', counterpartyId: 'CP-own', amount: 1000, paidAmount: 1000, status: 'paid' }];
+  state.gantt_rentals = [
+    { id: 'GR-own', counterpartyId: 'CP-own', amount: 1000, paymentStatus: 'unpaid' },
+    { id: 'GR-other', counterpartyId: 'CP-other', amount: 1000, paymentStatus: 'unpaid' },
+  ];
 
   await withServer(app, async (baseUrl) => {
     const missingPayment = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
@@ -2658,6 +2661,22 @@ test('payment allocations API validates existence cap and syncs rental payment s
     assert.match(missingDocumentBulk.body.error, /Документ для распределения не найден/);
     assert.equal(state.payment_allocations.length, 0);
 
+    const foreign = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
+      paymentId: 'P-paid',
+      rentalId: 'GR-other',
+      amount: 100,
+    });
+    assert.equal(foreign.status, 409);
+    assert.match(foreign.body.error, /different counterparties/);
+    assert.equal(state.payment_allocations.length, 0);
+
+    const foreignBulk = await request(baseUrl, 'PUT', '/api/payment_allocations', 'admin-token', [
+      { id: 'PA-bulk-valid', paymentId: 'P-paid', rentalId: 'GR-own', amount: 100 },
+      { id: 'PA-bulk-foreign', paymentId: 'P-paid', rentalId: 'GR-other', amount: 100 },
+    ]);
+    assert.equal(foreignBulk.status, 409);
+    assert.equal(state.payment_allocations.length, 0);
+
     const valid = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
       paymentId: 'P-paid',
       rentalId: 'GR-own',
@@ -2668,6 +2687,12 @@ test('payment allocations API validates existence cap and syncs rental payment s
     assert.equal(valid.body.paymentId, 'P-paid');
     assert.equal(state.payment_allocations.length, 1);
     assert.equal(state.gantt_rentals[0].paymentStatus, 'paid');
+
+    const foreignPatch = await request(baseUrl, 'PATCH', `/api/payment_allocations/${valid.body.id}`, 'admin-token', {
+      rentalId: 'GR-other',
+    });
+    assert.equal(foreignPatch.status, 409);
+    assert.equal(state.payment_allocations[0].rentalId, 'GR-own');
   });
 });
 

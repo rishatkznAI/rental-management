@@ -15,6 +15,7 @@ const { buildRentalDebtRows } = serverRequire('./lib/finance-core');
 const { registerCrudRoutes } = serverRequire('./routes/crud');
 const {
   PAYMENT_RELATION_CLASSIFICATIONS,
+  assertPaymentRentalCounterpartyMatch,
   auditPaymentCounterpartyRelations,
   canonicalizePaymentCounterpartyRelation,
   repairPaymentCounterpartyRelations,
@@ -135,6 +136,73 @@ test('Rental to Payment uses authoritative Rental.counterpartyId and compatibili
   relationError(
     () => canonicalizePaymentCounterpartyRelation({ rentalId: 'R-1', counterpartyId: 'CP-S' }, store),
     'COUNTERPARTY_RELATION_MISMATCH',
+  );
+});
+
+test('Payment allocation Counterparty assertion accepts stable legacy chains and rejects every unresolved or conflicting relation', () => {
+  const store = state({
+    counterparties: [counterparty('CP-A', ['customer']), counterparty('CP-B', ['customer'])],
+    clients: [
+      { id: 'C-A', counterpartyId: 'CP-A', company: 'Same display name' },
+      { id: 'C-B', counterpartyId: 'CP-B', company: 'Same display name' },
+    ],
+  });
+
+  assert.equal(
+    assertPaymentRentalCounterpartyMatch(
+      { id: 'P-direct', counterpartyId: 'CP-A' },
+      { id: 'R-direct', counterpartyId: 'CP-A' },
+      store,
+    ).counterpartyId,
+    'CP-A',
+  );
+  assert.equal(
+    assertPaymentRentalCounterpartyMatch(
+      { id: 'P-client', clientId: 'C-A' },
+      { id: 'R-client', clientId: 'C-A' },
+      store,
+    ).counterpartyId,
+    'CP-A',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-cross', counterpartyId: 'CP-A', client: 'Same display name' },
+      { id: 'R-cross', counterpartyId: 'CP-B', client: 'Same display name' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_MISMATCH',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-dual', clientId: 'C-B', counterpartyId: 'CP-A' },
+      { id: 'R-A', counterpartyId: 'CP-A' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_MISMATCH',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-A', counterpartyId: 'CP-A' },
+      { id: 'R-dual', clientId: 'C-B', counterpartyId: 'CP-A' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_MISMATCH',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-unresolved', client: 'Same display name' },
+      { id: 'R-A', counterpartyId: 'CP-A' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_ID_REQUIRED',
+  );
+  relationError(
+    () => assertPaymentRentalCounterpartyMatch(
+      { id: 'P-A', counterpartyId: 'CP-A' },
+      { id: 'R-unresolved', client: 'Same display name' },
+      store,
+    ),
+    'COUNTERPARTY_RELATION_ID_REQUIRED',
   );
 });
 

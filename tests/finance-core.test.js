@@ -392,12 +392,18 @@ test('payment allocations close only selected rentals and keep contract payment 
 
 test('allocation preview suggests but does not apply unallocated contract payment', () => {
   const rentals = [
-    { id: 'gr-1', clientId: 'c-1', objectId: 'o-1', contractId: 'ct-1', client: 'Клиент', equipmentInv: '083', manager: 'Анна', startDate: '2026-04-01', endDate: '2026-04-10', amount: 60000, status: 'active' },
-    { id: 'gr-2', clientId: 'c-1', objectId: 'o-2', contractId: 'ct-1', client: 'Клиент', equipmentInv: '084', manager: 'Анна', startDate: '2026-04-01', endDate: '2026-04-10', amount: 60000, status: 'active' },
+    { id: 'gr-1', clientId: 'c-1', counterpartyId: 'CP-1', objectId: 'o-1', contractId: 'ct-1', client: 'Клиент', equipmentInv: '083', manager: 'Анна', startDate: '2026-04-01', endDate: '2026-04-10', amount: 60000, status: 'active' },
+    { id: 'gr-2', clientId: 'c-1', counterpartyId: 'CP-1', objectId: 'o-2', contractId: 'ct-1', client: 'Клиент', equipmentInv: '084', manager: 'Анна', startDate: '2026-04-01', endDate: '2026-04-10', amount: 60000, status: 'active' },
   ];
   const payments = [{ id: 'p-1', clientId: 'c-1', contractId: 'ct-1', amount: 90000, paidAmount: 90000, status: 'paid' }];
+  const relationData = {
+    clients: [{ id: 'c-1', counterpartyId: 'CP-1' }],
+    counterparties: [{ id: 'CP-1', roles: ['customer'], status: 'active' }],
+    rentals: [],
+    gantt_rentals: rentals,
+  };
 
-  const preview = buildAllocationPreview({ payments, paymentAllocations: [], rentals }, 'p-1');
+  const preview = buildAllocationPreview({ payments, paymentAllocations: [], rentals, relationData }, 'p-1');
   const rowsAfterPreview = buildRentalDebtRows(rentals, payments, { paymentAllocations: [] });
 
   assert.equal(preview.unallocatedAmount, 90000);

@@ -4,6 +4,7 @@ const {
   resolveCounterpartyById,
 } = require('./counterparty-relations');
 const { counterpartyError } = require('./counterparty');
+const { resolveRentalCounterpartyRelation } = require('./rental-counterparty-relations');
 
 const PAYMENT_RELATION_CLASSIFICATIONS = Object.freeze({
   VALID_COUNTERPARTY: 'valid_counterparty',
@@ -198,6 +199,35 @@ function resolvePaymentCounterpartyRelation(payment, data, {
       metadataFields,
     },
   );
+}
+
+/**
+ * Rental allocations are valid only inside one canonical Counterparty boundary.
+ * Both identities are resolved by their domain authorities; display metadata is
+ * never considered and any unresolved or internally inconsistent relation fails.
+ */
+function assertPaymentRentalCounterpartyMatch(payment, rental, data, {
+  allowArchived = false,
+  paymentRelation = null,
+} = {}) {
+  const resolvedPayment = paymentRelation || resolvePaymentCounterpartyRelation(payment, data, {
+    allowArchived,
+  });
+  const resolvedRental = resolveRentalCounterpartyRelation(rental, data, {
+    allowArchived,
+  });
+  if (resolvedPayment.counterpartyId !== resolvedRental.counterpartyId) {
+    throw counterpartyError(
+      COUNTERPARTY_RELATION_CODES.MISMATCH,
+      'Payment and Rental belong to different counterparties.',
+      409,
+    );
+  }
+  return {
+    counterpartyId: resolvedPayment.counterpartyId,
+    payment: resolvedPayment,
+    rental: resolvedRental,
+  };
 }
 
 function canonicalizePaymentCounterpartyRelation(payment, data, options = {}) {
@@ -469,6 +499,7 @@ function repairPaymentCounterpartyRelations({
 module.exports = {
   PAYMENT_METADATA_FIELDS,
   PAYMENT_RELATION_CLASSIFICATIONS,
+  assertPaymentRentalCounterpartyMatch,
   auditPaymentCounterpartyRelations,
   canonicalizePaymentCounterpartyRelation,
   counterpartySummary,

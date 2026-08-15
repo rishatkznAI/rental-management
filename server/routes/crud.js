@@ -84,6 +84,7 @@ const {
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 const { equipmentProjectionForState, reconcileEquipmentRentalProjection } = require('../lib/rental-lifecycle');
 const {
+  assertPaymentRentalCounterpartyMatch,
   canonicalizePaymentCounterpartyRelation,
   decoratePaymentCounterparty,
 } = require('../lib/payment-counterparty-relations');
@@ -1070,6 +1071,14 @@ function registerCrudRoutes(deps) {
     return Number.isFinite(amount) && amount > 0 ? Math.min(paid, amount) : paid;
   }
 
+  function findPaymentAllocationRental(rentalId) {
+    const id = String(rentalId || '').trim();
+    if (!id) return null;
+    return (readData('gantt_rentals') || []).find(item => String(item?.id || '').trim() === id)
+      || (readData('rentals') || []).find(item => String(item?.id || '').trim() === id)
+      || null;
+  }
+
   function validatePaymentAllocationRecord(record, existing = null) {
     const paymentId = String(record?.paymentId || '').trim();
     if (!paymentId) throw new Error('Для распределения платежа укажите paymentId');
@@ -1079,19 +1088,9 @@ function registerCrudRoutes(deps) {
     if (!payment) throw new Error('Платёж для распределения не найден');
     const rentalId = String(record?.rentalId || '').trim();
     if (rentalId) {
-      const rental = [...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
-        .find(item => String(item?.id || '').trim() === rentalId);
+      const rental = findPaymentAllocationRental(rentalId);
       if (!rental) throw new Error('Аренда для распределения не найдена');
-      const paymentCounterpartyId = String(payment?.counterpartyId || '').trim();
-      const rentalCounterpartyId = String(rental?.counterpartyId || '').trim();
-      const legacyClientMismatch = !paymentCounterpartyId && !rentalCounterpartyId
-        && String(payment?.clientId || '').trim()
-        && String(rental?.clientId || '').trim()
-        && String(payment.clientId).trim() !== String(rental.clientId).trim();
-      if ((paymentCounterpartyId || rentalCounterpartyId) && paymentCounterpartyId !== rentalCounterpartyId) {
-        throw new Error('Платёж и аренда относятся к разным контрагентам');
-      }
-      if (legacyClientMismatch) throw new Error('Платёж и аренда относятся к разным клиентам');
+      assertPaymentRentalCounterpartyMatch(payment, rental, { readData });
     }
     const documentId = String(record?.documentId || '').trim();
     if (documentId) {
@@ -1112,9 +1111,6 @@ function registerCrudRoutes(deps) {
     const paymentsById = new Map((readData('payments') || [])
       .map(item => [String(item?.id || '').trim(), item])
       .filter(([id]) => id));
-    const rentalsById = new Map([...(readData('gantt_rentals') || []), ...(readData('rentals') || [])]
-      .map(item => [String(item?.id || '').trim(), item])
-      .filter(([id]) => id));
     const documentIds = new Set((readData('documents') || [])
       .map(item => String(item?.id || '').trim())
       .filter(Boolean));
@@ -1124,26 +1120,19 @@ function registerCrudRoutes(deps) {
       if (!paymentId) throw new Error('Для распределения платежа укажите paymentId');
       if (!paymentsById.has(paymentId)) throw new Error('Платёж для распределения не найден');
       const rentalId = String(record?.rentalId || '').trim();
-      if (rentalId && !rentalsById.has(rentalId)) throw new Error('Аренда для распределения не найдена');
       if (rentalId) {
         const payment = paymentsById.get(paymentId);
-        const rental = rentalsById.get(rentalId);
-        const paymentCounterpartyId = String(payment?.counterpartyId || '').trim();
-        const rentalCounterpartyId = String(rental?.counterpartyId || '').trim();
-        const legacyClientMismatch = !paymentCounterpartyId && !rentalCounterpartyId
-          && String(payment?.clientId || '').trim()
-          && String(rental?.clientId || '').trim()
-          && String(payment.clientId).trim() !== String(rental.clientId).trim();
-        if ((paymentCounterpartyId || rentalCounterpartyId) && paymentCounterpartyId !== rentalCounterpartyId) {
-          throw new Error('Платёж и аренда относятся к разным контрагентам');
-        }
-        if (legacyClientMismatch) throw new Error('Платёж и аренда относятся к разным клиентам');
+        const rental = findPaymentAllocationRental(rentalId);
+        if (!rental) throw new Error('Аренда для распределения не найдена');
+        assertPaymentRentalCounterpartyMatch(payment, rental, { readData });
       }
       const documentId = String(record?.documentId || '').trim();
       if (documentId && !documentIds.has(documentId)) throw new Error('Документ для распределения не найден');
       if (String(record?.status || '').trim().toLowerCase() === 'cancelled') continue;
       const amount = Number(record?.amount);
-      if (!Number.isFinite(amount) || amount <= 0) continue;
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error('Сумма распределения должна быть больше 0');
+      }
       totalsByPaymentId.set(paymentId, (totalsByPaymentId.get(paymentId) || 0) + amount);
     }
     for (const [paymentId, amount] of totalsByPaymentId) {

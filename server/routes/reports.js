@@ -1,7 +1,7 @@
 const express = require('express');
 const {
   buildClientDebtAgingRows,
-  buildClientFinancialSnapshots,
+  buildClientReceivables,
   buildManagerReceivables,
   buildOverdueBuckets,
   buildRentalDebtRows,
@@ -252,9 +252,15 @@ function registerReportRoutes(deps) {
       const paymentId = String(allocation?.paymentId || '').trim();
       return (rentalId && scopedRentalIds.has(rentalId)) || (paymentId && scopedPaymentIds.has(paymentId));
     });
-    const debtRows = buildRentalDebtRows(rentals, payments, { paymentAllocations });
-    const clientSnapshots = buildClientFinancialSnapshots(clients, rentals, payments, new Date().toISOString().slice(0, 10), { paymentAllocations });
-    const managerReceivables = buildManagerReceivables(debtRows, new Date().toISOString().slice(0, 10), clients);
+    const identityOptions = { paymentAllocations, relationData: { readData } };
+    const debtRows = buildRentalDebtRows(rentals, payments, identityOptions);
+    const clientReceivables = buildClientReceivables(
+      clients,
+      debtRows,
+      new Date().toISOString().slice(0, 10),
+      identityOptions,
+    );
+    const managerReceivables = buildManagerReceivables(debtRows, new Date().toISOString().slice(0, 10), clients, identityOptions);
     const overdueBuckets = buildOverdueBuckets(debtRows);
     const clientDebtAgingRows = buildClientDebtAgingRows(clients, debtRows);
     return {
@@ -264,9 +270,9 @@ function registerReportRoutes(deps) {
       managerReceivables,
       overdueBuckets,
       summary: {
-        debt: clientSnapshots.reduce((sum, item) => sum + item.currentDebt, 0),
-        overdueClients: clientSnapshots.filter(item => item.overdueRentals > 0).length,
-        exceededClients: clientSnapshots.filter(item => item.exceededLimit).length,
+        debt: clientReceivables.reduce((sum, item) => sum + item.currentDebt, 0),
+        overdueClients: clientReceivables.filter(item => item.overdueRentals > 0).length,
+        exceededClients: clientReceivables.filter(item => item.exceededLimit).length,
         unpaidRentals: debtRows.length,
         overdueDebt: managerReceivables.reduce((sum, item) => sum + item.overdueDebt, 0),
       },

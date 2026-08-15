@@ -13,9 +13,14 @@ const receivablesCore = require('../server/lib/receivables-core.js');
 function createApp() {
   let idCounter = 0;
   const state = {
-    clients: [{ id: 'c-1', company: 'ООО Долг', inn: '7701000000', manager: 'Office' }],
+    counterparties: [
+      { id: 'CP-1', roles: ['customer'], status: 'active' },
+      { id: 'CP-2', roles: ['customer'], status: 'active' },
+    ],
+    clients: [{ id: 'c-1', counterpartyId: 'CP-1', company: 'ООО Долг', inn: '7701000000', manager: 'Office' }],
     rentals: [{
       id: 'r-1',
+      counterpartyId: 'CP-1',
       clientId: 'c-1',
       client: 'ООО Долг',
       equipmentInv: 'A-1',
@@ -26,6 +31,7 @@ function createApp() {
     }],
     gantt_rentals: [{
       id: 'gr-1',
+      counterpartyId: 'CP-1',
       rentalId: 'r-1',
       sourceRentalId: 'r-1',
       originalRentalId: 'r-1',
@@ -122,15 +128,18 @@ async function request(baseUrl, method, path, token, body) {
   return { response, json };
 }
 
-test('receivables API lists debt and persists collection actions and payment plans', async () => {
+test('J-H2 read 14: receivables API returns canonical debtor identity and persists guarded workflows', async () => {
   const { app, state } = createApp();
   await withServer(app, async (baseUrl) => {
     const list = await request(baseUrl, 'GET', '/api/finance/receivables?today=2026-05-09', 'office');
     assert.equal(list.response.status, 200);
     assert.equal(list.json.summary.totalDebt, 100000);
     assert.equal(list.json.rows[0].clientId, 'c-1');
+    assert.equal(list.json.rows[0].counterpartyId, 'CP-1');
+    assert.equal(list.json.rows[0].debtorCounterpartyId, 'CP-1');
 
     const action = await request(baseUrl, 'POST', '/api/finance/receivables/actions', 'office', {
+      counterpartyId: 'CP-1',
       clientId: 'c-1',
       actionType: 'payment_promise',
       status: 'done',
@@ -140,9 +149,11 @@ test('receivables API lists debt and persists collection actions and payment pla
       comment: 'Клиент обещал оплату',
     });
     assert.equal(action.response.status, 201);
+    assert.equal(action.json.counterpartyId, 'CP-1');
     assert.equal(state.debt_collection_actions.length, 1);
 
     const plan = await request(baseUrl, 'POST', '/api/finance/receivables/payment-plans', 'office', {
+      counterpartyId: 'CP-1',
       clientId: 'c-1',
       paymentDate: '2026-05-25',
       amount: 50000,
@@ -173,19 +184,49 @@ test('receivables API denies roles without finance payment access', async () => 
   });
 });
 
+test('receivables API rejects cross-Counterparty action and payment-plan writes before persistence', async () => {
+  const { app, state } = createApp();
+  await withServer(app, async (baseUrl) => {
+    const action = await request(baseUrl, 'POST', '/api/finance/receivables/actions', 'office', {
+      counterpartyId: 'CP-2',
+      clientId: 'c-1',
+      actionType: 'call',
+    });
+    assert.equal(action.response.status, 409);
+    assert.equal(action.json.code, 'AR_DEBTOR_IDENTITY_REQUIRED');
+    assert.equal(state.debt_collection_actions.length, 0);
+
+    const plan = await request(baseUrl, 'POST', '/api/finance/receivables/payment-plans', 'office', {
+      counterpartyId: 'CP-2',
+      rentalId: 'gr-1',
+      paymentDate: '2026-05-25',
+      amount: 50000,
+      status: 'planned',
+    });
+    assert.equal(plan.response.status, 409);
+    assert.equal(plan.json.code, 'AR_DEBTOR_IDENTITY_REQUIRED');
+    assert.equal(state.receivable_payment_plans.length, 0);
+  });
+});
+
 test('receivables API allows rental manager scoped read without exposing other managers debt', async () => {
   const { app, state } = createApp();
   state.clients = [
-    { id: 'c-own', company: 'ООО Свой', manager: 'Manager', managerId: 'u-manager' },
-    { id: 'c-other', company: 'ООО Чужой', manager: 'Office', managerId: 'u-office' },
+    { id: 'c-own', counterpartyId: 'CP-own', company: 'ООО Свой', manager: 'Manager', managerId: 'u-manager' },
+    { id: 'c-other', counterpartyId: 'CP-other', company: 'ООО Чужой', manager: 'Office', managerId: 'u-office' },
+  ];
+  state.counterparties = [
+    { id: 'CP-own', roles: ['customer'], status: 'active' },
+    { id: 'CP-other', roles: ['customer'], status: 'active' },
   ];
   state.rentals = [
-    { id: 'r-own', clientId: 'c-own', client: 'ООО Свой', manager: 'Manager', managerId: 'u-manager', status: 'active' },
-    { id: 'r-other', clientId: 'c-other', client: 'ООО Чужой', manager: 'Office', managerId: 'u-office', status: 'active' },
+    { id: 'r-own', counterpartyId: 'CP-own', clientId: 'c-own', client: 'ООО Свой', manager: 'Manager', managerId: 'u-manager', status: 'active' },
+    { id: 'r-other', counterpartyId: 'CP-other', clientId: 'c-other', client: 'ООО Чужой', manager: 'Office', managerId: 'u-office', status: 'active' },
   ];
   state.gantt_rentals = [
     {
       id: 'gr-own',
+      counterpartyId: 'CP-own',
       rentalId: 'r-own',
       sourceRentalId: 'r-own',
       originalRentalId: 'r-own',
@@ -202,6 +243,7 @@ test('receivables API allows rental manager scoped read without exposing other m
     },
     {
       id: 'gr-other',
+      counterpartyId: 'CP-other',
       rentalId: 'r-other',
       sourceRentalId: 'r-other',
       originalRentalId: 'r-other',

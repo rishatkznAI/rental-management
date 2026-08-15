@@ -12,6 +12,7 @@ export type TaskCenterTask = {
   section: string;
   entityType?: string;
   entityId?: string;
+  counterpartyId?: string;
   clientId?: string;
   clientName?: string;
   assignedTo?: string;

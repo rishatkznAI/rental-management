@@ -1,9 +1,13 @@
 import type { GanttRentalData } from '../mock-data';
-import type { Client, Payment, PaymentAllocation } from '../types';
+import type { ArDebtorIdentityStatus, Client, Payment, PaymentAllocation } from '../types';
 import { calculateRentalBilling } from './rentalDowntimeFlow.js';
 
 export interface RentalDebtRow {
   rentalId: string;
+  counterpartyId?: string;
+  debtorCounterpartyId?: string | null;
+  debtorIdentityStatus: ArDebtorIdentityStatus;
+  debtorIdentityIssues?: string[];
   clientId?: string;
   client: string;
   objectId?: string;
@@ -28,7 +32,12 @@ export interface RentalDebtRow {
 }
 
 export interface ClientReceivableRow {
+  counterpartyId?: string;
+  debtorCounterpartyId?: string | null;
+  debtorIdentityStatus: ArDebtorIdentityStatus;
+  debtorIdentityIssues?: string[];
   clientId?: string;
+  clientIds?: string[];
   client: string;
   creditLimit: number;
   currentDebt: number;
@@ -36,7 +45,7 @@ export interface ClientReceivableRow {
   unpaidRentals: number;
   overdueRentals: number;
   exceededLimit: boolean;
-  dataIssue?: 'missing_client_id';
+  dataIssue?: 'unresolved_debtor_identity';
 }
 
 export interface ClientFinancialSnapshot extends ClientReceivableRow {
@@ -62,7 +71,12 @@ export interface OverdueBucketRow {
 }
 
 export interface ClientDebtAgingRow {
+  counterpartyId?: string;
+  debtorCounterpartyId?: string | null;
+  debtorIdentityStatus: ArDebtorIdentityStatus;
+  debtorIdentityIssues?: string[];
   clientId?: string;
+  clientIds?: string[];
   client: string;
   manager: string;
   ageBucket: string;
@@ -191,10 +205,6 @@ function buildAllocatedAmountsByRental(payments: Payment[], paymentAllocations: 
   return byRentalId;
 }
 
-function normalizeText(value: unknown): string {
-  return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
-}
-
 function stableClientId(record: unknown): string {
   if (!record || typeof record !== 'object') return '';
   const item = record as { clientId?: unknown; customerId?: unknown; client_id?: unknown };
@@ -212,9 +222,58 @@ function toMoney(value: unknown): number {
   return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
 }
 
-function receivableKey(row: RentalDebtRow): string {
-  const clientId = stableClientId(row);
-  return clientId ? `id:${clientId}` : `unlinked:${normalizeText(row.client) || row.rentalId || 'unknown'}`;
+type FrontendDebtorIdentity = {
+  counterpartyId: string | null;
+  status: ArDebtorIdentityStatus;
+  issues: string[];
+};
+
+function clientsByStableId(clients: Client[]): Map<string, Client[]> {
+  const index = new Map<string, Client[]>();
+  clients.forEach(client => {
+    const id = String(client?.id || '').trim();
+    if (!id) return;
+    index.set(id, [...(index.get(id) ?? []), client]);
+  });
+  return index;
+}
+
+function frontendDebtorIdentity(
+  record: { counterpartyId?: unknown; clientId?: unknown },
+  clientIndex: Map<string, Client[]>,
+): FrontendDebtorIdentity {
+  const directCounterpartyId = String(record?.counterpartyId || '').trim();
+  const clientId = String(record?.clientId || '').trim();
+  const matches = clientId ? (clientIndex.get(clientId) ?? []) : [];
+  if (matches.length > 1) {
+    return { counterpartyId: null, status: 'ambiguous', issues: ['AR_DEBTOR_RELATION_AMBIGUOUS'] };
+  }
+  const clientCounterpartyId = String(matches[0]?.counterpartyId || '').trim();
+  if (clientId && matches.length === 0) {
+    return { counterpartyId: null, status: 'orphan_client', issues: ['AR_DEBTOR_ORPHAN_CLIENT'] };
+  }
+  if (directCounterpartyId && clientCounterpartyId && directCounterpartyId !== clientCounterpartyId) {
+    return { counterpartyId: null, status: 'mismatch', issues: ['AR_DEBTOR_IDENTITY_MISMATCH'] };
+  }
+  const counterpartyId = directCounterpartyId || clientCounterpartyId;
+  if (!counterpartyId) {
+    return { counterpartyId: null, status: 'unresolved', issues: ['AR_DEBTOR_IDENTITY_UNRESOLVED'] };
+  }
+  return {
+    counterpartyId,
+    status: directCounterpartyId && clientCounterpartyId
+      ? 'matching_dual_id'
+      : directCounterpartyId
+        ? 'counterparty_only'
+        : 'legacy_resolved',
+    issues: [],
+  };
+}
+
+function frontendDebtorKey(identity: FrontendDebtorIdentity, domain: string, recordId: string, sourceIndex: number): string {
+  return identity.counterpartyId
+    ? `counterparty:${identity.counterpartyId}`
+    : `unresolved:${domain}:${recordId || 'missing_id'}:${sourceIndex}:${identity.status}`;
 }
 
 function getOverdueDate(row: Pick<RentalDebtRow, 'expectedPaymentDate' | 'endDate'>): string {
@@ -250,9 +309,13 @@ export function buildRentalDebtRows(
         : paidAmount > 0
           ? 'partial'
           : 'unpaid';
+      const counterpartyId = String(rental.counterpartyId || '').trim();
       return {
         rentalId: rental.id,
-        counterpartyId: String(rental.counterpartyId || '').trim() || undefined,
+        counterpartyId: counterpartyId || undefined,
+        debtorCounterpartyId: counterpartyId || null,
+        debtorIdentityStatus: counterpartyId ? 'counterparty_only' as const : 'unresolved' as const,
+        debtorIdentityIssues: counterpartyId ? [] : ['AR_DEBTOR_IDENTITY_UNRESOLVED'],
         clientId: stableClientId(rental) || undefined,
         client: getClientName(rental),
         objectId: rental.objectId || undefined,
@@ -304,16 +367,30 @@ export function buildClientReceivables(
   clients: Client[],
   rentalDebtRows: RentalDebtRow[],
 ): ClientReceivableRow[] {
-  const clientsById = new Map(clients.map(client => [client.id, client] as const));
+  const clientIndex = clientsByStableId(clients);
   const map = new Map<string, ClientReceivableRow>();
   const today = new Date().toISOString().slice(0, 10);
 
-  rentalDebtRows.forEach(row => {
+  rentalDebtRows.forEach((row, sourceIndex) => {
     const rowClientId = stableClientId(row);
-    const client = rowClientId ? clientsById.get(rowClientId) : undefined;
-    const key = receivableKey(row);
+    const identity = frontendDebtorIdentity(row, clientIndex);
+    const counterpartyClients = identity.counterpartyId
+      ? clients.filter(client => client.counterpartyId === identity.counterpartyId)
+      : [];
+    const linkedClient = rowClientId ? clientIndex.get(rowClientId)?.[0] : undefined;
+    const client = linkedClient?.counterpartyId === identity.counterpartyId
+      ? linkedClient
+      : counterpartyClients[0] ?? linkedClient;
+    const key = frontendDebtorKey(identity, 'rental_debt_rows', row.rentalId, sourceIndex);
+    const clientIds = counterpartyClients.map(item => item.id).filter(Boolean);
+    if (rowClientId && !clientIds.includes(rowClientId)) clientIds.push(rowClientId);
     const existing = map.get(key) ?? {
+      counterpartyId: identity.counterpartyId || undefined,
+      debtorCounterpartyId: identity.counterpartyId,
+      debtorIdentityStatus: identity.status,
+      debtorIdentityIssues: identity.issues,
       clientId: client?.id ?? (rowClientId || undefined),
+      clientIds,
       client: client?.company ?? (row.client || 'Клиент не привязан'),
       creditLimit: client?.creditLimit ?? 0,
       currentDebt: 0,
@@ -321,8 +398,12 @@ export function buildClientReceivables(
       unpaidRentals: 0,
       overdueRentals: 0,
       exceededLimit: false,
-      dataIssue: rowClientId ? undefined : 'missing_client_id',
+      dataIssue: identity.counterpartyId ? undefined : 'unresolved_debtor_identity',
     };
+    clientIds.forEach(clientId => {
+      if (!existing.clientIds?.includes(clientId)) existing.clientIds?.push(clientId);
+    });
+    existing.clientIds?.sort();
     existing.currentDebt += row.outstanding;
     existing.unpaidRentals += 1;
     if ((row.expectedPaymentDate && row.expectedPaymentDate < today) || row.endDate < today) {
@@ -332,12 +413,24 @@ export function buildClientReceivables(
     map.set(key, existing);
   });
 
-  clients.forEach(client => {
+  clients.forEach((client, sourceIndex) => {
     const manualDebt = toMoney(client.debt);
     if (manualDebt <= 0) return;
-    const key = client.id ? `id:${client.id}` : `manual:${normalizeText(client.company) || 'unknown'}`;
+    const identity = frontendDebtorIdentity({
+      counterpartyId: client.counterpartyId,
+      clientId: client.id,
+    }, clientIndex);
+    const key = frontendDebtorKey(identity, 'manual_client_debt', client.id, sourceIndex);
+    const clientIds = identity.counterpartyId
+      ? clients.filter(item => item.counterpartyId === identity.counterpartyId).map(item => item.id)
+      : [client.id];
     const existing = map.get(key) ?? {
+      counterpartyId: identity.counterpartyId || undefined,
+      debtorCounterpartyId: identity.counterpartyId,
+      debtorIdentityStatus: identity.status,
+      debtorIdentityIssues: identity.issues,
       clientId: client.id || undefined,
+      clientIds,
       client: client.company || 'Клиент не привязан',
       creditLimit: client.creditLimit ?? 0,
       currentDebt: 0,
@@ -345,6 +438,7 @@ export function buildClientReceivables(
       unpaidRentals: 0,
       overdueRentals: 0,
       exceededLimit: false,
+      dataIssue: identity.counterpartyId ? undefined : 'unresolved_debtor_identity',
     };
     existing.currentDebt += manualDebt;
     existing.manualDebt += manualDebt;
@@ -363,17 +457,36 @@ export function buildClientFinancialSnapshots(
 ): ClientFinancialSnapshot[] {
   const debtRows = buildRentalDebtRows(rentals, payments, paymentAllocations);
   const receivables = buildClientReceivables(clients, debtRows);
-  const receivableMap = new Map(receivables.filter(item => item.clientId).map(item => [String(item.clientId), item] as const));
+  const clientIndex = clientsByStableId(clients);
+  const receivableMap = new Map(
+    receivables
+      .filter(item => item.counterpartyId)
+      .map(item => [String(item.counterpartyId), item] as const),
+  );
 
   return clients
     .map(client => {
-      const clientRentals = rentals.filter(item => stableClientId(item) === client.id);
+      const identity = frontendDebtorIdentity({ counterpartyId: client.counterpartyId, clientId: client.id }, clientIndex);
+      const clientRentals = rentals.filter(item => {
+        const rentalIdentity = frontendDebtorIdentity({
+          counterpartyId: item.counterpartyId,
+          clientId: stableClientId(item),
+        }, clientIndex);
+        return Boolean(identity.counterpartyId && rentalIdentity.counterpartyId === identity.counterpartyId);
+      });
       const latestRental = clientRentals
         .slice()
         .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
-      const receivable = receivableMap.get(client.id);
+      const receivable = identity.counterpartyId ? receivableMap.get(identity.counterpartyId) : undefined;
       return {
+        counterpartyId: identity.counterpartyId || undefined,
+        debtorCounterpartyId: identity.counterpartyId,
+        debtorIdentityStatus: identity.status,
+        debtorIdentityIssues: identity.issues,
         clientId: client.id,
+        clientIds: identity.counterpartyId
+          ? clients.filter(item => item.counterpartyId === identity.counterpartyId).map(item => item.id)
+          : [client.id],
         client: client.company,
         creditLimit: client.creditLimit ?? 0,
         currentDebt: receivable?.currentDebt ?? toMoney(client.debt),
@@ -384,6 +497,7 @@ export function buildClientFinancialSnapshots(
         totalRentals: clientRentals.length,
         activeRentals: clientRentals.filter(item => item.status === 'active' || item.status === 'created').length,
         lastRentalDate: latestRental?.startDate ?? client.lastRentalDate,
+        dataIssue: identity.counterpartyId ? undefined : 'unresolved_debtor_identity' as const,
       };
     })
     .sort((a, b) => b.currentDebt - a.currentDebt || a.client.localeCompare(b.client, 'ru'));
@@ -395,8 +509,9 @@ export function buildManagerReceivables(
   clients: Client[] = [],
 ): ManagerReceivableRow[] {
   const map = new Map<string, ManagerReceivableRow & { clients: Set<string> }>();
+  const clientIndex = clientsByStableId(clients);
 
-  rentalDebtRows.forEach(row => {
+  rentalDebtRows.forEach((row, sourceIndex) => {
     const key = row.manager || 'Не назначен';
     const overdueDays = getRentalDebtOverdueDays(row, today);
     const item = map.get(key) ?? {
@@ -414,12 +529,13 @@ export function buildManagerReceivables(
       item.overdueRentals += 1;
       item.overdueDebt += row.outstanding;
     }
-    item.clients.add(stableClientId(row) || row.client || 'Клиент не привязан');
+    const identity = frontendDebtorIdentity(row, clientIndex);
+    item.clients.add(frontendDebtorKey(identity, 'manager_rental_debt', row.rentalId, sourceIndex));
     item.clientsCount = item.clients.size;
     map.set(key, item);
   });
 
-  clients.forEach(client => {
+  clients.forEach((client, sourceIndex) => {
     const manualDebt = toMoney(client.debt);
     if (manualDebt <= 0) return;
     const key = client.manager || 'Не назначен';
@@ -433,7 +549,8 @@ export function buildManagerReceivables(
       clients: new Set<string>(),
     };
     item.currentDebt += manualDebt;
-    item.clients.add(client.id || client.company || 'Клиент не привязан');
+    const identity = frontendDebtorIdentity({ counterpartyId: client.counterpartyId, clientId: client.id }, clientIndex);
+    item.clients.add(frontendDebtorKey(identity, 'manager_manual_debt', client.id, sourceIndex));
     item.clientsCount = item.clients.size;
     map.set(key, item);
   });
@@ -465,26 +582,38 @@ export function buildClientDebtAgingRows(
   rentalDebtRows: RentalDebtRow[],
   today = new Date().toISOString().slice(0, 10),
 ): ClientDebtAgingRow[] {
-  const clientsById = new Map(clients.map(client => [client.id, client] as const));
+  const clientIndex = clientsByStableId(clients);
   const map = new Map<string, ClientDebtAgingRow>();
 
-  rentalDebtRows.forEach(row => {
+  rentalDebtRows.forEach((row, sourceIndex) => {
     if (row.outstanding <= 0) return;
     const rowClientId = stableClientId(row);
-    const client = rowClientId ? clientsById.get(rowClientId) : undefined;
+    const identity = frontendDebtorIdentity(row, clientIndex);
+    const counterpartyClients = identity.counterpartyId
+      ? clients.filter(item => item.counterpartyId === identity.counterpartyId)
+      : [];
+    const linkedClient = rowClientId ? clientIndex.get(rowClientId)?.[0] : undefined;
+    const client = linkedClient?.counterpartyId === identity.counterpartyId
+      ? linkedClient
+      : counterpartyClients[0] ?? linkedClient;
     const overdueDays = getRentalDebtOverdueDays(row, today);
     const bucket = getDebtAgeBucket(overdueDays);
     const hasActiveRental = isActiveRentalStatus(row.rentalStatus);
     const clientName = client?.company ?? (row.client || 'Клиент не привязан');
     const manager = row.manager || client?.manager || 'Не назначен';
     const key = [
-      rowClientId ? `id:${rowClientId}` : `unlinked:${normalizeText(clientName) || row.rentalId || 'unknown'}`,
+      frontendDebtorKey(identity, 'client_debt_aging', row.rentalId, sourceIndex),
       manager,
       bucket.key,
       hasActiveRental ? 'active' : 'inactive',
     ].join('|');
     const existing = map.get(key) ?? {
+      counterpartyId: identity.counterpartyId || undefined,
+      debtorCounterpartyId: identity.counterpartyId,
+      debtorIdentityStatus: identity.status,
+      debtorIdentityIssues: identity.issues,
       clientId: client?.id ?? (rowClientId || undefined),
+      clientIds: counterpartyClients.map(item => item.id),
       client: clientName,
       manager,
       ageBucket: bucket.key,

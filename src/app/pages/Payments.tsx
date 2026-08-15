@@ -286,11 +286,11 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
 
   // Compute current client debt (excluding payments being created right now)
   const clientDebt = useMemo(() => {
-    if (!form.clientId) return null;
+    if (!form.counterpartyId) return null;
     const debtRows = buildRentalDebtRows(rentals, allPayments);
     const receivables = buildClientReceivables(clients, debtRows);
-    return receivables.find(r => r.clientId === form.clientId) ?? null;
-  }, [form.clientId, rentals, allPayments, clients]);
+    return receivables.find(r => r.counterpartyId === form.counterpartyId) ?? null;
+  }, [form.counterpartyId, rentals, allPayments, clients]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

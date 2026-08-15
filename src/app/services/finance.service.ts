@@ -131,7 +131,7 @@ export const financeService = {
   ): Promise<ReceivableCollectionAction> =>
     api.patch<ReceivableCollectionAction>(`/api/finance/receivables/actions/${id}`, data),
   createReceivableWorkflowAction: (
-    data: Partial<ReceivableCollectionAction> & Pick<ReceivableCollectionAction, 'clientId' | 'actionType'>,
+    data: Partial<ReceivableCollectionAction> & Pick<ReceivableCollectionAction, 'counterpartyId' | 'actionType'>,
   ): Promise<{ action: ReceivableCollectionAction; document?: unknown }> =>
     api.post<{ action: ReceivableCollectionAction; document?: unknown }>('/api/finance/receivables/workflow-actions', data),
   createReceivablePaymentPlan: (

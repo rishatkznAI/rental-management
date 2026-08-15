@@ -778,7 +778,10 @@ function registerRentalRoutes(deps) {
         readData('gantt_rentals') || [],
         readData('payments') || [],
         String(nowIso() || '').slice(0, 10),
-        { paymentAllocations: readData('payment_allocations') || [] },
+        {
+          paymentAllocations: readData('payment_allocations') || [],
+          relationData: { readData },
+        },
       )[0];
       if (!snapshot) return null;
       return {

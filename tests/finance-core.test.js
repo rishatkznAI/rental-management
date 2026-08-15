@@ -17,6 +17,53 @@ const {
   calculateRentalBilling,
 } = require('../server/lib/finance-core.js');
 
+function withCanonicalDebtors(payload) {
+  const clients = (payload.clients || []).map(client => ({
+    ...client,
+    counterpartyId: client.counterpartyId || `CP-${client.id}`,
+  }));
+  const clientsById = new Map(clients.map(client => [String(client.id), client]));
+  const rentals = (payload.rentals || []).map(rental => ({
+    ...rental,
+    counterpartyId: rental.counterpartyId || clientsById.get(String(rental.clientId || ''))?.counterpartyId,
+  }));
+  const payments = (payload.payments || []).map(payment => ({
+    ...payment,
+    counterpartyId: payment.counterpartyId || clientsById.get(String(payment.clientId || ''))?.counterpartyId,
+  }));
+  const counterparties = [...new Set(clients.map(client => client.counterpartyId).filter(Boolean))]
+    .map(id => ({ id, roles: ['customer'], status: 'active' }));
+  const clientObjects = [...new Map(rentals
+    .filter(rental => rental.objectId && rental.counterpartyId)
+    .map(rental => [rental.objectId, {
+      id: rental.objectId,
+      counterpartyId: rental.counterpartyId,
+      clientId: rental.clientId,
+    }])).values()];
+  const clientContracts = [...new Map(rentals
+    .filter(rental => rental.contractId && rental.counterpartyId)
+    .map(rental => [rental.contractId, {
+      id: rental.contractId,
+      counterpartyId: rental.counterpartyId,
+      clientId: rental.clientId,
+    }])).values()];
+  return {
+    ...payload,
+    clients,
+    rentals,
+    payments,
+    relationData: {
+      counterparties,
+      clients,
+      gantt_rentals: rentals,
+      payments,
+      documents: payload.documents || [],
+      client_objects: payload.clientObjects || clientObjects,
+      client_contracts: payload.clientContracts || clientContracts,
+    },
+  };
+}
+
 test('calculateRentalBilling keeps rentals without downtimes unchanged', () => {
   const billing = calculateRentalBilling({
     id: 'gr-no-downtime',
@@ -458,7 +505,12 @@ test('debt supports one contract on many objects and one object in many contract
     { id: 'pa-3', paymentId: 'p-1', rentalId: 'r-3', objectId: 'o-1', contractId: 'ct-2', amount: 30000 },
   ];
 
-  const report = buildFinanceReport({ clients: [{ id: 'c-1', company: 'Клиент' }], rentals, payments, paymentAllocations }, '2026-05-13');
+  const report = buildFinanceReport(withCanonicalDebtors({
+    clients: [{ id: 'c-1', company: 'Клиент' }],
+    rentals,
+    payments,
+    paymentAllocations,
+  }), '2026-05-13');
 
   assert.equal(report.debtByClient.find(row => row.clientId === 'c-1').debt, 210000);
   assert.equal(report.debtByObject.find(row => row.objectId === 'o-1').debt, 140000);
@@ -504,7 +556,7 @@ test('getRentalDebtOverdueDays returns zero for fully paid rentals', () => {
   );
 });
 
-test('buildClientReceivables groups debt and overdue rentals by client', () => {
+test('buildClientReceivables aggregates debt and overdue rental facts without display-name authority', () => {
   const rows = buildClientReceivables(
     [{ id: 'c-1', company: 'ЭМ-СТРОЙ', creditLimit: 50000 }],
     [
@@ -683,7 +735,7 @@ test('buildClientDebtAgingRows groups by client manager age and active rental fl
 
 test('buildFinanceReport returns aggregated totals and slices', () => {
   const report = buildFinanceReport(
-    {
+    withCanonicalDebtors({
       clients: [{ id: 'c-1', company: 'ЭМ-СТРОЙ', creditLimit: 50000 }],
       rentals: [
         {
@@ -704,7 +756,7 @@ test('buildFinanceReport returns aggregated totals and slices', () => {
       payments: [
         { id: 'p-1', rentalId: 'gr-1', clientId: 'c-1', amount: 100000, paidAmount: 40000, status: 'partial' },
       ],
-    },
+    }),
     '2026-04-18',
   );
 
@@ -813,7 +865,7 @@ test('manual client debt contributes to receivables and manager totals', () => {
 
 test('finance report separates total debt from overdue receivables without paid cancelled or future rows', () => {
   const report = buildFinanceReport(
-    {
+    withCanonicalDebtors({
       clients: [
         { id: 'c-overdue', company: 'Просроченный клиент', creditLimit: 0 },
         { id: 'c-future', company: 'Будущий клиент', creditLimit: 0, debt: 15000, manager: 'Анна' },
@@ -891,7 +943,7 @@ test('finance report separates total debt from overdue receivables without paid 
         { id: 'p-paid', rentalId: 'gr-paid', clientId: 'c-paid', amount: 50000, paidAmount: 50000, status: 'paid' },
         { id: 'p-cancelled', rentalId: 'gr-cancelled', clientId: 'c-overdue', amount: 999999, paidAmount: 999999, status: 'cancelled' },
       ],
-    },
+    }),
     '2026-04-18',
   );
 
@@ -912,9 +964,10 @@ test('finance report separates total debt from overdue receivables without paid 
   assert.equal(report.managerReceivables.find(row => row.manager === 'Анна')?.overdueDebt, 0);
 });
 
-test('client rename keeps receivables linked by clientId', () => {
-  const clients = [{ id: 'c-1', company: 'ООО Ромашка Казань', creditLimit: 0 }];
-  const rentals = [
+test('client rename preserves receivables through canonical Counterparty identity', () => {
+  const canonical = withCanonicalDebtors({
+    clients: [{ id: 'c-1', company: 'ООО Ромашка Казань', creditLimit: 0 }],
+    rentals: [
     {
       id: 'gr-rename-1',
       clientId: 'c-1',
@@ -928,9 +981,17 @@ test('client rename keeps receivables linked by clientId', () => {
       paymentStatus: 'unpaid',
       status: 'active',
     },
-  ];
+    ],
+    payments: [],
+  });
 
-  const snapshots = buildClientFinancialSnapshots(clients, rentals, [], '2026-04-18');
+  const snapshots = buildClientFinancialSnapshots(
+    canonical.clients,
+    canonical.rentals,
+    canonical.payments,
+    '2026-04-18',
+    { relationData: canonical.relationData },
+  );
 
   assert.equal(snapshots.length, 1);
   assert.equal(snapshots[0].clientId, 'c-1');
@@ -939,9 +1000,9 @@ test('client rename keeps receivables linked by clientId', () => {
   assert.equal(snapshots[0].totalRentals, 1);
 });
 
-test('client rename keeps partial payment remainder by clientId', () => {
+test('client rename preserves partial payment remainder through canonical Counterparty identity', () => {
   const report = buildFinanceReport(
-    {
+    withCanonicalDebtors({
       clients: [{ id: 'c-1', company: 'ООО Ромашка Казань', creditLimit: 0 }],
       rentals: [
         {
@@ -961,7 +1022,7 @@ test('client rename keeps partial payment remainder by clientId', () => {
       payments: [
         { id: 'p-rename-2', rentalId: 'gr-rename-2', clientId: 'c-1', amount: 100000, paidAmount: 40000, status: 'partial' },
       ],
-    },
+    }),
     '2026-04-18',
   );
 
@@ -970,7 +1031,7 @@ test('client rename keeps partial payment remainder by clientId', () => {
   assert.equal(report.clientReceivables[0].currentDebt, 60000);
 });
 
-test('changing rental clientId moves receivable to the new client id', () => {
+test('changing the stable Client relation moves receivable to that Client Counterparty', () => {
   const report = buildFinanceReport(
     {
       clients: [
@@ -1059,6 +1120,6 @@ test('rows without clientId are marked as unlinked instead of attached by rename
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].clientId, undefined);
-  assert.equal(rows[0].dataIssue, 'missing_client_id');
+  assert.equal(rows[0].dataIssue, 'unresolved_debtor_identity');
   assert.equal(rows[0].currentDebt, 100000);
 });

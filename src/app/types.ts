@@ -1873,8 +1873,23 @@ export type DebtCollectionNextActionType =
 
 export type DebtCollectionPlanPriority = 'low' | 'medium' | 'high' | 'critical';
 
+export type ArDebtorIdentityStatus =
+  | 'canonical'
+  | 'legacy_resolved'
+  | 'counterparty_only'
+  | 'matching_dual_id'
+  | 'unresolved'
+  | 'mismatch'
+  | 'ambiguous'
+  | 'orphan_client'
+  | 'orphan_counterparty';
+
 export interface DebtCollectionPlan {
   id: string;
+  counterpartyId?: string;
+  debtorCounterpartyId?: string | null;
+  debtorIdentityStatus?: ArDebtorIdentityStatus;
+  debtorIdentityIssues?: string[];
   clientId?: string;
   clientName: string;
   responsibleUserId?: string;
@@ -1954,6 +1969,11 @@ export type ReceivablePaymentPlanStatus = 'planned' | 'paid' | 'missed' | 'cance
 
 export interface ReceivableCollectionAction {
   id: string;
+  counterpartyId?: string;
+  debtorCounterpartyId?: string | null;
+  debtorIdentityStatus?: ArDebtorIdentityStatus;
+  debtorIdentityIssues?: string[];
+  debtCollectionPlanId?: string;
   clientId?: string;
   rentalId?: string;
   paymentId?: string;
@@ -2003,8 +2023,14 @@ export interface ReceivableCollectionAction {
 
 export interface ReceivablePaymentPlanItem {
   id: string;
+  counterpartyId?: string;
+  debtorCounterpartyId?: string | null;
+  debtorIdentityStatus?: ArDebtorIdentityStatus;
+  debtorIdentityIssues?: string[];
+  debtCollectionPlanId?: string;
   clientId?: string;
   rentalId?: string;
+  paymentId?: string;
   paymentDate: string;
   amount: number;
   status: ReceivablePaymentPlanStatus;
@@ -2017,6 +2043,7 @@ export interface ReceivablePaymentPlanItem {
 
 export interface ReceivableRentalBreakdown {
   rentalId: string;
+  counterpartyId?: string;
   equipmentInv: string;
   startDate: string;
   endDate: string;
@@ -2052,7 +2079,12 @@ export interface ReceivableDocumentRef {
 }
 
 export interface ReceivableRow {
+  counterpartyId?: string;
+  debtorCounterpartyId?: string | null;
+  debtorIdentityStatus: ArDebtorIdentityStatus;
+  debtorIdentityIssues?: string[];
   clientId?: string;
+  clientIds?: string[];
   client: string;
   inn?: string;
   contacts?: {
@@ -2120,6 +2152,13 @@ export interface ReceivablesSummary {
 export interface ReceivablesResponse {
   rows: ReceivableRow[];
   summary: ReceivablesSummary;
+  unresolvedDebtorRecords?: Array<{
+    domain: string;
+    recordId: string | null;
+    debtorCounterpartyId: string | null;
+    debtorIdentityStatus: ArDebtorIdentityStatus;
+    debtorIdentityIssues?: string[];
+  }>;
 }
 
 export type CanonicalActualPostingReadiness = 'ready' | 'already_created' | 'runtime_disabled';

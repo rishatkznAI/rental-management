@@ -16,6 +16,12 @@ const {
   assertPaymentAllocationPersistenceEntriesSafe,
   decoratePaymentCounterparty,
 } = require('../lib/payment-counterparty-relations');
+const {
+  assertCanonicalArWorkflowWrite,
+} = require('../lib/ar-debtor-workflow');
+const {
+  assertCanonicalArDebtorIdentity,
+} = require('../lib/ar-debtor-identity');
 
 function registerFinanceRoutes(router, deps) {
   const {
@@ -305,6 +311,15 @@ function registerFinanceRoutes(router, deps) {
     });
   }
 
+  function workflowErrorResponse(res, error, fallback) {
+    return res.status(error?.status || 400).json({
+      ok: false,
+      error: error?.message || fallback,
+      ...(error?.code ? { code: error.code } : {}),
+      ...(error?.details ? { details: error.details } : {}),
+    });
+  }
+
   function isAdmin(user) {
     return user?.userRole === 'Администратор';
   }
@@ -370,13 +385,31 @@ function registerFinanceRoutes(router, deps) {
     writeData('app_settings', writeNumberingSettings(collectionList('app_settings'), settings, nowIso));
   }
 
-  function findReceivableRow(req, clientId) {
+  function findReceivableRow(req, selector = {}) {
     const fakeReq = { ...req, query: { ...(req.query || {}) } };
     const result = receivablesResponse(fakeReq);
-    const id = String(clientId || '').trim();
-    const row = result.rows.find(item => String(item.clientId || '') === id);
+    const submittedCounterpartyId = text(selector?.counterpartyId);
+    const submittedClientId = text(selector?.clientId);
+    if (!submittedCounterpartyId && !submittedClientId) {
+      const error = new Error('Укажите canonical Counterparty должника.');
+      error.status = 400;
+      error.code = 'AR_DEBTOR_IDENTITY_REQUIRED';
+      throw error;
+    }
+    const identity = assertCanonicalArDebtorIdentity({
+      counterpartyId: submittedCounterpartyId || undefined,
+      clientId: submittedClientId || undefined,
+    }, { readData }, {
+      domain: 'receivable_selection',
+      recordId: submittedClientId || submittedCounterpartyId,
+    });
+    const debtorCounterpartyId = identity.counterpartyId;
+    const row = result.rows.find(item => (
+      debtorCounterpartyId
+      && String(item.counterpartyId || '') === debtorCounterpartyId
+    ));
     if (!row) {
-      const error = new Error('Дебиторка клиента не найдена');
+      const error = new Error('Дебиторка canonical Counterparty не найдена');
       error.status = 404;
       throw error;
     }
@@ -410,6 +443,7 @@ function registerFinanceRoutes(router, deps) {
       documentType,
       number: '',
       documentNumber: '',
+      counterpartyId: row.counterpartyId,
       clientId: row.clientId,
       client: row.client,
       rentalId: payload.rentalId || firstRental.rentalId || undefined,
@@ -439,7 +473,16 @@ function registerFinanceRoutes(router, deps) {
   function receivablesResponse(req) {
     const today = String(req.query.today || '').trim() || undefined;
     const { clients, rentals, payments, paymentAllocations, documents, actions, paymentPlans } = getFinanceCollections(req.user);
-    return buildReceivables({ clients, rentals, payments, paymentAllocations, documents, actions, paymentPlans }, today);
+    return buildReceivables({
+      clients,
+      rentals,
+      payments,
+      paymentAllocations,
+      documents,
+      actions,
+      paymentPlans,
+      relationData: { readData },
+    }, today);
   }
 
   router.get('/finance/accounts', requireAuth, requireRead('finance_accounts'), (req, res) => {
@@ -626,28 +669,43 @@ function registerFinanceRoutes(router, deps) {
   router.get('/finance/debt-rows', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildRentalDebtRows(rentals, payments, { paymentAllocations, today });
+    const rows = buildRentalDebtRows(rentals, payments, { paymentAllocations, relationData: { readData } });
     res.json(rows);
   });
 
   router.get('/finance/clients', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { clients, rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildClientReceivables(clients, buildRentalDebtRows(rentals, payments, { paymentAllocations }), today);
+    const identityOptions = { paymentAllocations, relationData: { readData } };
+    const rows = buildClientReceivables(
+      clients,
+      buildRentalDebtRows(rentals, payments, identityOptions),
+      today,
+      identityOptions,
+    );
     res.json(rows);
   });
 
   router.get('/finance/client-snapshots', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { clients, rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildClientFinancialSnapshots(clients, rentals, payments, today, { paymentAllocations });
+    const rows = buildClientFinancialSnapshots(clients, rentals, payments, today, {
+      paymentAllocations,
+      relationData: { readData },
+    });
     res.json(rows);
   });
 
   router.get('/finance/managers', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { clients, rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildManagerReceivables(buildRentalDebtRows(rentals, payments, { paymentAllocations }), today, clients);
+    const identityOptions = { paymentAllocations, relationData: { readData } };
+    const rows = buildManagerReceivables(
+      buildRentalDebtRows(rentals, payments, identityOptions),
+      today,
+      clients,
+      identityOptions,
+    );
     res.json(rows);
   });
 
@@ -683,7 +741,10 @@ function registerFinanceRoutes(router, deps) {
       return (ret >= todayDate && ret < tomorrowStart) || (ret >= tomorrowStart && ret < dayAfterTomorrowStart);
     });
 
-    const debtRows = buildRentalDebtRows(rentals, payments, { paymentAllocations });
+    const debtRows = buildRentalDebtRows(rentals, payments, {
+      paymentAllocations,
+      relationData: { readData },
+    });
     const managerDebtRows = debtRows.filter(item => item.manager === manager);
     const managerOverdueRows = managerDebtRows.filter(item => getRentalDebtOverdueDays(item, today) > 0);
     const managerManualDebt = clients
@@ -777,14 +838,26 @@ function registerFinanceRoutes(router, deps) {
   router.get('/finance/aging', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { rentals, payments, paymentAllocations } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    const rows = buildOverdueBuckets(buildRentalDebtRows(rentals, payments, { paymentAllocations }), today);
+    const rows = buildOverdueBuckets(buildRentalDebtRows(rentals, payments, {
+      paymentAllocations,
+      relationData: { readData },
+    }), today);
     res.json(rows);
   });
 
   router.get('/finance/report', requireAuth, requireRead('finance_operations'), (req, res) => {
     const { clients, rentals, payments, paymentAllocations, clientObjects, leasingContracts, leasingPaymentSchedule } = getFinanceCollections(req.user);
     const today = String(req.query.today || '').trim() || undefined;
-    res.json(buildFinanceReport({ clients, rentals, payments, paymentAllocations, clientObjects, leasingContracts, leasingPaymentSchedule }, today));
+    res.json(buildFinanceReport({
+      clients,
+      rentals,
+      payments,
+      paymentAllocations,
+      clientObjects,
+      leasingContracts,
+      leasingPaymentSchedule,
+      relationData: { readData },
+    }, today));
   });
 
   router.get('/finance/tax-settings', requireAuth, requireRead('finance_operations'), (_req, res) => {
@@ -995,21 +1068,26 @@ function registerFinanceRoutes(router, deps) {
   });
 
   router.get('/finance/receivables/:clientId', requireAuth, requireRead('payments'), (req, res) => {
-    const result = receivablesResponse(req);
-    const clientId = String(req.params.clientId || '').trim();
-    const row = result.rows.find(item => String(item.clientId || '') === clientId);
-    if (!row) return res.status(404).json({ ok: false, error: 'Дебиторка клиента не найдена' });
-    return res.json(row);
+    try {
+      return res.json(findReceivableRow(req, { clientId: req.params.clientId }));
+    } catch (error) {
+      return workflowErrorResponse(res, error, 'Дебиторка canonical Counterparty не найдена');
+    }
   });
 
   router.post('/finance/receivables/workflow-actions', requireAuth, requireWrite('debt_collection_actions'), (req, res) => {
     try {
       accessControl.assertCanCreateCollection('debt_collection_actions', req.user, req.body);
-      const row = findReceivableRow(req, req.body.clientId);
+      const row = findReceivableRow(req, {
+        counterpartyId: req.body.counterpartyId,
+        clientId: req.body.clientId,
+      });
       const actions = collectionList('debt_collection_actions');
       const actionId = String(req.body.id || '').trim() || generateId(idPrefixes.debt_collection_actions || 'DCA');
-      const next = normalizeAction({
+      let next = normalizeAction({
         ...req.body,
+        counterpartyId: row.counterpartyId,
+        clientId: req.body.clientId || row.clientId,
         id: actionId,
         fromStage: req.body.fromStage || row.collectionStage || 'new_debt',
         dueDate: req.body.dueDate || (
@@ -1023,6 +1101,9 @@ function registerFinanceRoutes(router, deps) {
         idPrefix: idPrefixes.debt_collection_actions || 'DCA',
         nowIso,
         userName: userName(req.user),
+      });
+      next = assertCanonicalArWorkflowWrite('debt_collection_actions', next, { readData }, {
+        recordId: next.id,
       });
       validateStageTransition(row.collectionStage || 'new_debt', next.toStage || row.collectionStage || 'new_debt', {
         override: Boolean(req.body.override),
@@ -1042,7 +1123,7 @@ function registerFinanceRoutes(router, deps) {
       audit(req, 'debt_collection_actions.workflow', 'debt_collection_actions', null, next);
       return res.status(201).json({ action: next, document });
     } catch (error) {
-      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось выполнить этап взыскания' });
+      return workflowErrorResponse(res, error, 'Не удалось выполнить этап взыскания');
     }
   });
 
@@ -1050,18 +1131,21 @@ function registerFinanceRoutes(router, deps) {
     try {
       accessControl.assertCanCreateCollection('debt_collection_actions', req.user, req.body);
       const actions = collectionList('debt_collection_actions');
-      const next = normalizeAction(req.body, null, {
+      let next = normalizeAction(req.body, null, {
         generateId,
         idPrefix: idPrefixes.debt_collection_actions || 'DCA',
         nowIso,
         userName: userName(req.user),
+      });
+      next = assertCanonicalArWorkflowWrite('debt_collection_actions', next, { readData }, {
+        recordId: next.id,
       });
       actions.push(next);
       writeData('debt_collection_actions', actions);
       audit(req, 'debt_collection_actions.create', 'debt_collection_actions', null, next);
       return res.status(201).json(next);
     } catch (error) {
-      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось создать действие взыскания' });
+      return workflowErrorResponse(res, error, 'Не удалось создать действие взыскания');
     }
   });
 
@@ -1072,18 +1156,21 @@ function registerFinanceRoutes(router, deps) {
       if (index < 0) return res.status(404).json({ ok: false, error: 'Действие взыскания не найдено' });
       accessControl.assertCanUpdateEntity('debt_collection_actions', actions[index], req.user);
       const previous = actions[index];
-      const next = normalizeAction(req.body, previous, {
+      let next = normalizeAction(req.body, previous, {
         generateId,
         idPrefix: idPrefixes.debt_collection_actions || 'DCA',
         nowIso,
         userName: userName(req.user),
+      });
+      next = assertCanonicalArWorkflowWrite('debt_collection_actions', next, { readData }, {
+        recordId: next.id,
       });
       actions[index] = next;
       writeData('debt_collection_actions', actions);
       audit(req, 'debt_collection_actions.update', 'debt_collection_actions', previous, next);
       return res.json(next);
     } catch (error) {
-      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось обновить действие взыскания' });
+      return workflowErrorResponse(res, error, 'Не удалось обновить действие взыскания');
     }
   });
 
@@ -1091,18 +1178,21 @@ function registerFinanceRoutes(router, deps) {
     try {
       accessControl.assertCanCreateCollection('receivable_payment_plans', req.user, req.body);
       const plans = collectionList('receivable_payment_plans');
-      const next = normalizePaymentPlan(req.body, null, {
+      let next = normalizePaymentPlan(req.body, null, {
         generateId,
         idPrefix: idPrefixes.receivable_payment_plans || 'RPP',
         nowIso,
         userName: userName(req.user),
+      });
+      next = assertCanonicalArWorkflowWrite('receivable_payment_plans', next, { readData }, {
+        recordId: next.id,
       });
       plans.push(next);
       writeData('receivable_payment_plans', plans);
       audit(req, 'receivable_payment_plans.create', 'receivable_payment_plans', null, next);
       return res.status(201).json(next);
     } catch (error) {
-      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось создать график погашения' });
+      return workflowErrorResponse(res, error, 'Не удалось создать график погашения');
     }
   });
 
@@ -1113,18 +1203,21 @@ function registerFinanceRoutes(router, deps) {
       if (index < 0) return res.status(404).json({ ok: false, error: 'Платёж плана не найден' });
       accessControl.assertCanUpdateEntity('receivable_payment_plans', plans[index], req.user);
       const previous = plans[index];
-      const next = normalizePaymentPlan(req.body, previous, {
+      let next = normalizePaymentPlan(req.body, previous, {
         generateId,
         idPrefix: idPrefixes.receivable_payment_plans || 'RPP',
         nowIso,
         userName: userName(req.user),
+      });
+      next = assertCanonicalArWorkflowWrite('receivable_payment_plans', next, { readData }, {
+        recordId: next.id,
       });
       plans[index] = next;
       writeData('receivable_payment_plans', plans);
       audit(req, 'receivable_payment_plans.update', 'receivable_payment_plans', previous, next);
       return res.json(next);
     } catch (error) {
-      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось обновить график погашения' });
+      return workflowErrorResponse(res, error, 'Не удалось обновить график погашения');
     }
   });
 }

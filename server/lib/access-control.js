@@ -588,6 +588,7 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'attachments',
   ]),
   debt_collection_plans: new Set([
+    'counterpartyId',
     'clientId',
     'clientName',
     'objectId',
@@ -604,6 +605,8 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'result',
   ]),
   debt_collection_actions: new Set([
+    'counterpartyId',
+    'debtCollectionPlanId',
     'clientId',
     'rentalId',
     'paymentId',
@@ -647,8 +650,11 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'comment',
   ]),
   receivable_payment_plans: new Set([
+    'counterpartyId',
+    'debtCollectionPlanId',
     'clientId',
     'rentalId',
+    'paymentId',
     'paymentDate',
     'amount',
     'rentalBillingSnapshot',
@@ -993,6 +999,7 @@ const NON_ADMIN_CREATE_FIELDS = {
     'attachments',
   ]),
   debt_collection_plans: new Set([
+    'counterpartyId',
     'clientId',
     'clientName',
     'responsibleUserId',
@@ -1007,6 +1014,8 @@ const NON_ADMIN_CREATE_FIELDS = {
     'result',
   ]),
   debt_collection_actions: new Set([
+    'counterpartyId',
+    'debtCollectionPlanId',
     'clientId',
     'rentalId',
     'paymentId',
@@ -1050,8 +1059,11 @@ const NON_ADMIN_CREATE_FIELDS = {
     'comment',
   ]),
   receivable_payment_plans: new Set([
+    'counterpartyId',
+    'debtCollectionPlanId',
     'clientId',
     'rentalId',
+    'paymentId',
     'paymentDate',
     'amount',
     'status',

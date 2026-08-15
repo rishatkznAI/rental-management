@@ -110,6 +110,11 @@ const {
   decorateWarrantyClaimFactoryCounterparty,
   listEligibleWarrantyFactoryCounterparties,
 } = require('../lib/warranty-claim-factory-counterparty-relations');
+const {
+  AR_WORKFLOW_COLLECTIONS,
+  assertCanonicalArWorkflowWrite,
+  decorateArWorkflowRecord,
+} = require('../lib/ar-debtor-workflow');
 
 const INLINE_RELATION_IDEMPOTENCY_COLLECTION = 'inline_relation_idempotency';
 const INLINE_RELATION_IDEMPOTENCY_SCOPES = new Set(['client_objects', 'client_contracts']);
@@ -1512,6 +1517,7 @@ function registerCrudRoutes(deps) {
       : [];
     const snapshots = buildClientFinancialSnapshots(clients, scopedRentals, scopedPayments, new Date().toISOString().slice(0, 10), {
       paymentAllocations: scopedAllocations,
+      relationData: { readData },
     });
     const byClientId = new Map(snapshots.map(item => [String(item.clientId || ''), item]));
     return clients.map(client => {
@@ -1600,6 +1606,9 @@ function registerCrudRoutes(deps) {
       }
       if (collection === 'payments') {
         data = data.map(item => decoratePaymentCounterparty(item, { readData }));
+      }
+      if (AR_WORKFLOW_COLLECTIONS.has(collection)) {
+        data = data.map(item => decorateArWorkflowRecord(collection, item, { readData }));
       }
       if (wantsPaginatedResponse(req.query)) {
         if (collection === 'clients') {
@@ -1737,7 +1746,9 @@ function registerCrudRoutes(deps) {
                 decorateWarrantyClaimCounterparty(sanitized, { readData }),
                 { readData },
               )
-            : sanitized);
+            : AR_WORKFLOW_COLLECTIONS.has(collection)
+              ? decorateArWorkflowRecord(collection, sanitized, { readData })
+              : sanitized);
     });
 
     router.post(`/${collection}`, ...writeMiddlewares(collection), (req, res) => {
@@ -1844,6 +1855,11 @@ function registerCrudRoutes(deps) {
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
         newItem = normalizeClientDomainRecord(collection, newItem);
+        if (AR_WORKFLOW_COLLECTIONS.has(collection)) {
+          newItem = assertCanonicalArWorkflowWrite(collection, newItem, { readData }, {
+            recordId: newItem.id,
+          });
+        }
         if (collection === 'warranty_claims') {
           assertWarrantyTargetServiceAccess(newItem, null, req.user);
         }
@@ -2002,7 +2018,9 @@ function registerCrudRoutes(deps) {
                   decorateWarrantyClaimCounterparty(newItem, { readData }),
                   { readData },
                 )
-            : newItem);
+            : AR_WORKFLOW_COLLECTIONS.has(collection)
+              ? decorateArWorkflowRecord(collection, newItem, { readData })
+              : newItem);
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
           return sendCounterpartyCompatibilityError(res, error);
@@ -2176,6 +2194,11 @@ function registerCrudRoutes(deps) {
         } else {
           let nextItem = withClientLink(collection, { ...data[idx], ...safePatch, id: data[idx].id });
           nextItem = normalizeClientDomainRecord(collection, nextItem, data[idx]);
+          if (AR_WORKFLOW_COLLECTIONS.has(collection)) {
+            nextItem = assertCanonicalArWorkflowWrite(collection, nextItem, { readData }, {
+              recordId: nextItem.id,
+            });
+          }
           if (collection === 'service') {
             nextItem = normalizeServiceTicketForWrite(nextItem, {
               previous: data[idx],
@@ -2318,7 +2341,9 @@ function registerCrudRoutes(deps) {
                   decorateWarrantyClaimCounterparty(data[idx], { readData }),
                   { readData },
                 )
-            : data[idx]);
+            : AR_WORKFLOW_COLLECTIONS.has(collection)
+              ? decorateArWorkflowRecord(collection, data[idx], { readData })
+              : data[idx]);
       } catch (error) {
         if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
           return sendCounterpartyCompatibilityError(res, error);
@@ -2332,7 +2357,12 @@ function registerCrudRoutes(deps) {
         if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
           return sendSystemFixtureProtectedError(req, res, error);
         }
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return res.status(error?.status || 400).json({
+          ok: false,
+          error: error.message,
+          ...(error?.code ? { code: error.code } : {}),
+          ...(error?.details ? { details: error.details } : {}),
+        });
       }
     });
 
@@ -2821,6 +2851,15 @@ function registerCrudRoutes(deps) {
           );
           return collection === 'equipment' ? normalizeEquipmentStorageRecord(normalized) : normalized;
         });
+        if (AR_WORKFLOW_COLLECTIONS.has(collection)) {
+          const stagedReadData = name => name === collection ? normalizedList : readData(name);
+          normalizedList = normalizedList.map(item => assertCanonicalArWorkflowWrite(
+            collection,
+            item,
+            { readData: stagedReadData },
+            { recordId: item?.id },
+          ));
+        }
         if (collection === 'clients') {
           const prepared = prepareClientCompatibilityBulkReplace({
             previousClients: readData('clients') || [],
@@ -2883,7 +2922,12 @@ function registerCrudRoutes(deps) {
         if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
           return sendSystemFixtureProtectedError(req, res, error);
         }
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return res.status(error?.status || 400).json({
+          ok: false,
+          error: error.message,
+          ...(error?.code ? { code: error.code } : {}),
+          ...(error?.details ? { details: error.details } : {}),
+        });
       }
       if (collection === 'service' && typeof persistServiceTicketBulkReplace === 'function') {
         try {

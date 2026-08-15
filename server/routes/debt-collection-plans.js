@@ -1,4 +1,9 @@
 const express = require('express');
+const {
+  assertCanonicalArWorkflowWrite,
+  decorateArWorkflowRecord,
+  resolveArWorkflowIdentity,
+} = require('../lib/ar-debtor-workflow');
 
 const COLLECTION = 'debt_collection_plans';
 
@@ -7,6 +12,7 @@ const PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
 const ACTION_TYPES = new Set(['call', 'message', 'email', 'documents', 'restrict_equipment', 'claim', 'meeting', 'wait_payment', 'other']);
 
 const SAFE_PLAN_FIELDS = [
+  'counterpartyId',
   'clientId',
   'clientName',
   'responsibleUserId',
@@ -46,27 +52,23 @@ function pickSafePlanFields(input = {}) {
   }, {});
 }
 
-function findClient(readData, clientId, clientName) {
+function findClient(readData, clientId) {
   const clients = Array.isArray(readData('clients')) ? readData('clients') : [];
   const id = normalizeText(clientId);
-  if (id) {
-    const byId = clients.find(client => normalizeText(client?.id) === id);
-    if (byId) return byId;
-  }
-  const name = normalizeText(clientName).toLowerCase();
-  if (!name) return null;
-  return clients.find(client => normalizeText(client?.company).toLowerCase() === name) || null;
+  if (!id) return null;
+  return clients.find(client => normalizeText(client?.id) === id) || null;
 }
 
 function normalizePlan(input, { previous = null, req, readData, generateId, idPrefix, nowIso }) {
   const safe = pickSafePlanFields(input);
   const now = nowIso();
-  const client = findClient(readData, safe.clientId ?? previous?.clientId, safe.clientName ?? previous?.clientName);
+  const client = findClient(readData, safe.clientId ?? previous?.clientId);
   const clientId = normalizeText(safe.clientId ?? previous?.clientId ?? client?.id);
+  const counterpartyId = normalizeText(safe.counterpartyId ?? previous?.counterpartyId ?? client?.counterpartyId);
   const clientName = normalizeText(client?.company ?? safe.clientName ?? previous?.clientName);
 
-  if (!clientId && !clientName) {
-    const error = new Error('Укажите клиента для плана взыскания.');
+  if (!counterpartyId && !clientId) {
+    const error = new Error('Укажите canonical Counterparty или стабильный Client для плана взыскания.');
     error.status = 400;
     throw error;
   }
@@ -91,11 +93,12 @@ function normalizePlan(input, { previous = null, req, readData, generateId, idPr
     throw error;
   }
 
-  return {
+  const normalized = {
     ...(previous || {}),
     id: previous?.id || normalizeText(input?.id) || generateId(idPrefix),
+    counterpartyId: counterpartyId || undefined,
     clientId: clientId || undefined,
-    clientName: clientName || 'Клиент не указан',
+    clientName: clientName || previous?.clientName || 'Контрагент не указан',
     responsibleUserId: normalizeText(safe.responsibleUserId ?? previous?.responsibleUserId) || undefined,
     responsibleName: normalizeText(safe.responsibleName ?? previous?.responsibleName) || undefined,
     status,
@@ -111,10 +114,18 @@ function normalizePlan(input, { previous = null, req, readData, generateId, idPr
     createdBy: previous?.createdBy || req.user?.userName || req.user?.email || undefined,
     updatedBy: req.user?.userName || req.user?.email || undefined,
   };
+  return assertCanonicalArWorkflowWrite(COLLECTION, normalized, { readData }, {
+    recordId: normalized.id,
+  });
 }
 
 function accessError(res, error) {
-  return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
+  return res.status(error?.status || 403).json({
+    ok: false,
+    error: error?.message || 'Forbidden',
+    ...(error?.code ? { code: error.code } : {}),
+    ...(error?.details ? { details: error.details } : {}),
+  });
 }
 
 function canViewFinance(req, canReadCollection) {
@@ -139,10 +150,17 @@ function auditPlanChange(auditLog, req, action, previous, next, metadata = null)
   });
 }
 
-function publicPlan(plan) {
+function publicPlan(plan, readData) {
+  const decorated = decorateArWorkflowRecord(COLLECTION, plan, { readData }, {
+    domain: COLLECTION,
+    recordId: plan?.id,
+  });
   return {
-    id: plan?.id,
-    ...pickSafePlanFields(plan),
+    id: decorated?.id,
+    ...pickSafePlanFields(decorated),
+    debtorCounterpartyId: decorated.debtorCounterpartyId,
+    debtorIdentityStatus: decorated.debtorIdentityStatus,
+    debtorIdentityIssues: decorated.debtorIdentityIssues,
   };
 }
 
@@ -172,7 +190,7 @@ function registerDebtCollectionPlanRoutes(deps) {
         COLLECTION,
         filterPlans(plans, req, accessControl),
         req.user,
-      ).map(publicPlan);
+      ).map(plan => publicPlan(plan, readData));
       return res.json({
         plans: scoped,
         permissions: {
@@ -190,9 +208,28 @@ function registerDebtCollectionPlanRoutes(deps) {
       accessControl.assertCanReadCollection(COLLECTION, req.user);
       const plans = Array.isArray(readData(COLLECTION)) ? readData(COLLECTION) : [];
       const scoped = filterPlans(plans, req, accessControl);
-      const plan = scoped.find(item => normalizeText(item?.clientId) === normalizeText(req.params.id));
-      if (!plan) return res.json({ plan: null });
-      return res.json({ plan: publicPlan(accessControl.sanitizeEntityForRead(COLLECTION, plan, req.user)) });
+      const requestedIdentity = resolveArWorkflowIdentity(COLLECTION, {
+        clientId: normalizeText(req.params.id),
+      }, { readData }, {
+        domain: 'client_receivable_selection',
+        recordId: normalizeText(req.params.id),
+      });
+      const plan = requestedIdentity.counterpartyId
+        ? scoped.find(item => (
+            resolveArWorkflowIdentity(COLLECTION, item, { readData }, {
+              domain: COLLECTION,
+              recordId: item?.id,
+            }).counterpartyId === requestedIdentity.counterpartyId
+          ))
+        : null;
+      if (!plan) {
+        return res.json({
+          plan: null,
+          debtorCounterpartyId: requestedIdentity.counterpartyId,
+          debtorIdentityStatus: requestedIdentity.status,
+        });
+      }
+      return res.json({ plan: publicPlan(accessControl.sanitizeEntityForRead(COLLECTION, plan, req.user), readData) });
     } catch (error) {
       return accessError(res, error);
     }
@@ -206,7 +243,7 @@ function registerDebtCollectionPlanRoutes(deps) {
       plans.push(next);
       writeData(COLLECTION, plans);
       auditPlanChange(auditLog, req, `${COLLECTION}.create`, null, next);
-      return res.status(201).json(publicPlan(next));
+      return res.status(201).json(publicPlan(next, readData));
     } catch (error) {
       return accessError(res, error);
     }
@@ -235,7 +272,7 @@ function registerDebtCollectionPlanRoutes(deps) {
       if (normalizeText(previous.comment) !== normalizeText(next.comment)) {
         auditPlanChange(auditLog, req, `${COLLECTION}.comment`, previous, next);
       }
-      return res.json(publicPlan(next));
+      return res.json(publicPlan(next, readData));
     } catch (error) {
       return accessError(res, error);
     }

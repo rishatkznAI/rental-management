@@ -1,5 +1,6 @@
 const express = require('express');
 const { buildClientDebtAgingRows, buildRentalDebtRows } = require('../lib/finance-core');
+const { resolveArWorkflowIdentity } = require('../lib/ar-debtor-workflow');
 const { normalizeRole } = require('../lib/role-groups');
 const { isRegularServiceTicket } = require('../lib/service-ticket-kind');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
@@ -75,6 +76,7 @@ function makeTask(input) {
     section: normalizeText(input.section) || 'system',
     entityType: normalizeText(input.entityType),
     entityId: normalizeText(input.entityId),
+    counterpartyId: normalizeText(input.counterpartyId) || undefined,
     clientId: normalizeText(input.clientId) || undefined,
     clientName: normalizeText(input.clientName) || undefined,
     assignedTo: normalizeText(input.assignedTo) || undefined,
@@ -156,11 +158,9 @@ function isDebtPlanOpen(plan) {
   return !CLOSED_DEBT_PLAN_STATUSES.has(normalizeStatus(plan?.status));
 }
 
-function clientPlanKey(clientId, clientName) {
-  const id = normalizeText(clientId);
-  if (id) return `id:${id}`;
-  const name = normalizeText(clientName).toLowerCase();
-  return name ? `name:${name}` : '';
+function canonicalDebtorKey(counterpartyId) {
+  const id = normalizeText(counterpartyId);
+  return id ? `counterparty:${id}` : '';
 }
 
 function buildTasksCenterSummary(tasks, todayKey) {
@@ -248,14 +248,23 @@ function buildTasksCenterPayload(input) {
   }
 
   if (payments.length > 0 && ganttRentals.length > 0) {
-    const rentalDebtRows = buildRentalDebtRows(ganttRentals, payments);
+    const rentalDebtRows = buildRentalDebtRows(ganttRentals, payments, {
+      relationData: { readData },
+    });
     const clientDebtRows = buildClientDebtAgingRows(clients, rentalDebtRows, todayKey);
-    const openPlanKeys = new Set(plans.filter(isDebtPlanOpen).map(plan => clientPlanKey(plan.clientId, plan.clientName)).filter(Boolean));
+    const openPlanKeys = new Set(plans
+      .filter(isDebtPlanOpen)
+      .map(plan => resolveArWorkflowIdentity('debt_collection_plans', plan, { readData }, {
+        domain: 'debt_collection_plans',
+        recordId: plan?.id,
+      }))
+      .map(identity => canonicalDebtorKey(identity.counterpartyId))
+      .filter(Boolean));
     for (const row of clientDebtRows) {
       const debt = safeNumber(row?.debt);
       const maxOverdueDays = safeNumber(row?.maxOverdueDays);
       if (debt <= 0 || maxOverdueDays < 30) continue;
-      const key = clientPlanKey(row?.clientId, row?.client);
+      const key = canonicalDebtorKey(row?.counterpartyId);
       if (key && openPlanKeys.has(key)) continue;
       tasks.push(makeTask({
         type: 'debt.no_plan_30_plus',
@@ -268,6 +277,7 @@ function buildTasksCenterPayload(input) {
         section: 'finance',
         entityType: 'clients',
         entityId: row?.clientId,
+        counterpartyId: row?.counterpartyId,
         clientId: row?.clientId,
         clientName: row?.client,
         responsible: row?.manager,
@@ -292,6 +302,7 @@ function buildTasksCenterPayload(input) {
         section: 'finance',
         entityType: 'debt_collection_plans',
         entityId: plan?.id,
+        counterpartyId: plan?.counterpartyId,
         clientId: plan?.clientId,
         clientName: plan?.clientName,
         responsible: plan?.responsibleName,
@@ -309,6 +320,7 @@ function buildTasksCenterPayload(input) {
         section: 'finance',
         entityType: 'debt_collection_plans',
         entityId: plan?.id,
+        counterpartyId: plan?.counterpartyId,
         clientId: plan?.clientId,
         clientName: plan?.clientName,
         responsible: plan?.responsibleName,
@@ -326,6 +338,7 @@ function buildTasksCenterPayload(input) {
         section: 'finance',
         entityType: 'debt_collection_plans',
         entityId: plan?.id,
+        counterpartyId: plan?.counterpartyId,
         clientId: plan?.clientId,
         clientName: plan?.clientName,
         responsible: plan?.responsibleName,
@@ -343,6 +356,7 @@ function buildTasksCenterPayload(input) {
         section: 'finance',
         entityType: 'debt_collection_plans',
         entityId: plan?.id,
+        counterpartyId: plan?.counterpartyId,
         clientId: plan?.clientId,
         clientName: plan?.clientName,
         actionUrl: plan?.clientId ? `/clients/${plan.clientId}` : '/finance',

@@ -625,10 +625,60 @@ function isBlockingArDebtorIdentityStatus(status) {
   return BLOCKING_STATUSES.has(status);
 }
 
+function isResolvedArDebtorIdentityStatus(status) {
+  return RESOLVED_STATUSES.has(status);
+}
+
+function arDebtorIdentityReadFields(result) {
+  const resolved = Boolean(
+    result?.counterpartyId && isResolvedArDebtorIdentityStatus(result?.status)
+  );
+  return {
+    counterpartyId: resolved ? result.counterpartyId : undefined,
+    debtorCounterpartyId: resolved ? result.counterpartyId : null,
+    debtorIdentityStatus: result?.status || AR_DEBTOR_IDENTITY_STATUSES.UNRESOLVED,
+    debtorIdentityIssues: asArray(result?.issues)
+      .filter(issue => issue?.blocking !== false)
+      .map(issue => issue?.code)
+      .filter(Boolean),
+  };
+}
+
+function arDebtorGroupingKey(result, options = {}) {
+  if (result?.counterpartyId && isResolvedArDebtorIdentityStatus(result?.status)) {
+    return `counterparty:${result.counterpartyId}`;
+  }
+  const domain = relationId(options.domain) || 'record';
+  const recordId = relationId(options.recordId) || 'missing_id';
+  const sourceIndex = Number.isInteger(options.sourceIndex) ? options.sourceIndex : 0;
+  const status = relationId(result?.status) || AR_DEBTOR_IDENTITY_STATUSES.UNRESOLVED;
+  return `unresolved:${domain}:${recordId}:${sourceIndex}:${status}`;
+}
+
+function assertCanonicalArDebtorIdentity(record, data = {}, options = {}) {
+  const result = resolveArDebtorIdentity(record, data, options);
+  if (result.counterpartyId && isResolvedArDebtorIdentityStatus(result.status)) return result;
+  const error = new Error('Canonical Counterparty debtor identity could not be proven.');
+  error.status = result.status === AR_DEBTOR_IDENTITY_STATUSES.UNRESOLVED ? 400 : 409;
+  error.code = 'AR_DEBTOR_IDENTITY_REQUIRED';
+  error.details = {
+    domain: options.domain || null,
+    recordId: options.recordId || relationId(record?.id) || null,
+    debtorIdentityStatus: result.status,
+    candidateCounterpartyIds: result.candidateCounterpartyIds,
+    issues: result.issues.filter(issue => issue.blocking !== false),
+  };
+  throw error;
+}
+
 module.exports = {
   AR_DEBTOR_AUDIT_COLLECTIONS,
   AR_DEBTOR_IDENTITY_STATUSES,
+  arDebtorGroupingKey,
+  arDebtorIdentityReadFields,
+  assertCanonicalArDebtorIdentity,
   auditArDebtorIdentities,
   isBlockingArDebtorIdentityStatus,
+  isResolvedArDebtorIdentityStatus,
   resolveArDebtorIdentity,
 };

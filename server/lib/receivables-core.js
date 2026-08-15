@@ -3,7 +3,15 @@ const {
   getEffectivePaidAmount,
   getRentalDebtOverdueDays,
 } = require('./finance-core');
-const { getStableClientId, normalizeText } = require('./client-links');
+const { getStableClientId } = require('./client-links');
+const {
+  arDebtorGroupingKey,
+  arDebtorIdentityReadFields,
+} = require('./ar-debtor-identity');
+const {
+  decorateArWorkflowRecord,
+  resolveArWorkflowIdentity,
+} = require('./ar-debtor-workflow');
 
 const ACTION_TYPES = new Set([
   'call',
@@ -127,13 +135,6 @@ function nowDate(today = new Date().toISOString().slice(0, 10)) {
   return dateOnly(today) || new Date().toISOString().slice(0, 10);
 }
 
-function clientKey(record) {
-  const clientId = getStableClientId(record);
-  if (clientId) return `id:${clientId}`;
-  const name = normalizeText(record?.client || record?.clientName || record?.company);
-  return name ? `name:${name}` : '';
-}
-
 function byId(items) {
   return new Map((items || []).filter(item => item?.id).map(item => [String(item.id), item]));
 }
@@ -216,6 +217,8 @@ function normalizeAction(input = {}, previous = null, context = {}) {
   const action = {
     ...(previous || {}),
     id: previous?.id || text(input.id) || context.generateId(context.idPrefix || 'DCA'),
+    counterpartyId: text(input.counterpartyId ?? previous?.counterpartyId) || undefined,
+    debtCollectionPlanId: text(input.debtCollectionPlanId ?? input.collectionPlanId ?? input.planId ?? previous?.debtCollectionPlanId) || undefined,
     clientId: text(input.clientId ?? previous?.clientId) || undefined,
     rentalId: text(input.rentalId ?? previous?.rentalId) || undefined,
     paymentId: text(input.paymentId ?? previous?.paymentId) || undefined,
@@ -289,8 +292,11 @@ function normalizePaymentPlan(input = {}, previous = null, context = {}) {
   return {
     ...(previous || {}),
     id: previous?.id || text(input.id) || context.generateId(context.idPrefix || 'RPP'),
+    counterpartyId: text(input.counterpartyId ?? previous?.counterpartyId) || undefined,
+    debtCollectionPlanId: text(input.debtCollectionPlanId ?? input.collectionPlanId ?? input.planId ?? previous?.debtCollectionPlanId) || undefined,
     clientId: text(input.clientId ?? previous?.clientId) || undefined,
     rentalId: text(input.rentalId ?? previous?.rentalId) || undefined,
+    paymentId: text(input.paymentId ?? previous?.paymentId) || undefined,
     paymentDate,
     amount,
     status,
@@ -355,13 +361,45 @@ function buildReceivables(input = {}, todayInput) {
   const documents = input.documents || [];
   const actions = input.actions || [];
   const paymentPlans = input.paymentPlans || [];
+  const identityData = input.relationData || input.identityData || input;
   const clientsById = byId(clients);
-  const debtRows = buildRentalDebtRows(rentals, payments, { paymentAllocations });
+  const clientsByCounterpartyId = new Map();
+  for (const client of clients) {
+    const counterpartyId = text(client?.counterpartyId);
+    if (!counterpartyId) continue;
+    const matches = clientsByCounterpartyId.get(counterpartyId) || [];
+    matches.push(client);
+    matches.sort((left, right) => text(left?.id).localeCompare(text(right?.id)));
+    clientsByCounterpartyId.set(counterpartyId, matches);
+  }
+  const debtRows = buildRentalDebtRows(rentals, payments, { paymentAllocations, relationData: identityData });
   const paymentsByRentalId = new Map();
-  const documentsByClientKey = new Map();
-  const actionsByClientKey = new Map();
-  const plansByClientKey = new Map();
+  const documentsByDebtorKey = new Map();
+  const actionsByDebtorKey = new Map();
+  const plansByDebtorKey = new Map();
+  const unresolvedDebtorRecords = [];
   const grouped = new Map();
+
+  function recordDebtorKey(collection, record, sourceIndex) {
+    const identity = resolveArWorkflowIdentity(collection, record, identityData, {
+      domain: collection,
+      recordId: record?.id,
+      sourceIndex,
+    });
+    const key = arDebtorGroupingKey(identity, {
+      domain: collection,
+      recordId: record?.id,
+      sourceIndex,
+    });
+    if (!identity.counterpartyId) {
+      unresolvedDebtorRecords.push({
+        domain: collection,
+        recordId: text(record?.id) || null,
+        ...arDebtorIdentityReadFields(identity),
+      });
+    }
+    return { identity, key };
+  }
 
   for (const payment of payments) {
     if (!payment?.rentalId) continue;
@@ -369,35 +407,74 @@ function buildReceivables(input = {}, todayInput) {
     paymentsByRentalId.get(payment.rentalId).push(payment);
   }
 
-  for (const doc of documents) {
-    const key = clientKey(doc);
-    if (!key) continue;
-    if (!documentsByClientKey.has(key)) documentsByClientKey.set(key, []);
-    documentsByClientKey.get(key).push(doc);
+  for (const [sourceIndex, doc] of documents.entries()) {
+    const { identity, key } = recordDebtorKey('documents', doc, sourceIndex);
+    if (!identity.counterpartyId) continue;
+    if (!documentsByDebtorKey.has(key)) documentsByDebtorKey.set(key, []);
+    documentsByDebtorKey.get(key).push({
+      ...doc,
+      ...arDebtorIdentityReadFields(identity),
+    });
   }
 
-  for (const action of actions) {
-    const key = clientKey(action);
-    if (!key) continue;
-    if (!actionsByClientKey.has(key)) actionsByClientKey.set(key, []);
-    actionsByClientKey.get(key).push(action);
+  for (const [sourceIndex, action] of actions.entries()) {
+    const { identity, key } = recordDebtorKey('debt_collection_actions', action, sourceIndex);
+    if (!identity.counterpartyId) continue;
+    if (!actionsByDebtorKey.has(key)) actionsByDebtorKey.set(key, []);
+    actionsByDebtorKey.get(key).push(
+      decorateArWorkflowRecord('debt_collection_actions', action, identityData)
+    );
   }
 
-  for (const plan of paymentPlans) {
-    const key = clientKey(plan);
-    if (!key) continue;
-    if (!plansByClientKey.has(key)) plansByClientKey.set(key, []);
-    plansByClientKey.get(key).push(plan);
+  for (const [sourceIndex, plan] of paymentPlans.entries()) {
+    const { identity, key } = recordDebtorKey('receivable_payment_plans', plan, sourceIndex);
+    if (!identity.counterpartyId) continue;
+    if (!plansByDebtorKey.has(key)) plansByDebtorKey.set(key, []);
+    plansByDebtorKey.get(key).push(
+      decorateArWorkflowRecord('receivable_payment_plans', plan, identityData)
+    );
   }
 
-  for (const row of debtRows) {
+  for (const [sourceIndex, row] of debtRows.entries()) {
     const rowClientId = getStableClientId(row);
-    const client = rowClientId ? clientsById.get(rowClientId) : null;
-    const key = clientKey(row) || `rental:${row.rentalId}`;
+    const linkedClient = rowClientId ? clientsById.get(rowClientId) : null;
+    const rowIdentity = {
+      status: row?.debtorIdentityStatus,
+      counterpartyId: text(row?.debtorCounterpartyId || row?.counterpartyId) || null,
+    };
+    const key = arDebtorGroupingKey(rowIdentity, {
+      domain: 'rental_debt_rows',
+      recordId: row?.rentalId,
+      sourceIndex,
+    });
+    if (!rowIdentity.counterpartyId) {
+      unresolvedDebtorRecords.push({
+        domain: 'rental_debt_rows',
+        recordId: text(row?.rentalId) || null,
+        counterpartyId: undefined,
+        debtorCounterpartyId: null,
+        debtorIdentityStatus: row?.debtorIdentityStatus || 'unresolved',
+        debtorIdentityIssues: Array.isArray(row?.debtorIdentityIssues) ? row.debtorIdentityIssues : [],
+      });
+    }
+    const counterpartyClients = rowIdentity.counterpartyId
+      ? (clientsByCounterpartyId.get(rowIdentity.counterpartyId) || [])
+      : [];
+    const client = (
+      linkedClient
+      && text(linkedClient?.counterpartyId) === rowIdentity.counterpartyId
+    ) ? linkedClient : counterpartyClients[0] || linkedClient;
+    const clientIds = counterpartyClients.map(item => text(item?.id)).filter(Boolean);
+    if (rowClientId && !clientIds.includes(rowClientId)) clientIds.push(rowClientId);
     const overdueDays = getRentalDebtOverdueDays(row, today);
     const existing = grouped.get(key) || {
+      counterpartyId: rowIdentity.counterpartyId || undefined,
+      debtorCounterpartyId: rowIdentity.counterpartyId,
+      debtorIdentityStatus: row?.debtorIdentityStatus || 'unresolved',
+      debtorIdentityIssues: Array.isArray(row?.debtorIdentityIssues) ? row.debtorIdentityIssues : [],
       clientId: client?.id || rowClientId || undefined,
-      client: client?.company || row.client || 'Клиент не привязан',
+      clientIds,
+      client: client?.company || row.client || 'Контрагент не определён',
       inn: client?.inn || client?.taxId || '',
       contacts: {
         contact: client?.contact || client?.contactName || '',
@@ -415,11 +492,16 @@ function buildReceivables(input = {}, todayInput) {
       actions: [],
       paymentPlans: [],
     };
+    for (const clientId of clientIds) {
+      if (!existing.clientIds.includes(clientId)) existing.clientIds.push(clientId);
+    }
+    existing.clientIds.sort();
     existing.totalDebt += row.outstanding;
     if (overdueDays > 0) existing.overdueDebt += row.outstanding;
     existing.oldestOverdueDays = Math.max(existing.oldestOverdueDays, overdueDays);
     existing.rentals.push({
       rentalId: row.rentalId,
+      counterpartyId: rowIdentity.counterpartyId || undefined,
       equipmentInv: row.equipmentInv || '',
       startDate: row.startDate || '',
       endDate: row.endDate || '',
@@ -433,6 +515,7 @@ function buildReceivables(input = {}, todayInput) {
     for (const payment of paymentsByRentalId.get(row.rentalId) || []) {
       existing.payments.push({
         id: payment.id,
+        counterpartyId: text(payment?.counterpartyId) || undefined,
         rentalId: payment.rentalId,
         invoiceNumber: payment.invoiceNumber || '',
         amount: toNumber(payment.amount),
@@ -447,12 +530,12 @@ function buildReceivables(input = {}, todayInput) {
   }
 
   for (const [key, row] of grouped.entries()) {
-    row.documents = documentsByClientKey.get(key) || [];
-    row.actions = (actionsByClientKey.get(key) || [])
+    row.documents = documentsByDebtorKey.get(key) || [];
+    row.actions = (actionsByDebtorKey.get(key) || [])
       .map((action, index) => ({ action, index }))
       .sort((left, right) => sortByDateDesc(left.action, right.action) || right.index - left.index)
       .map(item => item.action);
-    row.paymentPlans = (plansByClientKey.get(key) || []).slice().sort((a, b) => String(a.paymentDate || '').localeCompare(String(b.paymentDate || '')));
+    row.paymentPlans = (plansByDebtorKey.get(key) || []).slice().sort((a, b) => String(a.paymentDate || '').localeCompare(String(b.paymentDate || '')));
 
     const openActions = row.actions.filter(action => !['done', 'cancelled'].includes(text(action.status)));
     const latestAction = row.actions[0] || null;
@@ -498,6 +581,7 @@ function buildReceivables(input = {}, todayInput) {
   return {
     rows,
     debtRows,
+    unresolvedDebtorRecords,
     summary: buildReceivablesSummary(rows, today),
   };
 }

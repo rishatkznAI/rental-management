@@ -126,10 +126,6 @@ function rentalStatusVariant(status: string): BadgeVariant {
   return RENTAL_STATUS_LABELS[status]?.variant ?? 'default';
 }
 
-function normalizeClientName(value?: string | null) {
-  return String(value || '').trim().toLowerCase();
-}
-
 function getDuplicateClient(error: unknown): { id?: string; company?: string } | null {
   if (!(error instanceof ApiError)) return null;
   const body = error.body as { code?: string; conflictClient?: { id?: string; company?: string } } | undefined;
@@ -484,7 +480,11 @@ export default function ClientDetail() {
     const objectsById = new Map(clientObjects.map(object => [object.id, object]));
     const groups = new Map<string, { objectId?: string; objectName: string; debt: number; rentals: number }>();
     rentalDebtRows
-      .filter(row => row.clientId === client.id)
+      .filter(row => Boolean(
+        client.counterpartyId
+        && row.counterpartyId
+        && row.counterpartyId === client.counterpartyId
+      ))
       .forEach(row => {
         const objectId = String((row as { objectId?: string }).objectId || '');
         const object = objectId ? objectsById.get(objectId) : null;
@@ -504,7 +504,11 @@ export default function ClientDetail() {
   const unallocatedClientPayments = useMemo(() => {
     if (!client) return 0;
     return payments
-      .filter(payment => payment.clientId === client.id)
+      .filter(payment => (
+        client.counterpartyId && payment.counterpartyId
+          ? payment.counterpartyId === client.counterpartyId
+          : payment.clientId === client.id
+      ))
       .reduce((sum, payment) => {
         const paid = typeof payment.paidAmount === 'number' ? Math.max(0, payment.paidAmount) : (payment.status === 'paid' ? Math.max(0, payment.amount) : 0);
         const cap = payment.amount > 0 ? Math.min(paid, payment.amount) : paid;
@@ -534,10 +538,8 @@ export default function ClientDetail() {
   );
   const clientDebtPlan = useMemo(() => {
     if (!client) return null;
-    const byId = debtCollectionPlans.find(plan => plan.clientId && plan.clientId === client.id);
-    if (byId) return byId;
-    const company = normalizeClientName(client.company);
-    return debtCollectionPlans.find(plan => !plan.clientId && company && normalizeClientName(plan.clientName) === company) || null;
+    if (!client.counterpartyId) return null;
+    return debtCollectionPlans.find(plan => plan.counterpartyId === client.counterpartyId) || null;
   }, [client, debtCollectionPlans]);
 
   const displayedDebt = clientFinancial?.currentDebt ?? client?.debt ?? 0;

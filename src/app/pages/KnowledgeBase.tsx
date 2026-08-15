@@ -880,7 +880,7 @@ export default function KnowledgeBase() {
                       <Button
                         onClick={() => void handleMarkWatched()}
                         disabled={createProgress.isPending || updateProgress.isPending}
-                        className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                        className="rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                       >
                         <PlayCircle className="h-4 w-4" />
                         Видео просмотрено
@@ -1056,7 +1056,7 @@ export default function KnowledgeBase() {
           variant={viewMode === 'sections' ? 'default' : 'ghost'}
           className={cn(
             'rounded-xl px-5',
-            viewMode === 'sections' ? 'bg-lime-300 text-slate-950 hover:bg-lime-200' : 'text-muted-foreground',
+            viewMode === 'sections' ? 'bg-lime-300 text-primary-foreground hover:bg-lime-200' : 'text-muted-foreground',
           )}
           onClick={() => setViewMode('sections')}
         >
@@ -1067,7 +1067,7 @@ export default function KnowledgeBase() {
           variant={viewMode === 'mine' ? 'default' : 'ghost'}
           className={cn(
             'rounded-xl px-5',
-            viewMode === 'mine' ? 'bg-lime-300 text-slate-950 hover:bg-lime-200' : 'text-muted-foreground',
+            viewMode === 'mine' ? 'bg-lime-300 text-primary-foreground hover:bg-lime-200' : 'text-muted-foreground',
           )}
           onClick={() => setViewMode('mine')}
         >
@@ -1079,7 +1079,7 @@ export default function KnowledgeBase() {
             variant={viewMode === 'cards' ? 'default' : 'ghost'}
             className={cn(
               'rounded-xl px-5',
-              viewMode === 'cards' ? 'bg-lime-300 text-slate-950 hover:bg-lime-200' : 'text-muted-foreground',
+              viewMode === 'cards' ? 'bg-lime-300 text-primary-foreground hover:bg-lime-200' : 'text-muted-foreground',
             )}
             onClick={() => setViewMode('cards')}
           >
@@ -1162,7 +1162,7 @@ export default function KnowledgeBase() {
                   </Button>
                   <Button
                     type="button"
-                    className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                    className="rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                     onClick={openCreateModuleEditor}
                   >
                     <Plus className="h-4 w-4" />
@@ -1397,7 +1397,7 @@ export default function KnowledgeBase() {
                             type="button"
                             className={cn(
                               'flex-1 rounded-lg px-3 py-2 text-sm transition-colors',
-                              editorState.isActive ? 'bg-lime-300 font-medium text-slate-950' : 'text-muted-foreground',
+                              editorState.isActive ? 'bg-lime-300 font-medium text-primary-foreground' : 'text-muted-foreground',
                             )}
                             onClick={() => setEditorState(current => ({ ...current, isActive: true }))}
                           >
@@ -1643,7 +1643,7 @@ export default function KnowledgeBase() {
                     type="button"
                     onClick={() => void handleSaveModule()}
                     disabled={isSavingModule}
-                    className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+                    className="bg-lime-300 text-primary-foreground hover:bg-lime-200"
                   >
                     {editingModule ? 'Сохранить модуль' : 'Создать модуль'}
                   </Button>

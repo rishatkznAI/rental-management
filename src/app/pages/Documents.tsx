@@ -2146,7 +2146,7 @@ export default function Documents() {
           </div>
 
           <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.055] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:p-4">
-            <div className="grid gap-3 lg:grid-cols-[minmax(240px,1.4fr)_repeat(4,minmax(150px,1fr))_auto]">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1.4fr)_repeat(2,minmax(160px,1fr))]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 <Input
@@ -2237,7 +2237,13 @@ export default function Documents() {
                   </Button>
                 </>
               ) : null}
-              <Button variant="secondary" onClick={resetDocumentFilters} className="border border-slate-200 bg-slate-50 px-3 text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.1]">
+              <Button
+                variant="secondary"
+                onClick={resetDocumentFilters}
+                aria-label="Сбросить фильтры"
+                title="Сбросить фильтры"
+                className="border border-slate-200 bg-slate-50 px-3 text-slate-600 hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.1]"
+              >
                 <Settings2 className="h-4 w-4" />
               </Button>
             </div>

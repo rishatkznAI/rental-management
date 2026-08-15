@@ -1148,7 +1148,7 @@ export default function Gsm() {
                 <Button
                   type="button"
                   onClick={() => openGsmBinding()}
-                  className="shrink-0 rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                  className="shrink-0 rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                 >
                   <Plus className="h-4 w-4" />
                   Привязать трекер
@@ -1214,7 +1214,7 @@ export default function Gsm() {
                   className={cn(
                     'rounded-full',
                     signalFilter === option.value
-                      ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+                      ? 'bg-lime-300 text-primary-foreground hover:bg-lime-200'
                       : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                   )}
                 >
@@ -1445,7 +1445,7 @@ export default function Gsm() {
                   <Button
                     type="button"
                     onClick={() => openGsmBinding()}
-                    className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                    className="rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                   >
                     <Plus className="h-4 w-4" />
                     Привязать технику
@@ -1460,7 +1460,7 @@ export default function Gsm() {
                       <Button
                         type="button"
                         onClick={() => openGsmBinding()}
-                        className="mt-4 rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                        className="mt-4 rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                       >
                         <Plus className="h-4 w-4" />
                         Привязать первое устройство
@@ -1884,7 +1884,7 @@ export default function Gsm() {
                           </div>
 
                           <div className="mt-4 flex flex-wrap gap-2">
-                            <Button asChild className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200">
+                            <Button asChild className="rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200">
                               <Link to={`/equipment/${selectedSnapshot.equipment.id}`}>Открыть карточку техники</Link>
                             </Button>
                             {buildMapLink(selectedSnapshot.point) ? (
@@ -2463,7 +2463,7 @@ export default function Gsm() {
                                   className={cn(
                                     'rounded-full',
                                     commandEncoding === option.value
-                                      ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+                                      ? 'bg-lime-300 text-primary-foreground hover:bg-lime-200'
                                       : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                                   )}
                                 >
@@ -2502,7 +2502,7 @@ export default function Gsm() {
                             type="button"
                             onClick={handleSendGprsCommand}
                             disabled={!canSendGprsCommands || !commandPayload.trim() || sendCommandMutation.isPending}
-                            className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                            className="rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                           >
                             <SendHorizontal className="h-4 w-4" />
                             {sendCommandMutation.isPending ? 'Отправляем...' : 'Отправить пакет'}
@@ -2789,7 +2789,7 @@ export default function Gsm() {
                 type="button"
                 onClick={() => bindGsmDeviceMutation.mutate(gsmBindingForm)}
                 disabled={bindGsmDeviceMutation.isPending}
-                className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+                className="bg-lime-300 text-primary-foreground hover:bg-lime-200"
               >
                 {bindGsmDeviceMutation.isPending ? 'Сохраняем...' : 'Сохранить привязку'}
               </Button>

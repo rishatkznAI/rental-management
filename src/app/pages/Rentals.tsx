@@ -3869,7 +3869,7 @@ export default function Rentals() {
   return (
     <div
       data-rentals-responsive-root="true"
-      className="relative flex h-[calc(100vh-56px-64px)] w-full min-w-0 max-w-full flex-col overflow-hidden overflow-x-clip bg-background sm:h-[calc(100vh)] sm:w-[calc(100vw-16rem)]"
+      className="relative flex h-[calc(100vh-56px-64px)] w-full min-w-0 max-w-full flex-col overflow-hidden overflow-x-clip bg-background sm:h-[calc(100vh)]"
       style={{ maxWidth: '100%', overflow: 'hidden' }}
     >
       <div

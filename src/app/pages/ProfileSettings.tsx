@@ -91,7 +91,7 @@ export default function ProfileSettings() {
   return (
     <div className="space-y-6 p-4 sm:p-6 md:p-8">
       <div>
-        <h1 className="text-3xl font-black tracking-tight text-foreground">Личные настройки</h1>
+        <h1 className="app-page-title">Личные настройки</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground sm:text-base">
           Здесь сотрудник может обновить фото профиля, имя для интерфейса и сменить пароль своей учётной записи.
         </p>

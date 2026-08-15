@@ -2027,6 +2027,24 @@
     animation-timing-function: var(--motion-ease-exit);
   }
 
+  .app-animate-dialog-surface {
+    animation-duration: var(--motion-duration-base);
+    animation-timing-function: var(--motion-ease-entrance);
+    animation-fill-mode: both;
+    transform-origin: center;
+    will-change: opacity, transform;
+  }
+
+  .app-animate-dialog-surface[data-state="open"] {
+    animation-name: app-dialog-surface-in;
+  }
+
+  .app-animate-dialog-surface[data-state="closed"] {
+    animation-name: app-dialog-surface-out;
+    animation-duration: var(--motion-duration-fast);
+    animation-timing-function: var(--motion-ease-exit);
+  }
+
   .app-animate-drawer {
     animation-duration: var(--motion-duration-relaxed);
     animation-timing-function: var(--motion-ease-entrance);
@@ -2205,6 +2223,28 @@
   to {
     opacity: 0;
     transform: translate(-50%, calc(-50% + var(--motion-modal-exit-y))) scale(var(--motion-modal-exit-scale));
+  }
+}
+
+@keyframes app-dialog-surface-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-modal-y)) scale(var(--motion-modal-scale-from));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes app-dialog-surface-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--motion-modal-exit-y)) scale(var(--motion-modal-exit-scale));
   }
 }
 
@@ -2746,6 +2786,7 @@ body.rentcore-dashboard-reference-mode .company-health-premium {
 
   .app-animate-overlay,
   .app-animate-modal,
+  .app-animate-dialog-surface,
   .app-animate-drawer,
   .app-animate-section,
   .app-animate-collapse,

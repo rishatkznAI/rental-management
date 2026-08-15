@@ -23,7 +23,7 @@ test('payments page preserves desktop table while exposing mobile cards', () => 
 });
 
 test('payments page uses dark-safe semantic surfaces and adaptive KPI geometry', () => {
-  assert.match(source, /bg-background p-4 text-foreground/);
+  assert.match(source, /app-page-shell min-h-screen max-w-full overflow-x-clip bg-background text-foreground/);
   assert.match(source, /grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5/);
   assert.match(source, /border border-border bg-card/);
   assert.match(source, /bg-input-background/);
@@ -79,7 +79,8 @@ test('payment detail allocation panel has mobile card structure and desktop tabl
 test('payment forms and empty state are mobile-safe', () => {
   assert.match(source, /className="grid gap-3 sm:grid-cols-2"/);
   assert.match(source, /max-h-\[min\(92dvh,calc\(100dvh-2rem\)\)\]/);
-  assert.match(source, /className="app-animate-modal relative z-10/);
+  assert.match(source, /className="app-animate-dialog-surface relative z-10/);
+  assert.doesNotMatch(source, /className="app-animate-modal relative z-10/);
   assert.match(source, /overflow-y-auto px-6 py-5/);
   assert.match(source, /Сбросить фильтры/);
   assert.match(source, /pagination\.setFilters\(\{ counterpartyId: 'all', status: 'all' \}\)/);

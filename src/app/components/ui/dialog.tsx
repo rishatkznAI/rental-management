@@ -62,7 +62,7 @@ const DialogContent = React.forwardRef<
         {children}
         <DialogPrimitive.Close className="absolute right-4 top-4 inline-flex size-9 items-center justify-center rounded-xl border border-transparent text-muted-foreground transition hover:border-primary/30 hover:bg-accent hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0">
           <XIcon className="size-4" />
-          <span className="sr-only">Close</span>
+          <span className="sr-only">Закрыть</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
     </DialogPortal>

@@ -2042,10 +2042,10 @@ export default function Documents() {
   };
 
   return (
-    <div className="min-h-full space-y-4 bg-[#f7f9fc] p-4 text-slate-950 dark:bg-slate-950 dark:text-slate-100 sm:space-y-6 sm:p-6 md:p-8">
+    <div className="app-page-shell min-h-full bg-background text-foreground">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-950 dark:text-white sm:text-3xl">Документы</h1>
+          <h1 className="app-page-title">Документы</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
             Генерация и контроль договоров, актов, заказ-нарядов и путевых листов.
           </p>

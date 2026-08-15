@@ -1120,11 +1120,11 @@ export default function Deliveries() {
   }
 
   return (
-    <div className="min-w-0 max-w-full space-y-5 overflow-x-clip p-3 sm:p-6" data-delivery-responsive-ui="true">
+    <div className="app-page-shell min-w-0 max-w-full overflow-x-clip" data-delivery-responsive-ui="true">
       <div className="flex min-w-0 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-500">Операции</div>
-          <h1 className="mt-2 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">Доставка</h1>
+          <div className="app-page-eyebrow">Операции</div>
+          <h1 className="app-page-title mt-2">Доставка</h1>
           <p className="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
             Операционный экран отгрузок и возвратов: статусы, перевозчики, срочные действия и связь с MAX без карты и лишней аналитики.
           </p>

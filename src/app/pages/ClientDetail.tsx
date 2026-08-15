@@ -1181,8 +1181,8 @@ export default function ClientDetail() {
         </div>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-4">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-4">
           <Card className="overflow-hidden rounded-[24px] border-gray-200/80 bg-white shadow-[0_24px_80px_-56px_rgba(15,23,42,0.65)] dark:border-gray-800 dark:bg-gray-950">
             <CardContent className="p-0">
               <div className={cn(
@@ -1653,7 +1653,7 @@ export default function ClientDetail() {
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <Card>
             <CardHeader className={profileRailHeaderClassName}>
               <CardTitle className={profileCardTitleClassName}>

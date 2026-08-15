@@ -1799,7 +1799,7 @@ export default function Service() {
       <section className="border-b border-gray-200 pb-3 dark:border-white/10">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Сервис</h1>
+            <h1 className="app-page-title">Сервис</h1>
             <p className="sr-only">Заявки, рекламации и планирование механиков.</p>
           </div>
           <div className="flex flex-wrap gap-2">

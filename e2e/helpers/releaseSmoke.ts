@@ -305,7 +305,7 @@ async function expectExecutiveCockpitVisible(page: Page) {
 
   const kpiChecks = [
     { testId: 'dashboard-kpi-overdue-debt', label: 'Просроченная дебиторка' },
-    { testId: 'dashboard-kpi-fleet-utilization', label: 'Утилизация парка' },
+    { testId: 'dashboard-kpi-fleet-utilization', label: 'Загрузка парка' },
     { testId: 'dashboard-kpi-service-load', label: 'Загрузка сервиса' },
     { testId: 'dashboard-kpi-operational-load', label: 'Нагрузка' },
   ];

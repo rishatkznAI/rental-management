@@ -1090,7 +1090,7 @@ export default function Gsm() {
         <section className="overflow-hidden rounded-[32px] border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 shadow-[0_32px_80px_-44px_rgba(15,23,42,0.9)] backdrop-blur-xl">
           <div className="grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
             <div>
-                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-200 dark:border-cyan-400/20 bg-cyan-50 dark:bg-cyan-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700 dark:text-cyan-200">
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-primary-content">
                 <MapIcon className="h-3.5 w-3.5" />
                 GSM
               </div>
@@ -1233,7 +1233,7 @@ export default function Gsm() {
                   className={cn(
                     'rounded-full',
                     statusFilter === option.value
-                      ? 'bg-cyan-300 text-slate-950 hover:bg-cyan-200'
+                      ? 'bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]'
                       : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                   )}
                 >
@@ -1495,7 +1495,7 @@ export default function Gsm() {
                           <tr key={device.equipmentId || device.id || device.imei || device.deviceId} className="border-t border-slate-200 dark:border-white/10 align-top">
                             <td className="px-3 py-2">
                               {device.equipmentId ? (
-                                <Link to={`/equipment/${device.equipmentId}`} className="font-medium text-cyan-700 dark:text-cyan-300 hover:text-cyan-700 dark:text-cyan-200">
+                                <Link to={`/equipment/${device.equipmentId}`} className="font-medium text-primary-content hover:text-primary-content-hover">
                                   {device.inventoryNumber || device.equipmentName || device.equipmentId}
                                 </Link>
                               ) : (
@@ -2118,7 +2118,7 @@ export default function Gsm() {
                         className={cn(
                           'rounded-full',
                           routePeriod === option.value
-                            ? 'bg-cyan-300 text-slate-950 hover:bg-cyan-200'
+                            ? 'bg-primary text-primary-foreground hover:bg-[color:var(--primary-hover)]'
                             : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                         )}
                       >
@@ -2203,7 +2203,7 @@ export default function Gsm() {
                                   {equipmentSnapshot ? (
                                     <Link
                                       to={`/equipment/${entry.equipmentId}`}
-                                      className="inline-flex items-center gap-1 text-cyan-700 dark:text-cyan-300 transition-colors hover:text-cyan-700 dark:text-cyan-200"
+                                      className="inline-flex items-center gap-1 text-primary-content transition-colors hover:text-primary-content-hover"
                                     >
                                       {buildEquipmentLabel(equipmentSnapshot)}
                                       <ArrowUpRight className="h-3.5 w-3.5" />
@@ -2717,7 +2717,7 @@ export default function Gsm() {
                 <select
                   value={gsmBindingForm.equipmentId}
                   onChange={event => handleGsmBindingEquipmentChange(event.target.value)}
-                  className="h-11 w-full rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/80 px-3 text-sm text-slate-900 dark:text-white outline-none focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/20"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 dark:border-white/10 dark:bg-slate-950/80 dark:text-white"
                 >
                   <option value="">Выберите технику</option>
                   {bindingEquipmentOptions.map(item => (

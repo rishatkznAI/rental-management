@@ -519,14 +519,14 @@ export default function EquipmentNew() {
                     <div className="flex h-9 items-center rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 dark:border-gray-600 dark:bg-gray-800/50">
                       <p className="text-sm text-gray-400 dark:text-gray-500">
                         Нет собственников —{' '}
-                        <Link to="/admin" className="text-blue-600 hover:underline dark:text-blue-400">
+                        <Link to="/admin" className="text-primary-content hover:underline">
                           добавьте в справочнике
                         </Link>
                       </p>
                     </div>
                     <FieldHint>
                       Перейдите в{' '}
-                      <Link to="/admin" className="text-blue-600 hover:underline dark:text-blue-400">
+                      <Link to="/admin" className="text-primary-content hover:underline">
                         Панель администратора → Справочники → Собственники техники
                       </Link>
                     </FieldHint>
@@ -541,7 +541,7 @@ export default function EquipmentNew() {
                     hint={
                       <>
                         Список ведётся в{' '}
-                        <Link to="/admin" className="text-blue-600 hover:underline dark:text-blue-400">
+                        <Link to="/admin" className="text-primary-content hover:underline">
                           Панель администратора → Справочники
                         </Link>
                       </>
@@ -740,7 +740,7 @@ export default function EquipmentNew() {
               hint={
                 <>
                   Список складов настраивается в{' '}
-                  <Link to="/admin" className="text-blue-600 hover:underline dark:text-blue-400">
+                  <Link to="/admin" className="text-primary-content hover:underline">
                     Панель администратора → Справочники
                   </Link>
                 </>

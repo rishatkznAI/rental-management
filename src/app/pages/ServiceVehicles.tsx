@@ -138,7 +138,7 @@ export default function ServiceVehicles() {
         <select
           value={filterStatus}
           onChange={e => setFilterStatus(e.target.value as VehicleStatus | '')}
-          className="h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-ring"
         >
           <option value="">Все статусы</option>
           {(Object.keys(STATUS_LABELS) as VehicleStatus[]).map(s => (
@@ -149,7 +149,7 @@ export default function ServiceVehicles() {
         <select
           value={filterType}
           onChange={e => setFilterType(e.target.value as VehicleType | '')}
-          className="h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-ring"
         >
           <option value="">Все типы</option>
           {(Object.keys(TYPE_LABELS) as VehicleType[]).map(t => (
@@ -161,7 +161,7 @@ export default function ServiceVehicles() {
           <select
             value={filterResponsible}
             onChange={e => setFilterResponsible(e.target.value)}
-            className="h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-ring"
           >
             <option value="">Все ответственные</option>
             {responsibles.map(r => (
@@ -340,7 +340,7 @@ function VehicleCard({ vehicle: v, onClick }: { vehicle: ServiceVehicle; onClick
       onClick={onClick}
       className={cn(
         'w-full rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm transition-colors',
-        'hover:border-blue-200 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/20',
+        'hover:border-primary/35 hover:bg-primary/5 dark:border-gray-700 dark:bg-gray-800 dark:hover:border-primary/35 dark:hover:bg-primary/10',
         v.status === 'repair' && 'border-red-200 bg-red-50/50 dark:border-red-900/50 dark:bg-red-950/20',
       )}
     >

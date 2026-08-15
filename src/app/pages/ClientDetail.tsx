@@ -225,6 +225,7 @@ function downloadDataUrl(dataUrl: string, fileName: string) {
 const profileCardHeaderClassName = 'flex flex-row items-start justify-between gap-3 pb-0';
 const profileCardTitleClassName = 'flex min-h-6 items-center gap-2 text-base font-semibold leading-6 [&>svg]:h-4 [&>svg]:w-4 [&>svg]:shrink-0';
 const profileCardContentClassName = 'pt-0';
+const editingBadgeClassName = 'border-primary/30 bg-primary/10 text-primary-content';
 const profileFieldGridClassName = 'grid grid-cols-1 gap-x-8 gap-y-5 md:grid-cols-2 xl:grid-cols-3';
 const profileRailHeaderClassName = 'flex flex-row items-center justify-between gap-3 pb-0';
 const profileRailContentClassName = 'space-y-3 pt-0';
@@ -258,9 +259,9 @@ function Field({
   );
 }
 
-const editInputClassName = 'h-11 rounded-xl border-blue-200 bg-white text-gray-950 shadow-sm focus-visible:border-blue-500 focus-visible:ring-blue-500/20 dark:border-blue-900/70 dark:bg-gray-950 dark:text-white dark:focus-visible:border-blue-400';
-const editTextareaClassName = 'min-h-[92px] rounded-xl border-blue-200 bg-white text-gray-950 shadow-sm focus-visible:border-blue-500 focus-visible:ring-blue-500/20 dark:border-blue-900/70 dark:bg-gray-950 dark:text-white dark:focus-visible:border-blue-400';
-const editSelectClassName = 'h-11 w-full rounded-xl border border-blue-200 bg-white px-3 text-sm text-gray-950 shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 dark:border-blue-900/70 dark:bg-gray-950 dark:text-white dark:focus:border-blue-400';
+const editInputClassName = 'h-11 rounded-xl border-primary/30 bg-white text-gray-950 shadow-sm focus-visible:border-ring focus-visible:ring-ring/20 dark:bg-gray-950 dark:text-white';
+const editTextareaClassName = 'min-h-[92px] rounded-xl border-primary/30 bg-white text-gray-950 shadow-sm focus-visible:border-ring focus-visible:ring-ring/20 dark:bg-gray-950 dark:text-white';
+const editSelectClassName = 'h-11 w-full rounded-xl border border-primary/30 bg-white px-3 text-sm text-gray-950 shadow-sm outline-none transition focus:border-ring focus:ring-4 focus:ring-ring/20 dark:bg-gray-950 dark:text-white';
 
 function EditField({
   label,
@@ -278,11 +279,11 @@ function EditField({
       'block rounded-2xl border p-3',
       readonly
         ? 'border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/60'
-        : 'border-blue-100 bg-blue-50/40 dark:border-blue-900/60 dark:bg-blue-950/20',
+        : 'border-primary/25 bg-primary/5 dark:bg-primary/10',
     )}>
       <span className={cn(
         'mb-1.5 block text-xs font-semibold uppercase tracking-wide',
-        readonly ? 'text-gray-500 dark:text-gray-400' : 'text-blue-700 dark:text-blue-300',
+        readonly ? 'text-gray-500 dark:text-gray-400' : 'text-primary-content',
       )}>
         {label}
       </span>
@@ -346,7 +347,7 @@ function StatTile({
 function InfoPill({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value?: string | null }) {
   return (
     <div className="flex min-w-0 items-start gap-3 rounded-2xl border border-gray-100 bg-gray-50/80 p-3.5 dark:border-gray-800 dark:bg-gray-900/60">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-blue-600 shadow-sm dark:bg-gray-800 dark:text-blue-300">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-primary-content shadow-sm dark:bg-gray-800">
         <Icon className="h-4 w-4" />
       </span>
       <Field label={label} value={value} />
@@ -1137,7 +1138,7 @@ export default function ClientDetail() {
             </>
           ) : (
             <>
-              <Button onClick={saveEdit} disabled={updateClient.isPending} className="shadow-lg shadow-blue-500/20">
+              <Button onClick={saveEdit} disabled={updateClient.isPending}>
                 <Save className="h-4 w-4" />
                 {updateClient.isPending ? 'Сохранение...' : 'Сохранить'}
               </Button>
@@ -1151,15 +1152,15 @@ export default function ClientDetail() {
       </div>
 
       {editing && (
-        <div className="rounded-3xl border border-blue-200 bg-blue-50/80 p-4 shadow-[0_18px_50px_-36px_rgba(37,99,235,0.8)] dark:border-blue-900/70 dark:bg-blue-950/30">
+        <div className="rounded-3xl border border-primary/30 bg-primary/10 p-4 shadow-[0_18px_50px_-36px_var(--rc-accent-border)]">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
+              <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
                 <Edit className="h-5 w-5" />
               </span>
               <div>
-                <h2 className="text-base font-semibold text-blue-950 dark:text-blue-100">Режим редактирования клиента</h2>
-                <p className="mt-1 text-sm text-blue-800 dark:text-blue-200">
+                <h2 className="text-base font-semibold text-foreground">Режим редактирования клиента</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
                   Измените нужные поля и нажмите “Сохранить”. Серые поля ниже доступны только для просмотра.
                 </p>
               </div>
@@ -1253,10 +1254,10 @@ export default function ClientDetail() {
                           </select>
                         </EditField>
                         <div className="lg:col-span-2">
-                          <label className="flex items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-3 text-sm font-medium text-gray-800 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-gray-100">
+                          <label className="flex items-center gap-3 rounded-2xl border border-primary/25 bg-primary/5 p-3 text-sm font-medium text-gray-800 dark:bg-primary/10 dark:text-gray-100">
                             <input
                               type="checkbox"
-                              className="h-4 w-4 rounded border-blue-300 text-blue-600 focus:ring-blue-500 dark:border-blue-800"
+                              className="h-4 w-4 rounded border-primary/40 text-primary-content focus:ring-primary"
                               checked={Boolean(editData.verified)}
                               onChange={e => setEditData({ ...editData, verified: e.target.checked })}
                             />
@@ -1302,7 +1303,7 @@ export default function ClientDetail() {
 
                 <div className={cn(
                   'rounded-2xl p-4',
-                  editing ? 'border border-blue-100 bg-blue-50/50 dark:border-blue-900/60 dark:bg-blue-950/20' : 'bg-gray-50 dark:bg-gray-900/70',
+                  editing ? 'border border-primary/25 bg-primary/5 dark:bg-primary/10' : 'bg-gray-50 dark:bg-gray-900/70',
                   editing ? 'w-full' : 'min-w-[220px]',
                 )}>
                   <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Менеджер</p>
@@ -1354,7 +1355,7 @@ export default function ClientDetail() {
                     className={cn(
                       'flex h-12 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors',
                       index === 0
-                        ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-300'
+                        ? 'border-primary text-primary-content'
                         : 'border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white',
                     )}
                   >
@@ -1371,12 +1372,12 @@ export default function ClientDetail() {
           </Card>
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
-            <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
+            <Card className={editing ? 'border-primary/30 bg-primary/5 dark:bg-primary/10' : undefined}>
               <CardHeader className={profileCardHeaderClassName}>
                 <CardTitle className={profileCardTitleClassName}>
-                  <Building2 className="h-4 w-4 text-blue-600" />
+                  <Building2 className="h-4 w-4 text-primary-content" />
                   Основная информация
-                  {editing && <Badge variant="info">Редактируется</Badge>}
+                  {editing && <Badge className={editingBadgeClassName}>Редактируется</Badge>}
                 </CardTitle>
               </CardHeader>
               <CardContent className={editing ? cn(profileCardContentClassName, 'space-y-4') : cn(profileCardContentClassName, 'grid gap-4 2xl:grid-cols-2')}>
@@ -1451,12 +1452,12 @@ export default function ClientDetail() {
               </CardContent>
             </Card>
 
-            <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
+            <Card className={editing ? 'border-primary/30 bg-primary/5 dark:bg-primary/10' : undefined}>
               <CardHeader className={profileCardHeaderClassName}>
                 <CardTitle className={profileCardTitleClassName}>
                   <CreditCard className="h-4 w-4 text-emerald-600" />
                   Финансовая сводка
-                  {editing && <Badge variant="info">Редактируется</Badge>}
+                  {editing && <Badge className={editingBadgeClassName}>Редактируется</Badge>}
                 </CardTitle>
                 <span className="rounded-full border border-gray-200 px-3 py-1 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">На сегодня</span>
               </CardHeader>
@@ -1560,7 +1561,7 @@ export default function ClientDetail() {
                   Текущие аренды
                   <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">{client360.rentals.active.length}</span>
                 </CardTitle>
-                <Link to="/rentals" className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-300">Смотреть все</Link>
+                <Link to="/rentals" className="text-sm font-medium text-primary-content hover:underline">Смотреть все</Link>
               </CardHeader>
               <CardContent className={profileCardContentClassName}>
                 {client360.rentals.latest.length === 0 ? (
@@ -1655,7 +1656,7 @@ export default function ClientDetail() {
             <CardHeader className={profileRailHeaderClassName}>
               <CardTitle className={profileCardTitleClassName}>
                 Контакты
-                {editing && <Badge variant="info">Форма</Badge>}
+                {editing && <Badge className={editingBadgeClassName}>Форма</Badge>}
               </CardTitle>
               {!editing && canEdit && (
                 <Button
@@ -1704,13 +1705,13 @@ export default function ClientDetail() {
                     </div>
                     <div className="mt-3 grid gap-2">
                       {contact.phone && (
-                        <a href={`tel:${contact.phone}`} className="grid grid-cols-[18px_minmax(0,1fr)] items-center gap-2 text-sm leading-5 text-gray-700 hover:text-blue-600 dark:text-gray-300 dark:hover:text-blue-300">
+                        <a href={`tel:${contact.phone}`} className="grid grid-cols-[18px_minmax(0,1fr)] items-center gap-2 text-sm leading-5 text-gray-700 hover:text-primary-content dark:text-gray-300">
                           <Phone className="h-4 w-4 text-gray-400" />
                           <span className="truncate">{contact.phone}</span>
                         </a>
                       )}
                       {contact.email && (
-                        <a href={`mailto:${contact.email}`} className="grid grid-cols-[18px_minmax(0,1fr)] items-center gap-2 text-sm leading-5 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-300">
+                        <a href={`mailto:${contact.email}`} className="grid grid-cols-[18px_minmax(0,1fr)] items-center gap-2 text-sm leading-5 text-gray-500 hover:text-primary-content dark:text-gray-400">
                           <Mail className="h-4 w-4 text-gray-400" />
                           <span className="truncate">{contact.email}</span>
                         </a>
@@ -1727,7 +1728,7 @@ export default function ClientDetail() {
             <CardHeader className={profileRailHeaderClassName}>
               <CardTitle className={profileCardTitleClassName}>
                 Заметки
-                {editing && <Badge variant="info">Редактируется</Badge>}
+                {editing && <Badge className={editingBadgeClassName}>Редактируется</Badge>}
               </CardTitle>
               {!editing && canEdit && (
                 <Button
@@ -1793,14 +1794,14 @@ export default function ClientDetail() {
                       <Paperclip className="h-4 w-4" />
                     </span>
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-blue-600 dark:text-blue-300">{file.title}</p>
+                      <p className="truncate text-sm font-medium text-primary-content">{file.title}</p>
                       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{file.meta}</p>
                     </div>
                   </div>
                 ))
               )}
               {visibleFiles.length > 0 && (
-                <Link to="/documents" className="block rounded-xl border border-gray-200 px-3 py-2 text-center text-sm font-medium text-blue-600 hover:bg-gray-50 dark:border-gray-700 dark:text-blue-300 dark:hover:bg-gray-900">
+                <Link to="/documents" className="block rounded-xl border border-gray-200 px-3 py-2 text-center text-sm font-medium text-primary-content hover:border-primary/35 hover:bg-primary/5 dark:border-gray-700 dark:hover:bg-primary/10">
                   Все файлы
                 </Link>
               )}
@@ -2071,12 +2072,12 @@ export default function ClientDetail() {
         <div className="lg:col-span-2 space-y-6">
 
           {/* Main info */}
-          <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
+          <Card className={editing ? 'border-primary/30 bg-primary/5 dark:bg-primary/10' : undefined}>
             <CardHeader className={profileCardHeaderClassName}>
               <CardTitle className={profileCardTitleClassName}>
                 <Building2 className="h-4 w-4" />
                 Основная информация
-                {editing && <Badge variant="info">Форма</Badge>}
+                {editing && <Badge className={editingBadgeClassName}>Форма</Badge>}
               </CardTitle>
             </CardHeader>
             <CardContent className={cn(profileCardContentClassName, 'space-y-4')}>
@@ -2139,12 +2140,12 @@ export default function ClientDetail() {
           </Card>
 
           {/* Contact */}
-          <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
+          <Card className={editing ? 'border-primary/30 bg-primary/5 dark:bg-primary/10' : undefined}>
             <CardHeader className={profileCardHeaderClassName}>
               <CardTitle className={profileCardTitleClassName}>
                 <User className="h-4 w-4" />
                 Контакт
-                {editing && <Badge variant="info">Форма</Badge>}
+                {editing && <Badge className={editingBadgeClassName}>Форма</Badge>}
               </CardTitle>
             </CardHeader>
             <CardContent className={profileCardContentClassName}>
@@ -2188,12 +2189,12 @@ export default function ClientDetail() {
           </Card>
 
           {/* Commercial */}
-          <Card className={editing ? 'border-blue-200 bg-blue-50/20 dark:border-blue-900/70 dark:bg-blue-950/10' : undefined}>
+          <Card className={editing ? 'border-primary/30 bg-primary/5 dark:bg-primary/10' : undefined}>
             <CardHeader className={profileCardHeaderClassName}>
               <CardTitle className={profileCardTitleClassName}>
                 <CreditCard className="h-4 w-4" />
                 Коммерческие условия
-                {editing && <Badge variant="info">Форма</Badge>}
+                {editing && <Badge className={editingBadgeClassName}>Форма</Badge>}
               </CardTitle>
             </CardHeader>
             <CardContent className={profileCardContentClassName}>
@@ -2373,7 +2374,7 @@ export default function ClientDetail() {
                         key={rental.id}
                         className={cn(
                           'rounded-lg border border-gray-200 p-4 transition-colors dark:border-gray-700',
-                          navigationId ? 'cursor-pointer hover:border-blue-400' : 'opacity-75',
+                          navigationId ? 'cursor-pointer hover:border-primary/50 hover:bg-primary/5' : 'opacity-75',
                         )}
                         title={navigationId ? 'Открыть карточку аренды' : unavailableTitle}
                         onClick={() => {
@@ -2768,7 +2769,7 @@ export default function ClientDetail() {
                   </p>
                 </div>
                 {activeRentals.slice(0, 2).map(r => (
-                  <p key={r.id} className="text-xs text-blue-600 cursor-pointer hover:underline" onClick={() => navigate('/rentals')}>
+                  <p key={r.id} className="cursor-pointer text-xs text-primary-content hover:underline" onClick={() => navigate('/rentals')}>
                     {r.id} · {r.equipmentInv || '—'}
                   </p>
                 ))}

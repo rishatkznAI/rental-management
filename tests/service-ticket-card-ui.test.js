@@ -36,8 +36,10 @@ test('service ticket detail exposes management tabs and full overview sections',
   }
   assert.match(serviceDetailSource, /const serviceDetailTabTriggerClass = \[/);
   assert.match(serviceDetailSource, /service-detail-tab-trigger/);
-  assert.match(serviceDetailSource, /data-\[state=active\]:bg-blue-50/);
-  assert.match(serviceDetailSource, /dark:data-\[state=active\]:border-emerald-400\/60/);
+  assert.match(serviceDetailSource, /data-\[state=active\]:border-primary\/40/);
+  assert.match(serviceDetailSource, /data-\[state=active\]:bg-primary\/10/);
+  assert.match(serviceDetailSource, /data-\[state=active\]:text-primary-content/);
+  assert.doesNotMatch(serviceDetailSource, /data-\[state=active\]:(?:bg|border|text|ring)-(?:blue|cyan|sky|emerald)-/);
   assert.match(serviceDetailSource, /aria-label="Разделы сервисной заявки"/);
   assert.match(serviceDetailSource, /className=\{serviceDetailTabTriggerClass\}>Обзор/);
   assert.match(serviceDetailSource, /className=\{serviceDetailTabTriggerClass\}>Фото/);

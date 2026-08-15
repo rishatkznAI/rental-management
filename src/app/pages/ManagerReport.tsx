@@ -366,7 +366,7 @@ function DetailTable({
                       <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
                         {mRows.map(row => (
                           <tr key={row.rowId}
-                            className="bg-white dark:bg-gray-800 hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors">
+                            className="bg-white transition-colors hover:bg-primary/5 dark:bg-gray-800 dark:hover:bg-primary/10">
                             <td className="px-3 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">{row.monthLabel}</td>
                             <td className="px-3 py-2 max-w-[180px] truncate text-gray-900 dark:text-white font-medium" title={row.client}>{row.client}</td>
                             <td className="px-3 py-2 font-mono text-xs text-gray-700 dark:text-gray-300 whitespace-nowrap">{row.equipmentInv}</td>

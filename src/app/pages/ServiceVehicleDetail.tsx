@@ -108,7 +108,7 @@ function DateField({
         className={cn(
           'block w-full h-9 rounded-md border px-3 text-sm',
           'bg-white dark:bg-gray-800 text-gray-900 dark:text-white',
-          'focus:outline-none focus:ring-2 focus:ring-blue-500',
+          'focus:outline-none focus:ring-2 focus:ring-ring',
           error  && 'border-red-500',
           warn   && 'border-amber-400',
           !error && !warn && 'border-gray-200 dark:border-gray-700',
@@ -486,7 +486,7 @@ export default function ServiceVehicleDetail() {
                 className={cn(
                   'flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
                   tab === key
-                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                    ? 'border-primary text-primary-content'
                     : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200',
                 )}
               >
@@ -510,7 +510,7 @@ export default function ServiceVehicleDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Car className="h-4 w-4 text-blue-500" /> Основные данные
+                <Car className="h-4 w-4 text-primary-content" /> Основные данные
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -531,7 +531,7 @@ export default function ServiceVehicleDetail() {
                     <select
                       value={form.vehicleType}
                       onChange={e => setF('vehicleType', e.target.value as VehicleType)}
-                      className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ring"
                     >
                       {(Object.keys(TYPE_LABELS) as VehicleType[]).map(t => (
                         <option key={t} value={t}>{TYPE_LABELS[t]}</option>
@@ -551,7 +551,7 @@ export default function ServiceVehicleDetail() {
                     onChange={e => setF('year', e.target.value ? Number(e.target.value) : null)}
                     readOnly={!editing}
                     min={1980} max={new Date().getFullYear()}
-                    className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 read-only:opacity-70 read-only:cursor-default"
+                    className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ring read-only:opacity-70 read-only:cursor-default"
                   />
                 </div>
                 <Field label="Цвет" value={form.color ?? ''} onChange={v => setF('color', v || null)} readOnly={!editing} />
@@ -563,7 +563,7 @@ export default function ServiceVehicleDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <Gauge className="h-4 w-4 text-blue-500" /> Эксплуатация
+                <Gauge className="h-4 w-4 text-primary-content" /> Эксплуатация
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -576,7 +576,7 @@ export default function ServiceVehicleDetail() {
                     onChange={e => setF('currentMileage', Math.max(0, Number(e.target.value)))}
                     readOnly={!editing}
                     min={0}
-                    className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 read-only:opacity-70 read-only:cursor-default"
+                    className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ring read-only:opacity-70 read-only:cursor-default"
                   />
                 </div>
                 <DateField
@@ -597,7 +597,7 @@ export default function ServiceVehicleDetail() {
                     <select
                       value={form.status}
                       onChange={e => setF('status', e.target.value as VehicleStatus)}
-                      className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ring"
                     >
                       {(Object.keys(STATUS_LABELS) as VehicleStatus[]).map(s => (
                         <option key={s} value={s}>{STATUS_LABELS[s]}</option>
@@ -618,7 +618,7 @@ export default function ServiceVehicleDetail() {
                       value={form.conditionNote}
                       onChange={e => setF('conditionNote', e.target.value)}
                       rows={2}
-                      className="block w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                      className="block w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                     />
                   ) : (
                     <div className="min-h-[2.5rem] text-sm text-gray-700 dark:text-gray-300 px-3 py-2 rounded-md bg-gray-50 dark:bg-gray-700/30">
@@ -634,7 +634,7 @@ export default function ServiceVehicleDetail() {
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="h-4 w-4 text-blue-500" /> Документы и обслуживание
+                <FileText className="h-4 w-4 text-primary-content" /> Документы и обслуживание
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -669,7 +669,7 @@ export default function ServiceVehicleDetail() {
                       value={form.serviceNote ?? ''}
                       onChange={e => setF('serviceNote', e.target.value || null)}
                       rows={2}
-                      className="block w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                      className="block w-full rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ring resize-none"
                     />
                   ) : (
                     <div className="min-h-[2.5rem] text-sm text-gray-700 dark:text-gray-300 px-3 py-2 rounded-md bg-gray-50 dark:bg-gray-700/30">
@@ -845,7 +845,7 @@ function Field({
         className={cn(
           'block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700',
           'bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white',
-          'focus:outline-none focus:ring-2 focus:ring-blue-500',
+          'focus:outline-none focus:ring-2 focus:ring-ring',
           readOnly && 'opacity-70 cursor-default',
           mono && 'font-mono',
         )}
@@ -866,7 +866,7 @@ function TripField({
         type={type}
         value={value}
         onChange={e => onChange(e.target.value)}
-        className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="block w-full h-9 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ring"
       />
     </div>
   );
@@ -954,7 +954,7 @@ function TripRow({
           <button
             onClick={onWaybill}
             title="Путевой лист"
-            className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-blue-500 transition-colors"
+            className="p-1.5 rounded text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-content dark:hover:bg-gray-700"
           >
             <FileText className="h-4 w-4" />
           </button>
@@ -963,7 +963,7 @@ function TripRow({
             <button
               onClick={onEdit}
               title="Редактировать"
-              className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-blue-500 transition-colors"
+              className="p-1.5 rounded text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-content dark:hover:bg-gray-700"
             >
               <Edit2 className="h-4 w-4" />
             </button>
@@ -1114,7 +1114,7 @@ function TripActionButton({
       title={label}
       aria-label={label}
       className={cn(
-        'rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-blue-500 dark:hover:bg-gray-700',
+        'rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-content dark:hover:bg-gray-700',
         tone === 'success' && 'hover:text-emerald-500',
         tone === 'warning' && 'hover:text-amber-500',
         tone === 'danger' && 'hover:text-red-500',

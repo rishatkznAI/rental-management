@@ -804,7 +804,7 @@ export default function KnowledgeBase() {
                     className={cn(
                       'w-full rounded-3xl border px-4 py-4 text-left transition-colors',
                       isActive
-                        ? 'border-cyan-300/60 bg-cyan-500/10'
+                        ? 'border-primary/40 bg-primary/10'
                         : 'border-border/70 bg-background/70 hover:bg-accent/50',
                     )}
                   >
@@ -968,7 +968,7 @@ export default function KnowledgeBase() {
                               className={cn(
                                 'w-full rounded-xl border px-3 py-3 text-left text-sm transition-colors',
                                 selected
-                                  ? 'border-lime-300/70 bg-lime-300/10 text-foreground'
+                                  ? 'border-primary/50 bg-primary/10 text-foreground'
                                   : 'border-border/70 bg-background hover:bg-accent/50',
                               )}
                             >
@@ -995,7 +995,7 @@ export default function KnowledgeBase() {
                       <Button
                         onClick={() => void handleSubmitTest()}
                         disabled={createProgress.isPending || updateProgress.isPending}
-                        className="rounded-full bg-cyan-300 text-slate-950 hover:bg-cyan-200"
+                        className="rounded-full"
                       >
                         <CheckCircle2 className="h-4 w-4" />
                         Завершить тест
@@ -1016,7 +1016,7 @@ export default function KnowledgeBase() {
       <Card className="overflow-hidden border-border/70 bg-card/70">
         <CardContent className="grid gap-6 p-0 xl:grid-cols-[minmax(0,1fr)_420px]">
           <div className="space-y-4 px-6 py-6 sm:px-8">
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-primary-content">
               <GraduationCap className="h-3.5 w-3.5" />
               База знаний
             </div>
@@ -1584,7 +1584,7 @@ export default function KnowledgeBase() {
                                       variant={question.correctOptionId === option.id ? 'default' : 'outline'}
                                       className={cn(
                                         'rounded-full',
-                                        question.correctOptionId === option.id && 'bg-cyan-300 text-slate-950 hover:bg-cyan-200',
+                                        question.correctOptionId === option.id && 'border-success/35 bg-success/15 text-success-foreground hover:bg-success/20',
                                       )}
                                       onClick={() => updateEditorQuestion(question.id, current => ({
                                         ...current,

@@ -18,10 +18,12 @@ test('Login uses the localized dark industrial UI-A treatment with the rentCore 
   assert.match(loginSource, /import '\.\/Login\.css'/);
   assert.match(loginStyles, /background:\s*var\(--rc-graphite-950\)/);
   assert.match(loginStyles, /--primary:\s*var\(--rc-brand-dark\)/);
+  assert.match(loginStyles, /--primary-active:\s*var\(--rc-brand-dark-hover\)/);
   assert.match(loginSource, /rentcore-login-auth-panel[^"]*rounded-lg/);
   assert.match(loginStyles, /\.rentcore-login-submit[\s\S]*background:\s*var\(--primary\)/);
   assert.match(loginStyles, /\.rentcore-login-submit[\s\S]*box-shadow:\s*none/);
   assert.match(loginStyles, /\.rentcore-login-checkbox[\s\S]*accent-color:\s*var\(--primary\)/);
+  assert.match(loginStyles, /\.rentcore-login-submit:active:not\(:disabled\)[\s\S]*background:\s*var\(--primary-active\)/);
   assert.match(loginStyles, /\.rentcore-login-error[\s\S]*rgba\(127, 29, 29, 0\.18\)/);
   assert.doesNotMatch(loginStyles, /#38bdf8|#60c9fa|56,\s*189,\s*248/i);
 });

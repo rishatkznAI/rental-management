@@ -3,6 +3,7 @@
   --muted-foreground: #8f9cac;
   --primary: var(--rc-brand-dark);
   --primary-hover: var(--rc-brand-dark-hover);
+  --primary-active: var(--rc-brand-dark-hover);
   --primary-foreground: var(--rc-brand-foreground);
   --primary-content: var(--rc-brand-dark);
   --primary-content-hover: var(--rc-brand-dark-hover);
@@ -119,7 +120,7 @@
 }
 
 .rentcore-login-submit:active:not(:disabled) {
-  background: var(--primary);
+  background: var(--primary-active);
   transform: scale(0.99);
 }
 

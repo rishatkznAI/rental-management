@@ -2106,7 +2106,7 @@ export default function Documents() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {kpiCards.map(({ label, value, Icon }) => (
               <div key={label} className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.05)] dark:border-white/10 dark:bg-white/[0.055] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.10),transparent_36%)]" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,var(--rc-accent-soft),transparent_36%)]" />
                 <div className="relative flex items-start justify-between gap-3">
                   <div>
                     <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</p>
@@ -2136,7 +2136,7 @@ export default function Documents() {
                 }}
                 className={`h-9 shrink-0 rounded-full px-4 text-sm font-semibold transition ${
                   quickTypeFilter === key
-                    ? 'bg-primary text-primary-foreground shadow-[0_0_22px_rgba(34,211,238,0.18)]'
+                    ? 'bg-primary text-primary-foreground'
                     : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-950 dark:border-white/10 dark:bg-white/[0.05] dark:text-slate-300 dark:hover:bg-white/[0.1] dark:hover:text-white'
                 }`}
               >

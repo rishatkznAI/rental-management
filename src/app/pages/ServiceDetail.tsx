@@ -95,9 +95,9 @@ const REPAIR_ITEMS_ADMIN_NOTICE = 'Работы и запчасти может �
 const serviceDetailTabTriggerClass = [
   'service-detail-tab-trigger flex-none rounded-md border border-transparent px-4 py-2 font-medium text-gray-600',
   'hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-white/[0.06] dark:hover:text-white',
-  'focus-visible:ring-2 focus-visible:ring-blue-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-emerald-400/70 dark:focus-visible:ring-offset-gray-950',
-  'data-[state=active]:border-blue-300 data-[state=active]:bg-blue-50 data-[state=active]:font-semibold data-[state=active]:text-blue-900 data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-blue-100',
-  'dark:data-[state=active]:border-emerald-400/60 dark:data-[state=active]:bg-emerald-400/10 dark:data-[state=active]:text-emerald-100 dark:data-[state=active]:shadow-none dark:data-[state=active]:ring-1 dark:data-[state=active]:ring-emerald-400/20',
+  'focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-gray-950',
+  'data-[state=active]:border-primary/40 data-[state=active]:bg-primary/10 data-[state=active]:font-semibold data-[state=active]:text-primary-content data-[state=active]:shadow-sm data-[state=active]:ring-1 data-[state=active]:ring-primary/15',
+  'dark:data-[state=active]:shadow-none',
 ].join(' ');
 
 type BadgeVariant = 'success' | 'warning' | 'error' | 'info' | 'default';
@@ -1328,7 +1328,7 @@ export default function ServiceDetail({
         </div>
       )}
       {isAdmin && ticket.status === 'closed' && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/40 dark:text-blue-300">
+        <div className="rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-foreground">
           Закрытая заявка открыта в режиме редактирования администратора.
         </div>
       )}
@@ -1940,9 +1940,9 @@ export default function ServiceDetail({
 
               {/* Pending previews */}
               {canEditTicketFields && photoPending.length > 0 && (
-                <div className="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-3 space-y-2">
+                <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/10 p-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <span className="text-sm text-blue-700 dark:text-blue-300 font-medium">Выбрано {photoPending.length} фото</span>
+                    <span className="text-sm font-medium text-primary-content">Выбрано {photoPending.length} фото</span>
                     <button onClick={() => setPhotoPending([])} className="text-xs text-gray-500 hover:text-red-500">Очистить</button>
                   </div>
                   <div className="flex gap-2 overflow-x-auto pb-1">
@@ -2607,7 +2607,7 @@ export default function ServiceDetail({
               <div>
                 <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Причина возврата</label>
                 <textarea
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-ring focus:outline-none focus:ring-4 focus:ring-ring/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                   rows={3}
                   value={revisionReason}
                   onChange={event => setRevisionReason(event.target.value)}
@@ -2635,7 +2635,7 @@ export default function ServiceDetail({
               <div>
                 <label className="mb-1 block text-xs text-gray-500 uppercase tracking-wide">Что нужно уточнить</label>
                 <textarea
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm focus:border-ring focus:outline-none focus:ring-4 focus:ring-ring/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                   rows={2}
                   value={revisionDetails}
                   onChange={event => setRevisionDetails(event.target.value)}

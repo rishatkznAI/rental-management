@@ -803,7 +803,7 @@ export function RentalDrawer({
                 onClick={() => setActiveTab(tabId)}
                 className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
                   activeTab === tabId
-                    ? 'bg-blue-600 text-white shadow-sm'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-gray-400 dark:hover:bg-gray-900 dark:hover:text-white'
                 }`}
               >
@@ -996,9 +996,9 @@ export function RentalDrawer({
 
           {activeTab === 'overview' && canEditRentals && showEdit && (
             <section>
-                <div className="mt-3 rounded-2xl border border-blue-200 bg-blue-50/70 p-4 shadow-sm dark:border-blue-800 dark:bg-blue-900/20">
+                <div className="mt-3 rounded-2xl border border-primary/30 bg-primary/10 p-4 shadow-sm">
                   <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-blue-800 dark:text-blue-200">Редактировать аренду</div>
+                    <div className="text-sm font-semibold text-primary-content">Редактировать аренду</div>
                     <Button size="sm" variant="ghost" onClick={() => { setShowEdit(false); setEditError(''); }}>Свернуть</Button>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2">
@@ -1121,7 +1121,7 @@ export function RentalDrawer({
             <section className="space-y-4">
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900/70">
                 <div className="mb-3 flex items-center gap-2">
-                  <CalendarClock className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  <CalendarClock className="h-4 w-4 text-primary-content" />
                   <div>
                     <div className="text-sm font-semibold text-slate-950 dark:text-white">Сроки и возврат</div>
                     <div className="text-xs text-slate-500 dark:text-gray-400">Период аренды, плановый и фактический возврат техники.</div>
@@ -1184,7 +1184,7 @@ export function RentalDrawer({
                         className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-gray-700 dark:bg-gray-950/60 dark:text-gray-300 dark:hover:bg-gray-800"
                       >
                         <span className="flex items-center gap-2">
-                          <CalendarClock className="h-4 w-4 text-blue-500" />
+                          <CalendarClock className="h-4 w-4 text-primary-content" />
                           Продлить аренду
                         </span>
                         {showExtend ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
@@ -1232,17 +1232,17 @@ export function RentalDrawer({
 
               {activeTab === 'terms' && canExtendRentalTerm && showExtend && (
                 <section>
-                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                  <div className="rounded-lg border border-primary/30 bg-primary/10 p-3">
                     <div className="mb-2 text-xs text-amber-700 dark:text-amber-400">
                       Текущая дата возврата: <strong>{formatDate(rental.endDate)}</strong>
                     </div>
                     {clientDebt && canViewMoney && (
-                      <p className="text-xs leading-relaxed text-blue-700 dark:text-blue-300">
+                      <p className="text-xs leading-relaxed text-primary-content">
                         Текущий долг клиента: <strong>{formatCurrency(clientDebt.currentDebt || 0)}</strong>
                       </p>
                     )}
                     {extensionInfo && (
-                      <p className="mt-2 text-xs leading-relaxed text-blue-700 dark:text-blue-300">{extensionInfo}</p>
+                      <p className="mt-2 text-xs leading-relaxed text-primary-content">{extensionInfo}</p>
                     )}
                     {rentalDetailNotice && (
                       <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
@@ -1327,7 +1327,7 @@ export function RentalDrawer({
               {canRegisterPayment && (
                 <button
                   onClick={() => setShowAddPayment(v => !v)}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-primary-content hover:bg-primary/10"
                 >
                   <Plus className="h-3 w-3" />
                   Создать платёж
@@ -1388,7 +1388,7 @@ export function RentalDrawer({
               {canRegisterPayment && !showAddPayment && (
                 <button
                   onClick={() => setShowAddPayment(true)}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/30"
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-medium text-primary-content transition-colors hover:bg-primary/15"
                 >
                   <Plus className="h-4 w-4" />
                   Создать платёж на {formatCurrency(remaining)}
@@ -1445,8 +1445,8 @@ export function RentalDrawer({
 
             {/* Add payment form */}
             {canRegisterPayment && showAddPayment && (
-              <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
-                <div className="mb-2 text-xs font-medium text-blue-700 dark:text-blue-400">Создать платёж по аренде</div>
+              <div className="mt-2 rounded-lg border border-primary/30 bg-primary/10 p-3">
+                <div className="mb-2 text-xs font-medium text-primary-content">Создать платёж по аренде</div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Сумма (₽) *</label>
@@ -1862,7 +1862,7 @@ export function RentalDrawer({
               {canReassignManager && !managerEditMode && (
                 <button
                   onClick={() => setManagerEditMode(true)}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-primary-content hover:bg-primary/10"
                 >
                   <Edit className="h-3 w-3" />
                   Изменить
@@ -1926,7 +1926,7 @@ export function RentalDrawer({
                     setShowCommentForm(v => !v);
                     setCommentError('');
                   }}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20"
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-primary-content hover:bg-primary/10"
                 >
                   <Plus className="h-3 w-3" />
                   Добавить запись
@@ -1934,8 +1934,8 @@ export function RentalDrawer({
               )}
             </div>
             {canEditRentals && showCommentForm && (
-              <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
-                <div className="mb-1 text-xs font-medium text-blue-700 dark:text-blue-400">Новая запись в историю</div>
+              <div className="mb-3 rounded-lg border border-primary/30 bg-primary/10 p-3">
+                <div className="mb-1 text-xs font-medium text-primary-content">Новая запись в историю</div>
                 <textarea
                   value={commentText}
                   onChange={e => setCommentText(e.target.value)}

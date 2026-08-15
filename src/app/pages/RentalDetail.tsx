@@ -1315,7 +1315,7 @@ export default function RentalDetail() {
                     <Link
                       key={eq.id}
                       to={`/equipment/${eq.id}`}
-                      className="flex items-center justify-between rounded-lg border border-gray-200 p-3 transition-colors hover:border-[--color-primary] hover:bg-gray-50 dark:border-gray-700 dark:hover:border-blue-500 dark:hover:bg-gray-700/50"
+                      className="flex items-center justify-between rounded-lg border border-gray-200 p-3 transition-colors hover:border-primary hover:bg-primary/5 dark:border-gray-700 dark:hover:border-primary dark:hover:bg-primary/10"
                     >
                       <div>
                         <p className="font-medium text-gray-900 dark:text-white">

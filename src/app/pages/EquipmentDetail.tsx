@@ -2158,7 +2158,7 @@ export default function EquipmentDetail() {
                   </h1>
                   <button
                     type="button"
-                    className="rounded-full p-1 text-blue-300 transition hover:bg-blue-500/10 hover:text-blue-200"
+                    className="rounded-full p-1 text-primary-content transition hover:bg-primary/10 hover:text-primary-content-hover"
                     aria-label="Избранное"
                     title="Избранное"
                   >
@@ -2185,7 +2185,7 @@ export default function EquipmentDetail() {
                   </h1>
                   <button
                     type="button"
-                    className="rounded-full p-1 text-blue-300 transition hover:bg-blue-500/10 hover:text-blue-200"
+                    className="rounded-full p-1 text-primary-content transition hover:bg-primary/10 hover:text-primary-content-hover"
                     aria-label="Избранное"
                     title="Избранное"
                   >
@@ -2529,7 +2529,7 @@ export default function EquipmentDetail() {
                     {canEditCurrentEquipment && (
                       <button
                         type="button"
-                        className="h-16 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-2 text-xs font-medium text-blue-300"
+                        className="h-16 rounded-lg border border-dashed border-primary/30 bg-primary/5 px-2 text-xs font-medium text-primary-content hover:bg-primary/10"
                         disabled={isSavingEquipmentPhoto}
                         onClick={() => mainPhotoInputRef.current?.click()}
                       >
@@ -2696,7 +2696,7 @@ export default function EquipmentDetail() {
                     <p className="text-sm text-muted-foreground">Связанных документов пока нет.</p>
                   )}
                   {canViewDocuments && (
-                    <Link to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`} className="inline-flex text-sm font-medium text-blue-300 hover:underline">
+                    <Link to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`} className="inline-flex text-sm font-medium text-primary-content hover:underline">
                       Открыть документы →
                     </Link>
                   )}
@@ -2794,7 +2794,7 @@ export default function EquipmentDetail() {
                     {canEditCurrentEquipment && (
                       <button
                         type="button"
-                        className="h-16 rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 px-2 text-xs font-medium text-blue-300"
+                        className="h-16 rounded-lg border border-dashed border-primary/30 bg-primary/5 px-2 text-xs font-medium text-primary-content hover:bg-primary/10"
                         onClick={() => mainPhotoInputRef.current?.click()}
                       >
                         +{Math.max(shippingGalleryPhotoCount + saleGalleryPhotos.length - assetGalleryPreview.length, 0)} фото
@@ -2835,7 +2835,7 @@ export default function EquipmentDetail() {
                       <p className="mt-1 text-muted-foreground">{assetCurrentRental.client}</p>
                       <p className="text-muted-foreground">Возврат: {formatDate(equipment.returnDate || assetCurrentRental.endDate)}</p>
                       {canViewRentals && (
-                        <Link to={`/rentals/${assetCurrentRental.id}`} className="mt-2 inline-flex text-xs font-medium text-blue-300 hover:underline">
+                        <Link to={`/rentals/${assetCurrentRental.id}`} className="mt-2 inline-flex text-xs font-medium text-primary-content hover:underline">
                           Открыть аренду →
                         </Link>
                       )}
@@ -2855,7 +2855,7 @@ export default function EquipmentDetail() {
                     <SaleField label="Площадка" value={equipment.gsmAddress || '—'} />
                     <SaleField label="Адрес" value={equipment.gsmAddress || equipment.location || '—'} />
                     {canEditCurrentEquipment && (
-                      <button type="button" className="text-left text-sm font-medium text-blue-300 hover:underline" onClick={() => setShowEditModal(true)}>
+                      <button type="button" className="text-left text-sm font-medium text-primary-content hover:underline" onClick={() => setShowEditModal(true)}>
                         Переместить технику →
                       </button>
                     )}
@@ -2869,7 +2869,7 @@ export default function EquipmentDetail() {
                   <SaleStatusRow label="Приёмка" value={saleReceiptStatus ? EQUIPMENT_SALE_RECEIPT_LABELS[saleReceiptStatus] : 'Не указана'} tone={saleReceiptStatus === 'accepted' ? 'success' : 'warning'} />
                   <SaleField label="Дата приёмки" value={formatDate(equipment.acceptedAt || equipment.actualArrivalDate)} />
                   <SaleField label="Ответственный" value={equipment.acceptedByName || '—'} />
-                  {canCreateService && <button type="button" className="text-left text-sm font-medium text-blue-300 hover:underline" onClick={() => setShowCreateServiceModal(true)}>Открыть PDI →</button>}
+                  {canCreateService && <button type="button" className="text-left text-sm font-medium text-primary-content hover:underline" onClick={() => setShowCreateServiceModal(true)}>Открыть PDI →</button>}
                 </SalePanel>
 
                 <SalePanel title="Комплектация">
@@ -2884,7 +2884,7 @@ export default function EquipmentDetail() {
                     <SaleCheckRow key={doc.id} ready={doc.status !== 'draft'} label={`${doc.type}${doc.id ? ` · ${doc.id}` : ''}`} />
                   )) : <p className="text-sm text-muted-foreground">Связанных документов пока нет.</p>}
                   {canViewDocuments && (
-                    <Link to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`} className="inline-flex text-sm font-medium text-blue-300 hover:underline">
+                    <Link to={`/documents?equipmentId=${encodeURIComponent(equipment.id)}&equipmentInv=${encodeURIComponent(equipment.inventoryNumber || '')}`} className="inline-flex text-sm font-medium text-primary-content hover:underline">
                       Все документы →
                     </Link>
                   )}
@@ -2902,7 +2902,7 @@ export default function EquipmentDetail() {
                   <SaleField label="Координаты" value={assetGsmCoordinateStatus.valid ? `${assetGsmCoordinateStatus.lat!.toFixed(5)}, ${assetGsmCoordinateStatus.lng!.toFixed(5)}` : '—'} />
                   <SaleField label="Зажигание" value={(assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === true ? 'Вкл.' : (assetGsmDevice?.lastIgnition ?? equipment.gsmIgnitionOn) === false ? 'Выкл.' : '—'} />
                   <SaleStatusRow label="GPS" value={assetGsmGpsWarning ? (assetGsmCoordinateStatus.warning || 'Проверьте координаты / спутники') : assetGsmCoordinateStatus.label} tone={assetGsmGpsWarning ? 'warning' : 'success'} />
-                  <Link to={`/gsm?equipmentId=${encodeURIComponent(equipment.id)}`} className="inline-flex text-sm font-medium text-blue-300 hover:underline">История пакетов →</Link>
+                  <Link to={`/gsm?equipmentId=${encodeURIComponent(equipment.id)}`} className="inline-flex text-sm font-medium text-primary-content hover:underline">История пакетов →</Link>
                 </SalePanel>
 
                 <SalePanel title="Техническое обслуживание">
@@ -2910,7 +2910,7 @@ export default function EquipmentDetail() {
                   <SaleStatusRow label="Следующее ТО" value={formatMaintenanceDate(equipment.nextMaintenance)} tone={assetMaintenanceOverdue || assetMaintenanceSoon ? 'warning' : 'success'} />
                   <SaleField label="Периодичность" value="250 м/ч или 3 мес." />
                   <SaleField label="Наработка до ТО" value={daysUntilMaintenance > 0 ? `${daysUntilMaintenance} дн.` : 'Просрочено'} />
-                  {canViewService && <Link to="/service" className="inline-flex text-sm font-medium text-blue-300 hover:underline">История ТО →</Link>}
+                  {canViewService && <Link to="/service" className="inline-flex text-sm font-medium text-primary-content hover:underline">История ТО →</Link>}
                 </SalePanel>
               </div>
 
@@ -3301,7 +3301,7 @@ export default function EquipmentDetail() {
               <SaleField label="Координаты" value={assetGsmCoordinateStatus.valid ? `${assetGsmCoordinateStatus.lat!.toFixed(5)}, ${assetGsmCoordinateStatus.lng!.toFixed(5)}` : '—'} />
               <SaleStatusRow label="GPS" value={assetGsmGpsWarning ? (assetGsmCoordinateStatus.warning || 'Проверьте координаты / спутники') : assetGsmCoordinateStatus.label} tone={assetGsmGpsWarning ? 'warning' : 'success'} />
             </div>
-            <Link to={`/gsm?equipmentId=${encodeURIComponent(equipment.id)}`} className="inline-flex text-sm font-medium text-blue-300 hover:underline">История пакетов →</Link>
+            <Link to={`/gsm?equipmentId=${encodeURIComponent(equipment.id)}`} className="inline-flex text-sm font-medium text-primary-content hover:underline">История пакетов →</Link>
           </SalePanel>
           <SalePanel title="Быстрые действия">
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -4518,7 +4518,7 @@ export default function EquipmentDetail() {
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => toggleShippingEventCollapsed(event!.id)}
-                              className="rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-blue-400/40 hover:text-blue-300"
+                              className="rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/40 hover:text-primary-content"
                             >
                               <span className="inline-flex items-center gap-1.5">
                                 <ChevronDown className={cn('h-4 w-4 transition-transform', isCollapsed && '-rotate-90')} />
@@ -4527,7 +4527,7 @@ export default function EquipmentDetail() {
                             </button>
                             <button
                               onClick={() => printHandoffAct(event!, equipment)}
-                              className="rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-blue-400/40 hover:text-blue-300"
+                              className="rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary/40 hover:text-primary-content"
                             >
                               Акт PDF
                             </button>
@@ -4684,9 +4684,9 @@ export default function EquipmentDetail() {
 
               {/* Upload form */}
               {canManageAcceptance && showUploadPhotoForm && (
-                <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 space-y-3">
+                <div className="space-y-3 rounded-2xl border border-primary/25 bg-primary/10 p-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-blue-200">
+                    <span className="text-sm font-medium text-primary-content">
                       {uploadEventType === 'shipping' ? 'Отправка техники в аренду' : 'Приёмка техники с аренды'}
                     </span>
                     <button
@@ -4699,7 +4699,7 @@ export default function EquipmentDetail() {
                         setUploadDamageDescription('');
                         setUploadSignatureDataUrl('');
                       }}
-                      className="rounded p-1 text-blue-300 transition hover:bg-blue-500/10"
+                      className="rounded p-1 text-primary-content transition hover:bg-primary/10"
                     >
                       <X className="h-4 w-4" />
                     </button>
@@ -4718,7 +4718,7 @@ export default function EquipmentDetail() {
                         }}
                         className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                           uploadEventType === t
-                            ? 'bg-blue-600 text-white'
+                            ? 'bg-primary text-primary-foreground'
                             : 'border border-border bg-card text-muted-foreground hover:text-foreground'
                         }`}
                       >
@@ -4751,7 +4751,7 @@ export default function EquipmentDetail() {
                         placeholder="Введите моточасы"
                         value={uploadHoursValue}
                         onChange={e => setUploadHoursValue(e.target.value)}
-                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                        className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
                       />
                     </div>
                     <div>
@@ -4782,7 +4782,7 @@ export default function EquipmentDetail() {
                     placeholder="Комментарий (необязательно)"
                     value={uploadComment}
                     onChange={e => setUploadComment(e.target.value)}
-                    className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                    className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
                   />
 
                   {uploadEventType === 'receiving' && (
@@ -4791,7 +4791,7 @@ export default function EquipmentDetail() {
                       value={uploadDamageDescription}
                       onChange={e => setUploadDamageDescription(e.target.value)}
                       rows={3}
-                      className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/50"
                     />
                   )}
 
@@ -4815,7 +4815,7 @@ export default function EquipmentDetail() {
                           >
                             <input
                               type="checkbox"
-                              className="mt-0.5 h-4 w-4 rounded border-border bg-card text-blue-500 focus:ring-blue-500"
+                              className="mt-0.5 h-4 w-4 rounded border-border bg-card text-primary-content focus:ring-primary"
                               checked={checked}
                               onChange={(e) => setUploadChecklist(prev => ({ ...prev, [checklistKey]: e.target.checked }))}
                             />
@@ -4923,7 +4923,7 @@ export default function EquipmentDetail() {
                           <span className="text-xs text-muted-foreground">Загрузил: {event.uploadedBy}</span>
                           <button
                             onClick={() => toggleShippingEventCollapsed(event.id)}
-                            className="rounded-xl border border-border px-2 py-1 text-xs text-foreground transition hover:border-blue-400/40 hover:bg-blue-500/10 hover:text-blue-300"
+                            className="rounded-xl border border-border px-2 py-1 text-xs text-foreground transition hover:border-primary/40 hover:bg-primary/10 hover:text-primary-content"
                             title={isShippingEventCollapsed(event.id) ? 'Развернуть событие' : 'Свернуть событие'}
                           >
                             <span className="inline-flex items-center gap-1">
@@ -4933,7 +4933,7 @@ export default function EquipmentDetail() {
                           </button>
                           <button
                             onClick={() => printHandoffAct(event, equipment)}
-                            className="rounded-xl border border-border px-2 py-1 text-xs text-blue-300 transition hover:border-blue-400/40 hover:bg-blue-500/10"
+                            className="rounded-xl border border-border px-2 py-1 text-xs text-primary-content transition hover:border-primary/40 hover:bg-primary/10"
                             title="Скачать акт PDF"
                           >
                             Акт PDF
@@ -5553,7 +5553,7 @@ function LinkedRow({ title, meta, href, canOpen }: {
   }
 
   return (
-    <Link to={href} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-2 transition hover:border-blue-400/40 hover:bg-blue-500/10">
+    <Link to={href} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/50 px-3 py-2 transition hover:border-primary/40 hover:bg-primary/10">
       {content}
     </Link>
   );
@@ -5671,7 +5671,7 @@ function FormSection({
   return (
     <div>
       <div className="mb-3 flex items-center gap-2">
-        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary-content">
           {icon}
         </div>
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h3>
@@ -6362,7 +6362,7 @@ function EditEquipmentModal({
               {/* ── Блок 5: Примечание ── */}
               <div>
                 <div className="mb-3 flex items-center gap-2">
-                  <div className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10 text-primary-content">
                     <MessageSquare className="h-3.5 w-3.5" />
                   </div>
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Примечание</h3>

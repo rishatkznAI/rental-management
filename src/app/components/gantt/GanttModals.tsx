@@ -84,8 +84,8 @@ function equipmentOptionLabel(eq: Equipment): string {
 // ─── selectClass — единый стиль для нативных <select> ──────────────────────
 const selectClass =
   'w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-950 shadow-sm ' +
-  'focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/15 ' +
-  'dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-blue-400';
+  'focus:border-ring focus:outline-none focus:ring-4 focus:ring-ring/20 ' +
+  'dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-ring';
 
 const modalOverlayClass = 'app-animate-overlay absolute inset-0 bg-slate-950/45 backdrop-blur-[3px] dark:bg-black/60';
 const modalSurfaceClass = 'app-animate-modal fixed left-1/2 top-1/2 z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white p-0 shadow-[0_32px_90px_-46px_rgba(15,23,42,0.72)] dark:border-gray-800 dark:bg-gray-950 dark:shadow-2xl';
@@ -183,7 +183,7 @@ export function ReturnModal({ open, rental: rentalProp, ganttRentals: ganttRenta
       <div data-state={presence.dataState} onAnimationEnd={presence.onExitAnimationEnd} className={`${modalSurfaceClass} max-w-md`}>
         <div className={modalHeaderClass}>
           <div className="flex items-center gap-2">
-            <span className="flex size-10 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-300">
+            <span className="flex size-10 items-center justify-center rounded-2xl bg-primary/10 text-primary-content">
               <RotateCcw className="h-5 w-5" />
             </span>
             <div>

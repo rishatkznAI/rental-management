@@ -339,7 +339,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
         tabIndex={-1}
         data-state={presence.dataState}
         onAnimationEnd={presence.onExitAnimationEnd}
-        className="app-animate-modal relative z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-2xl transition duration-[var(--motion-duration-ui)] ease-out data-[state=closed]:scale-[0.98] data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100"
+        className="app-animate-dialog-surface relative z-10 flex max-h-[min(92dvh,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-lg border border-border bg-popover p-0 text-popover-foreground shadow-2xl"
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-6 py-5 pr-14">
           <div>
@@ -1185,7 +1185,7 @@ export default function Payments() {
   }
 
   return (
-    <div data-payments-responsive-root="true" className="min-h-screen max-w-full space-y-6 overflow-x-clip bg-background p-4 text-foreground sm:p-6 md:p-8">
+    <div data-payments-responsive-root="true" className="app-page-shell min-h-screen max-w-full overflow-x-clip bg-background text-foreground">
       <AddPaymentModal
         open={showAddModal}
         onClose={closeAddPaymentModal}
@@ -1200,7 +1200,7 @@ export default function Payments() {
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 ref={paymentsHeadingRef} tabIndex={-1} className="text-3xl font-semibold tracking-normal text-foreground sm:text-4xl">Платежи</h1>
+          <h1 ref={paymentsHeadingRef} tabIndex={-1} className="app-page-title">Платежи</h1>
           <p className="mt-2 text-sm text-muted-foreground">Управление платежами и задолженностями</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

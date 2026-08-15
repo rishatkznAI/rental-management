@@ -19,7 +19,7 @@ export function AppErrorState({
 }: AppErrorStateProps) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="max-w-md w-full rounded-2xl border border-border bg-card/80 px-6 py-8 text-center shadow-sm backdrop-blur">
+      <div className="max-w-md w-full rounded-lg border border-border bg-card/90 px-6 py-8 text-center backdrop-blur">
         <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-destructive/10">
           <AlertTriangle className="h-10 w-10 text-destructive" />
         </div>

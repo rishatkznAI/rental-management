@@ -165,11 +165,11 @@ export default function ClientNew() {
 
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="secondary" onClick={() => navigate('/clients')}>
+        <Button variant="secondary" onClick={() => navigate('/clients')} aria-label="Назад к клиентам" title="Назад к клиентам">
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Новый клиент</h1>
+          <h1 className="app-page-title">Новый клиент</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Добавление нового клиента в систему</p>
         </div>
       </div>

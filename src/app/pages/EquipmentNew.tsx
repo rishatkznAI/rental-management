@@ -307,7 +307,7 @@ export default function EquipmentNew() {
           <ArrowLeft className="h-4 w-4" />
           Вернуться к списку
         </Link>
-        <h1 className="mt-4 text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">
+        <h1 className="app-page-title mt-4">
           {isSaleMode ? 'Добавить технику в продажи' : 'Добавить технику'}
         </h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">

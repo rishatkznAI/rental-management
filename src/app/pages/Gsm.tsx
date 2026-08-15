@@ -1085,17 +1085,17 @@ export default function Gsm() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.08),transparent_28%),radial-gradient(circle_at_top_right,rgba(163,230,53,0.08),transparent_24%),linear-gradient(180deg,#050816_0%,#09101f_100%)] px-4 py-8 text-slate-900 dark:text-white sm:px-6 lg:px-8">
+    <div className="app-page-shell min-h-screen bg-background text-foreground">
       <div className="mx-auto max-w-7xl space-y-6">
-        <section className="overflow-hidden rounded-[32px] border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 shadow-[0_32px_80px_-44px_rgba(15,23,42,0.9)] backdrop-blur-xl">
-          <div className="grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_340px] lg:px-8">
+        <section className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="grid gap-6 px-5 py-5 lg:grid-cols-[minmax(0,1fr)_440px] lg:px-6">
             <div>
                 <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-primary-content">
                 <MapIcon className="h-3.5 w-3.5" />
                 GSM
               </div>
-              <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white sm:text-4xl">Геозоны, уведомления и маршруты техники</h1>
-              <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-700 dark:text-slate-300 sm:text-base">
+              <h1 className="app-page-title">Геозоны, уведомления и маршруты техники</h1>
+              <p className="app-page-subtitle mt-2">
                 Раздел показывает текущее положение техники, выезд со склада, прибытие на объект, пропажу сигнала, маршрут за день или неделю,
                 а также телеметрию по моточасам, зажиганию и АКБ. Привязка идёт к активной аренде и адресу объекта клиента.
               </p>
@@ -1105,25 +1105,25 @@ export default function Gsm() {
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-              <div className="rounded-3xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-slate-600 dark:text-slate-400">Точек на карте</div>
-                <div className="mt-2 text-3xl font-black">{metrics.mapped}</div>
+                <div className="mt-2 text-2xl font-bold">{metrics.mapped}</div>
                 <div className="mt-1 text-sm text-slate-700 dark:text-slate-300">из {metrics.total} единиц техники</div>
               </div>
-              <div className="rounded-3xl border border-emerald-200 dark:border-emerald-400/20 bg-emerald-50 dark:bg-emerald-400/10 p-4">
+              <div className="rounded-lg border border-emerald-200 dark:border-emerald-400/20 bg-emerald-50 dark:bg-emerald-400/10 p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-200">Реальный GPS</div>
-                <div className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{metrics.realGps}</div>
+                <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">{metrics.realGps}</div>
                 <div className="mt-1 text-sm text-emerald-700 dark:text-emerald-100/80">точка пришла от трекера</div>
               </div>
-              <div className="rounded-3xl border border-amber-200 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-400/10 p-4">
+              <div className="rounded-lg border border-amber-200 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-400/10 p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-amber-800 dark:text-amber-100">Расчётно по локации</div>
-                <div className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{metrics.locationDerived}</div>
+                <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">{metrics.locationDerived}</div>
                 <div className="mt-1 text-sm text-amber-700 dark:text-amber-100/80">точка достроена по адресу и истории</div>
               </div>
-              <div className="rounded-3xl border border-rose-200 dark:border-rose-400/20 bg-rose-50 dark:bg-rose-400/10 p-4">
+              <div className="rounded-lg border border-rose-200 dark:border-rose-400/20 bg-rose-50 dark:bg-rose-400/10 p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-rose-800 dark:text-rose-100">Уведомления</div>
-                <div className="mt-2 text-3xl font-black text-slate-900 dark:text-white">{metrics.alerts}</div>
+                <div className="mt-2 text-2xl font-bold text-slate-900 dark:text-white">{metrics.alerts}</div>
                 <div className="mt-1 text-sm text-rose-700 dark:text-rose-100/80">только для техники с реальным трекером</div>
               </div>
             </div>
@@ -1131,7 +1131,7 @@ export default function Gsm() {
         </section>
 
         {!hasLiveTelemetry ? (
-          <section className="rounded-3xl border border-dashed border-slate-300 bg-white p-5 dark:border-white/10 dark:bg-slate-950/70">
+          <section className="rounded-lg border border-dashed border-border bg-card p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex min-w-0 gap-3">
                 <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-400/20 dark:bg-cyan-400/10 dark:text-cyan-200">
@@ -1148,7 +1148,7 @@ export default function Gsm() {
                 <Button
                   type="button"
                   onClick={() => openGsmBinding()}
-                  className="shrink-0 rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                  className="shrink-0 rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                 >
                   <Plus className="h-4 w-4" />
                   Привязать трекер
@@ -1214,7 +1214,7 @@ export default function Gsm() {
                   className={cn(
                     'rounded-full',
                     signalFilter === option.value
-                      ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+                      ? 'bg-lime-300 text-primary-foreground hover:bg-lime-200'
                       : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                   )}
                 >
@@ -1445,7 +1445,7 @@ export default function Gsm() {
                   <Button
                     type="button"
                     onClick={() => openGsmBinding()}
-                    className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                    className="rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                   >
                     <Plus className="h-4 w-4" />
                     Привязать технику
@@ -1460,7 +1460,7 @@ export default function Gsm() {
                       <Button
                         type="button"
                         onClick={() => openGsmBinding()}
-                        className="mt-4 rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                        className="mt-4 rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                       >
                         <Plus className="h-4 w-4" />
                         Привязать первое устройство
@@ -1884,7 +1884,7 @@ export default function Gsm() {
                           </div>
 
                           <div className="mt-4 flex flex-wrap gap-2">
-                            <Button asChild className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200">
+                            <Button asChild className="rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200">
                               <Link to={`/equipment/${selectedSnapshot.equipment.id}`}>Открыть карточку техники</Link>
                             </Button>
                             {buildMapLink(selectedSnapshot.point) ? (
@@ -2463,7 +2463,7 @@ export default function Gsm() {
                                   className={cn(
                                     'rounded-full',
                                     commandEncoding === option.value
-                                      ? 'bg-lime-300 text-slate-950 hover:bg-lime-200'
+                                      ? 'bg-lime-300 text-primary-foreground hover:bg-lime-200'
                                       : 'border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/10',
                                   )}
                                 >
@@ -2502,7 +2502,7 @@ export default function Gsm() {
                             type="button"
                             onClick={handleSendGprsCommand}
                             disabled={!canSendGprsCommands || !commandPayload.trim() || sendCommandMutation.isPending}
-                            className="rounded-full bg-lime-300 text-slate-950 hover:bg-lime-200"
+                            className="rounded-full bg-lime-300 text-primary-foreground hover:bg-lime-200"
                           >
                             <SendHorizontal className="h-4 w-4" />
                             {sendCommandMutation.isPending ? 'Отправляем...' : 'Отправить пакет'}
@@ -2789,7 +2789,7 @@ export default function Gsm() {
                 type="button"
                 onClick={() => bindGsmDeviceMutation.mutate(gsmBindingForm)}
                 disabled={bindGsmDeviceMutation.isPending}
-                className="bg-lime-300 text-slate-950 hover:bg-lime-200"
+                className="bg-lime-300 text-primary-foreground hover:bg-lime-200"
               >
                 {bindGsmDeviceMutation.isPending ? 'Сохраняем...' : 'Сохранить привязку'}
               </Button>

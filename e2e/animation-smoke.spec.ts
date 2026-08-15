@@ -79,11 +79,11 @@ test.describe('animation smoke', () => {
 
     await navigateInApp(page, '/payments');
     await page.getByRole('button', { name: /Добавить платёж/ }).first().click();
-    const customPaymentDialog = page.locator('.app-animate-modal').first();
+    const customPaymentDialog = page.locator('.app-animate-dialog-surface').first();
     await expect(customPaymentDialog).toBeVisible();
-    await expectAnimation(customPaymentDialog, 'app-animate-modal', /app-modal-in/);
+    await expectAnimation(customPaymentDialog, 'app-animate-dialog-surface', /app-dialog-surface-in/);
     await page.keyboard.press('Escape');
-    await expectExitAnimation(customPaymentDialog, /app-modal-out/);
+    await expectExitAnimation(customPaymentDialog, /app-dialog-surface-out/);
     await expect(customPaymentDialog).toBeHidden();
 
     await navigateInApp(page, '/service');

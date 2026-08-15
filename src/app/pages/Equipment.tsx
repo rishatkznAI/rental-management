@@ -1872,7 +1872,7 @@ export default function Equipment() {
         <div className="border-b border-border/70 px-4 py-3 sm:px-5">
           <div className="flex flex-col gap-2 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <h1 className="app-shell-title text-2xl font-extrabold text-foreground">Техника</h1>
+              <h1 className="app-page-title">Техника</h1>
               <p className="mt-1 max-w-2xl text-xs font-medium text-foreground/58">Единый реестр парка, готовности и операционных блокеров</p>
             </div>
             {canCreateEquipment && (

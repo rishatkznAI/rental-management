@@ -3869,7 +3869,7 @@ export default function Rentals() {
   return (
     <div
       data-rentals-responsive-root="true"
-      className="relative flex h-[calc(100vh-56px-64px)] w-full min-w-0 max-w-full flex-col overflow-hidden overflow-x-clip bg-background sm:h-[calc(100vh)] sm:w-[calc(100vw-16rem)]"
+      className="relative flex h-[calc(100vh-56px-64px)] w-full min-w-0 max-w-full flex-col overflow-hidden overflow-x-clip bg-background sm:h-[calc(100vh)]"
       style={{ maxWidth: '100%', overflow: 'hidden' }}
     >
       <div
@@ -3888,7 +3888,7 @@ export default function Rentals() {
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                 Рабочий раздел
               </p>
-              <h1 className="app-shell-title mt-1 text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">
+              <h1 className="app-page-title mt-1">
                 Аренды
               </h1>
               <p className="mt-1 hidden max-w-3xl text-sm text-muted-foreground sm:block">

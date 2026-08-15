@@ -686,7 +686,7 @@ export default function CRM() {
     return (
       <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">CRM</h1>
+          <h1 className="app-page-title">CRM</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Загрузка CRM-воронок…</p>
         </div>
       </div>
@@ -701,7 +701,7 @@ export default function CRM() {
             <Briefcase className="h-3.5 w-3.5" />
             CRM
           </div>
-          <h1 className="mt-3 text-2xl font-bold text-gray-900 dark:text-white sm:text-3xl">CRM</h1>
+          <h1 className="app-page-title mt-3">CRM</h1>
           <p className="mt-1 max-w-3xl text-sm text-gray-500 dark:text-gray-400">
             Две отдельные воронки для аренды и продаж. Менеджеры работают по своим сделкам, офис и администратор видят всю картину.
           </p>

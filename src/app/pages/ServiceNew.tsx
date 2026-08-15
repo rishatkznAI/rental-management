@@ -22,11 +22,11 @@ export default function ServiceNew() {
     <div className="space-y-4 p-4 sm:space-y-6 sm:p-6 md:p-8">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="secondary" onClick={() => navigate('/service')}>
+        <Button variant="secondary" onClick={() => navigate('/service')} aria-label="Назад к сервису" title="Назад к сервису">
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
-          <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">Новая заявка в сервис</h1>
+          <h1 className="app-page-title">Новая заявка в сервис</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Создание заявки на обслуживание техники</p>
         </div>
       </div>

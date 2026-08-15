@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Outlet, useLocation, useNavigate, useNavigation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
@@ -183,6 +183,10 @@ export function Layout() {
       document.body.classList.remove('app-demo-presentation-motion');
     };
   }, [location.search]);
+
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [location.pathname]);
 
   // Auth + permission guard via useEffect — avoids render-time <Navigate> which
   // conflicts with React 18 concurrent rendering and breaks Outlet updates.
@@ -401,6 +405,7 @@ export function Layout() {
               className="flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card/80 px-3 py-2 text-left transition-colors duration-[var(--motion-duration-micro)] hover:border-primary/35 hover:bg-accent"
               aria-expanded={profileOpen}
               aria-haspopup="menu"
+              aria-label="Профиль пользователя"
             >
               <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-primary/25 bg-primary text-sm font-bold text-primary-foreground">
                 {user?.profilePhoto ? (

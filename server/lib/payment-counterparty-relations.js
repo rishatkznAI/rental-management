@@ -1,3 +1,5 @@
+const { isDeepStrictEqual } = require('node:util');
+
 const {
   COUNTERPARTY_RELATION_CODES,
   assertClientCounterpartyLink,
@@ -404,6 +406,24 @@ function findUniqueRentalEndpoint(rentals, ganttRentals, rentalId, allocation) {
   return aliases[0].rental;
 }
 
+function resolvePaymentAllocationEndpoints(allocation, state, { requireRental = true } = {}) {
+  const paymentRecord = findUniquePaymentEndpoint(
+    readCollection(state, 'payments'),
+    allocation?.paymentId,
+    allocation,
+  );
+  const rentalId = relationId(allocation?.rentalId);
+  const rentalRecord = requireRental || rentalId
+    ? findUniqueRentalEndpoint(
+        readCollection(state, 'rentals'),
+        readCollection(state, 'gantt_rentals'),
+        rentalId,
+        allocation,
+      )
+    : null;
+  return { paymentRecord, rentalRecord };
+}
+
 function throwAllocationCandidateError(error, allocation, phase) {
   error.details = {
     ...(error?.details || {}),
@@ -428,7 +448,11 @@ function assertPaymentAllocationCandidateCanonical(allocation, state, {
 } = {}) {
   let payment;
   try {
-    payment = findUniquePaymentEndpoint(state?.payments, allocation?.paymentId, allocation);
+    payment = findUniquePaymentEndpoint(
+      readCollection(state, 'payments'),
+      allocation?.paymentId,
+      allocation,
+    );
   } catch (error) {
     throwAllocationCandidateError(error, allocation, 'payment_endpoint');
   }
@@ -436,8 +460,8 @@ function assertPaymentAllocationCandidateCanonical(allocation, state, {
   let rental;
   try {
     rental = findUniqueRentalEndpoint(
-      state?.rentals,
-      state?.gantt_rentals,
+      readCollection(state, 'rentals'),
+      readCollection(state, 'gantt_rentals'),
       allocation?.rentalId,
       allocation,
     );
@@ -627,6 +651,7 @@ function assertPaymentAllocationPersistenceEntriesSafe(entries, { readData }) {
     'clients',
     'counterparties',
     'counterparty_role_assignments',
+    'payment_allocations',
   ].some(name => staged.has(name))) {
     return { checked: 0, affectedPaymentIds: [], affectedRentalIds: [] };
   }
@@ -634,7 +659,49 @@ function assertPaymentAllocationPersistenceEntriesSafe(entries, { readData }) {
   const next = name => staged.has(name) ? (staged.get(name) || []) : current(name);
   const currentData = { readData: current };
   const nextData = { readData: next };
-  return assertExistingPaymentAllocationsRemainCanonical({
+  const currentAllocations = current('payment_allocations');
+  const nextAllocations = next('payment_allocations');
+  let changedAllocationChecked = 0;
+  const changedPaymentIds = new Set();
+  const changedRentalIds = new Set();
+
+  if (staged.has('payment_allocations')) {
+    const currentById = new Map();
+    for (const allocation of currentAllocations) {
+      const id = relationId(allocation?.id) || null;
+      const matches = currentById.get(id) || [];
+      matches.push(allocation);
+      currentById.set(id, matches);
+    }
+    const nextState = allocationState(nextData, {
+      payments: next('payments'),
+      rentals: next('rentals'),
+      gantt_rentals: next('gantt_rentals'),
+      clients: next('clients'),
+      counterparties: next('counterparties'),
+      counterparty_role_assignments: next('counterparty_role_assignments'),
+    });
+    for (const allocation of nextAllocations) {
+      if (!isEffectivePaymentAllocation(allocation)) continue;
+      const id = relationId(allocation?.id) || null;
+      const currentMatches = currentById.get(id) || [];
+      const unchangedIndex = currentMatches.findIndex(currentAllocation => (
+        isDeepStrictEqual(currentAllocation, allocation)
+      ));
+      if (unchangedIndex !== -1) {
+        currentMatches.splice(unchangedIndex, 1);
+        continue;
+      }
+      assertPaymentAllocationCandidateCanonical(allocation, nextState);
+      changedAllocationChecked += 1;
+      const paymentId = relationId(allocation?.paymentId);
+      const rentalId = relationId(allocation?.rentalId);
+      if (paymentId) changedPaymentIds.add(paymentId);
+      if (rentalId) changedRentalIds.add(rentalId);
+    }
+  }
+
+  const endpointResult = assertExistingPaymentAllocationsRemainCanonical({
     currentPayments: current('payments'),
     nextPayments: next('payments'),
     currentRentals: current('rentals'),
@@ -647,10 +714,21 @@ function assertPaymentAllocationPersistenceEntriesSafe(entries, { readData }) {
     nextCounterparties: next('counterparties'),
     currentCounterpartyRoleAssignments: current('counterparty_role_assignments'),
     nextCounterpartyRoleAssignments: next('counterparty_role_assignments'),
-    allocations: current('payment_allocations'),
+    allocations: currentAllocations,
     currentData,
     nextData,
   });
+  return {
+    checked: changedAllocationChecked + endpointResult.checked,
+    affectedPaymentIds: [...new Set([
+      ...changedPaymentIds,
+      ...endpointResult.affectedPaymentIds,
+    ])],
+    affectedRentalIds: [...new Set([
+      ...changedRentalIds,
+      ...endpointResult.affectedRentalIds,
+    ])],
+  };
 }
 
 function canonicalizePaymentCounterpartyRelation(payment, data, options = {}) {
@@ -931,6 +1009,7 @@ module.exports = {
   counterpartySummary,
   decoratePaymentCounterparty,
   repairPaymentCounterpartyRelations,
+  resolvePaymentAllocationEndpoints,
   resolvePaymentCounterpartyRelation,
   resolveRentalForPayment,
 };

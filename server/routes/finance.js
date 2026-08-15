@@ -12,9 +12,9 @@ const { getRentalBillingAmount } = require('../lib/rental-billing');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 const { normalizeDateOnly } = require('../lib/date-only');
 const {
-  assertPaymentRentalCounterpartyMatch,
+  assertPaymentAllocationCandidateCanonical,
+  assertPaymentAllocationPersistenceEntriesSafe,
   decoratePaymentCounterparty,
-  resolvePaymentCounterpartyRelation,
 } = require('../lib/payment-counterparty-relations');
 
 function registerFinanceRoutes(router, deps) {
@@ -118,14 +118,6 @@ function registerFinanceRoutes(router, deps) {
 
   function collectionList(name) {
     return Array.isArray(readData(name)) ? readData(name) : [];
-  }
-
-  function findPaymentAllocationRental(rentalId) {
-    const id = text(rentalId);
-    if (!id) return null;
-    return collectionList('gantt_rentals').find(item => text(item?.id) === id)
-      || collectionList('rentals').find(item => text(item?.id) === id)
-      || null;
   }
 
   function syncPaymentStatusesAfterAllocationWrite() {
@@ -924,7 +916,6 @@ function registerFinanceRoutes(router, deps) {
         relationData,
       }, req.params.id);
       const requested = Array.isArray(req.body?.allocations) ? req.body.allocations : preview.suggestedAllocations;
-      const paymentRelation = resolvePaymentCounterpartyRelation(payment, relationData);
       const validated = requested.map(item => {
         const requestedAmount = money(item?.amount);
         if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
@@ -933,15 +924,12 @@ function registerFinanceRoutes(router, deps) {
           throw error;
         }
         const rentalId = text(item?.rentalId);
-        if (rentalId) {
-          const rental = findPaymentAllocationRental(rentalId);
-          if (!rental) {
-            const error = new Error('Аренда для распределения не найдена');
-            error.status = 400;
-            throw error;
-          }
-          assertPaymentRentalCounterpartyMatch(payment, rental, relationData, { paymentRelation });
-        }
+        assertPaymentAllocationCandidateCanonical({
+          ...item,
+          paymentId: req.params.id,
+          rentalId,
+          status: 'active',
+        }, relationData);
         const documentId = text(item?.documentId);
         if (documentId && !documentIds.has(documentId)) {
           const error = new Error('Invalid allocation documentId. Document does not exist.');
@@ -967,7 +955,7 @@ function registerFinanceRoutes(router, deps) {
           clientId: text(item.clientId) || undefined,
           objectId: text(item.objectId) || undefined,
           contractId: text(item.contractId) || undefined,
-          rentalId: rentalId || undefined,
+          rentalId,
           documentId: documentId || undefined,
           amount,
           status: 'active',
@@ -979,12 +967,20 @@ function registerFinanceRoutes(router, deps) {
         remaining -= amount;
       }
       for (const item of created) accessControl.assertCanCreateCollection('payment_allocations', req.user, item);
+      assertPaymentAllocationPersistenceEntriesSafe([
+        { name: 'payment_allocations', value: [...allocations, ...created] },
+      ], { readData });
       writeData('payment_allocations', [...allocations, ...created]);
       syncPaymentStatusesAfterAllocationWrite();
       created.forEach(item => audit(req, 'payment_allocations.create', 'payment_allocations', null, item));
       return res.status(201).json({ paymentId: req.params.id, allocations: created });
     } catch (error) {
-      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось распределить платёж' });
+      return res.status(error?.status || 400).json({
+        ok: false,
+        ...(error?.code ? { code: error.code } : {}),
+        error: error?.message || 'Не удалось распределить платёж',
+        ...(error?.details !== undefined ? { details: error.details } : {}),
+      });
     }
   });
 

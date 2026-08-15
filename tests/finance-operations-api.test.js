@@ -469,6 +469,20 @@ test('allocation preview and crafted apply fail closed for foreign or unresolved
     assert.equal(afterForeign.paidAmount, beforeForeign.paidAmount);
     assert.equal(afterForeign.outstanding, beforeForeign.outstanding);
 
+    const missingRental = await request(baseUrl, 'POST', '/api/finance/payments/p-direct/apply-allocation-preview', 'office', {
+      allocations: [{ amount: 1000 }],
+    });
+    assert.equal(missingRental.response.status, 409);
+    assert.equal(missingRental.json.code, 'COUNTERPARTY_RELATION_ID_REQUIRED');
+    assert.equal(state.payment_allocations.length, 0);
+
+    const unknownRental = await request(baseUrl, 'POST', '/api/finance/payments/p-direct/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'r-missing', amount: 1000 }],
+    });
+    assert.equal(unknownRental.response.status, 409);
+    assert.equal(unknownRental.json.code, 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND');
+    assert.equal(state.payment_allocations.length, 0);
+
     const unresolvedPaymentPreview = await request(baseUrl, 'POST', '/api/finance/payments/p-unresolved/allocation-preview', 'office', {});
     assert.equal(unresolvedPaymentPreview.response.status, 400);
     const unresolvedPaymentApply = await request(baseUrl, 'POST', '/api/finance/payments/p-unresolved/apply-allocation-preview', 'office', {

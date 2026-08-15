@@ -2704,16 +2704,16 @@ test('payment allocations API validates existence cap and syncs rental payment s
       rentalId: 'GR-own',
       amount: 100,
     });
-    assert.equal(missingPayment.status, 400);
-    assert.match(missingPayment.body.error, /Платёж для распределения не найден/);
+    assert.equal(missingPayment.status, 409);
+    assert.equal(missingPayment.body.code, 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND');
 
     const missingRental = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
       paymentId: 'P-paid',
       rentalId: 'GR-missing',
       amount: 100,
     });
-    assert.equal(missingRental.status, 400);
-    assert.match(missingRental.body.error, /Аренда для распределения не найдена/);
+    assert.equal(missingRental.status, 409);
+    assert.equal(missingRental.body.code, 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND');
 
     const overCap = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
       paymentId: 'P-paid',
@@ -2734,8 +2734,8 @@ test('payment allocations API validates existence cap and syncs rental payment s
     const missingPaymentBulk = await request(baseUrl, 'PUT', '/api/payment_allocations', 'admin-token', [
       { id: 'PA-bulk-missing-payment', paymentId: 'P-missing', rentalId: 'GR-own', amount: 100 },
     ]);
-    assert.equal(missingPaymentBulk.status, 400);
-    assert.match(missingPaymentBulk.body.error, /Платёж для распределения не найден/);
+    assert.equal(missingPaymentBulk.status, 409);
+    assert.equal(missingPaymentBulk.body.code, 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND');
     assert.equal(state.payment_allocations.length, 0);
 
     const missingDocumentBulk = await request(baseUrl, 'PUT', '/api/payment_allocations', 'admin-token', [
@@ -2777,6 +2777,112 @@ test('payment allocations API validates existence cap and syncs rental payment s
     });
     assert.equal(foreignPatch.status, 409);
     assert.equal(state.payment_allocations[0].rentalId, 'GR-own');
+  });
+});
+
+test('effective payment allocation writers require unique canonical Payment and Rental endpoints atomically', async () => {
+  const { app, state } = createSecurityApp();
+  state.counterparties = [
+    { id: 'CP-A', legalName: 'A', shortName: 'A', roles: ['customer'], status: 'active', archivedAt: null },
+    { id: 'CP-B', legalName: 'B', shortName: 'B', roles: ['customer'], status: 'active', archivedAt: null },
+  ];
+  state.clients = [];
+  state.payments = [
+    { id: 'P-safe', counterpartyId: 'CP-A', amount: 2000, paidAmount: 2000, status: 'paid' },
+    { id: 'P-dup', counterpartyId: 'CP-A', amount: 2000, paidAmount: 2000, status: 'paid' },
+    { id: 'P-dup', counterpartyId: 'CP-A', amount: 2000, paidAmount: 2000, status: 'paid' },
+    { id: 'P-unresolved', client: 'display only', amount: 2000, paidAmount: 2000, status: 'paid' },
+  ];
+  state.rentals = [
+    { id: 'R-alias-a', rentalId: 'R-ambiguous', counterpartyId: 'CP-A' },
+    { id: 'R-alias-b', sourceRentalId: 'R-ambiguous', counterpartyId: 'CP-A' },
+  ];
+  state.gantt_rentals = [
+    { id: 'GR-safe', counterpartyId: 'CP-A', amount: 1000, paymentStatus: 'unpaid' },
+    { id: 'GR-safe-2', counterpartyId: 'CP-A', amount: 1000, paymentStatus: 'unpaid' },
+    { id: 'GR-foreign', counterpartyId: 'CP-B', amount: 1000, paymentStatus: 'unpaid' },
+    { id: 'GR-unresolved', client: 'display only', amount: 1000, paymentStatus: 'unpaid' },
+  ];
+  state.payment_allocations = [];
+
+  await withServer(app, async (baseUrl) => {
+    const rejectedPosts = [
+      [{ paymentId: 'P-safe', amount: 100 }, 409, 'COUNTERPARTY_RELATION_ID_REQUIRED'],
+      [{ rentalId: 'GR-safe', amount: 100 }, 400, null],
+      [{ paymentId: 'P-missing', rentalId: 'GR-safe', amount: 100 }, 409, 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND'],
+      [{ paymentId: 'P-safe', rentalId: 'GR-missing', amount: 100 }, 409, 'COUNTERPARTY_RELATION_ENDPOINT_NOT_FOUND'],
+      [{ paymentId: 'P-dup', rentalId: 'GR-safe', amount: 100 }, 409, 'COUNTERPARTY_RELATION_AMBIGUOUS'],
+      [{ paymentId: 'P-safe', rentalId: 'R-ambiguous', amount: 100 }, 409, 'COUNTERPARTY_RELATION_AMBIGUOUS'],
+      [{ paymentId: 'P-unresolved', rentalId: 'GR-safe', amount: 100 }, 400, 'COUNTERPARTY_RELATION_ID_REQUIRED'],
+      [{ paymentId: 'P-safe', rentalId: 'GR-unresolved', amount: 100 }, 400, 'COUNTERPARTY_RELATION_ID_REQUIRED'],
+      [{ paymentId: 'P-safe', rentalId: 'GR-foreign', amount: 100 }, 409, 'COUNTERPARTY_RELATION_MISMATCH'],
+    ];
+    for (const [body, status, code] of rejectedPosts) {
+      const response = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', body);
+      assert.equal(response.status, status, JSON.stringify(response.body));
+      if (code) assert.equal(response.body.code, code);
+      assert.equal(state.payment_allocations.length, 0);
+    }
+
+    const created = await request(baseUrl, 'POST', '/api/payment_allocations', 'admin-token', {
+      paymentId: 'P-safe',
+      rentalId: 'GR-safe',
+      amount: 100,
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(state.payment_allocations.length, 1);
+
+    for (const [patch, code] of [
+      [{ rentalId: null }, 'COUNTERPARTY_RELATION_ID_REQUIRED'],
+      [{ rentalId: '' }, 'COUNTERPARTY_RELATION_ID_REQUIRED'],
+      [{ paymentId: 'P-dup' }, 'COUNTERPARTY_RELATION_AMBIGUOUS'],
+      [{ rentalId: 'R-ambiguous' }, 'COUNTERPARTY_RELATION_AMBIGUOUS'],
+      [{ rentalId: 'GR-foreign' }, 'COUNTERPARTY_RELATION_MISMATCH'],
+    ]) {
+      const before = structuredClone(state.payment_allocations);
+      const response = await request(
+        baseUrl,
+        'PATCH',
+        `/api/payment_allocations/${created.body.id}`,
+        'admin-token',
+        patch,
+      );
+      assert.equal(response.status, 409, JSON.stringify(response.body));
+      assert.equal(response.body.code, code);
+      assert.deepEqual(state.payment_allocations, before);
+    }
+
+    const safePatch = await request(
+      baseUrl,
+      'PATCH',
+      `/api/payment_allocations/${created.body.id}`,
+      'admin-token',
+      { rentalId: 'GR-safe-2' },
+    );
+    assert.equal(safePatch.status, 200, JSON.stringify(safePatch.body));
+    assert.equal(state.payment_allocations[0].rentalId, 'GR-safe-2');
+
+    for (const replacement of [
+      [
+        { id: 'PA-put-safe', paymentId: 'P-safe', rentalId: 'GR-safe', amount: 100 },
+        { id: 'PA-put-missing-rental', paymentId: 'P-safe', amount: 100 },
+      ],
+      [{ id: 'PA-put-duplicate-payment', paymentId: 'P-dup', rentalId: 'GR-safe', amount: 100 }],
+      [{ id: 'PA-put-ambiguous-rental', paymentId: 'P-safe', rentalId: 'R-ambiguous', amount: 100 }],
+      [{ id: 'PA-put-cross', paymentId: 'P-safe', rentalId: 'GR-foreign', amount: 100 }],
+    ]) {
+      const before = structuredClone(state.payment_allocations);
+      const response = await request(baseUrl, 'PUT', '/api/payment_allocations', 'admin-token', replacement);
+      assert.equal(response.status, 409, JSON.stringify(response.body));
+      assert.deepEqual(state.payment_allocations, before);
+    }
+
+    const safeReplacement = await request(baseUrl, 'PUT', '/api/payment_allocations', 'admin-token', [
+      { id: 'PA-put-safe', paymentId: 'P-safe', rentalId: 'GR-safe', amount: 200, status: 'active' },
+    ]);
+    assert.equal(safeReplacement.status, 200, JSON.stringify(safeReplacement.body));
+    assert.deepEqual(state.payment_allocations.map(item => item.id), ['PA-put-safe']);
+    assert.equal(state.payment_allocations[0].rentalId, 'GR-safe');
   });
 });
 

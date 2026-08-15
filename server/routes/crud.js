@@ -84,10 +84,12 @@ const {
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
 const { equipmentProjectionForState, reconcileEquipmentRentalProjection } = require('../lib/rental-lifecycle');
 const {
+  assertPaymentAllocationCandidateCanonical,
   assertPaymentAllocationPersistenceEntriesSafe,
   assertPaymentRentalCounterpartyMatch,
   canonicalizePaymentCounterpartyRelation,
   decoratePaymentCounterparty,
+  resolvePaymentAllocationEndpoints,
 } = require('../lib/payment-counterparty-relations');
 const {
   canonicalizeDeliveryCarrierCounterpartyRelation,
@@ -1070,26 +1072,21 @@ function registerCrudRoutes(deps) {
     return Number.isFinite(amount) && amount > 0 ? Math.min(paid, amount) : paid;
   }
 
-  function findPaymentAllocationRental(rentalId) {
-    const id = String(rentalId || '').trim();
-    if (!id) return null;
-    return (readData('gantt_rentals') || []).find(item => String(item?.id || '').trim() === id)
-      || (readData('rentals') || []).find(item => String(item?.id || '').trim() === id)
-      || null;
-  }
-
   function validatePaymentAllocationRecord(record, existing = null) {
     const paymentId = String(record?.paymentId || '').trim();
     if (!paymentId) throw new Error('Для распределения платежа укажите paymentId');
     const amount = parsePaymentMoney(record?.amount, 'Сумма распределения', { required: true });
     if (amount <= 0) throw new Error('Сумма распределения должна быть больше 0');
-    const payment = (readData('payments') || []).find(item => String(item?.id || '').trim() === paymentId);
-    if (!payment) throw new Error('Платёж для распределения не найден');
-    const rentalId = String(record?.rentalId || '').trim();
-    if (rentalId) {
-      const rental = findPaymentAllocationRental(rentalId);
-      if (!rental) throw new Error('Аренда для распределения не найдена');
-      assertPaymentRentalCounterpartyMatch(payment, rental, { readData });
+    const effective = String(record?.status || '').trim().toLowerCase() !== 'cancelled';
+    let payment;
+    if (effective) {
+      payment = assertPaymentAllocationCandidateCanonical(record, { readData }).paymentRecord;
+    } else {
+      const endpoints = resolvePaymentAllocationEndpoints(record, { readData }, { requireRental: false });
+      payment = endpoints.paymentRecord;
+      if (endpoints.rentalRecord) {
+        assertPaymentRentalCounterpartyMatch(payment, endpoints.rentalRecord, { readData });
+      }
     }
     const documentId = String(record?.documentId || '').trim();
     if (documentId) {
@@ -1117,17 +1114,22 @@ function registerCrudRoutes(deps) {
     for (const record of records || []) {
       const paymentId = String(record?.paymentId || '').trim();
       if (!paymentId) throw new Error('Для распределения платежа укажите paymentId');
-      if (!paymentsById.has(paymentId)) throw new Error('Платёж для распределения не найден');
-      const rentalId = String(record?.rentalId || '').trim();
-      if (rentalId) {
-        const payment = paymentsById.get(paymentId);
-        const rental = findPaymentAllocationRental(rentalId);
-        if (!rental) throw new Error('Аренда для распределения не найдена');
-        assertPaymentRentalCounterpartyMatch(payment, rental, { readData });
+      const effective = String(record?.status || '').trim().toLowerCase() !== 'cancelled';
+      if (effective) {
+        assertPaymentAllocationCandidateCanonical(record, { readData });
+      } else {
+        const endpoints = resolvePaymentAllocationEndpoints(record, { readData }, { requireRental: false });
+        if (endpoints.rentalRecord) {
+          assertPaymentRentalCounterpartyMatch(
+            endpoints.paymentRecord,
+            endpoints.rentalRecord,
+            { readData },
+          );
+        }
       }
       const documentId = String(record?.documentId || '').trim();
       if (documentId && !documentIds.has(documentId)) throw new Error('Документ для распределения не найден');
-      if (String(record?.status || '').trim().toLowerCase() === 'cancelled') continue;
+      if (!effective) continue;
       const amount = Number(record?.amount);
       if (!Number.isFinite(amount) || amount <= 0) {
         throw new Error('Сумма распределения должна быть больше 0');
@@ -1918,6 +1920,11 @@ function registerCrudRoutes(deps) {
           newItem = clientCompatibilityWrite.state.clients
             .find(client => String(client?.id || '') === String(newItem.id)) || newItem;
         }
+        if (collection === 'payment_allocations') {
+          assertPaymentAllocationPersistenceEntriesSafe([
+            { name: 'payment_allocations', value: [...data, newItem] },
+          ], { readData });
+        }
         if (collection === 'service' && typeof applyServiceTicketCreationEffects === 'function') {
           const lifecycleResult = applyServiceTicketCreationEffects(newItem, req.user.userName, {
             persistService: true,
@@ -2248,6 +2255,11 @@ function registerCrudRoutes(deps) {
             });
             data = clientCompatibilityWrite.state.clients;
           }
+        }
+        if (collection === 'payment_allocations') {
+          assertPaymentAllocationPersistenceEntriesSafe([
+            { name: 'payment_allocations', value: data },
+          ], { readData });
         }
         if (collection === 'service' && typeof persistServiceTicketUpdate === 'function') {
           data[idx] = persistServiceTicketUpdate(data[idx], req.user.userName);
@@ -2690,6 +2702,9 @@ function registerCrudRoutes(deps) {
           for (const item of list) validateCrmDealRecord(item);
         }
       } catch (error) {
+        if (String(error?.code || '').startsWith('COUNTERPARTY_')) {
+          return sendCounterpartyCompatibilityError(res, error);
+        }
         if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
           return sendClientInnError(res, error);
         }
@@ -2854,6 +2869,11 @@ function registerCrudRoutes(deps) {
         if (collection === 'payments') {
           assertPaymentAllocationPersistenceEntriesSafe([
             { name: 'payments', value: normalizedList },
+          ], { readData });
+        }
+        if (collection === 'payment_allocations') {
+          assertPaymentAllocationPersistenceEntriesSafe([
+            { name: 'payment_allocations', value: normalizedList },
           ], { readData });
         }
       } catch (error) {

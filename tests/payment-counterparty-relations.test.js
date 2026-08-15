@@ -292,6 +292,50 @@ test('persistence-entry guard uses the complete staged batch and ignores cancell
   );
 });
 
+test('persistence-entry guard checks changed effective allocation-only rows', () => {
+  const current = state({
+    counterparties: [counterparty('CP-A', ['customer'])],
+    payments: [{ id: 'P-1', counterpartyId: 'CP-A' }],
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-A' }],
+    payment_allocations: [{
+      id: 'PA-1',
+      paymentId: 'P-1',
+      rentalId: 'R-1',
+      amount: 100,
+      status: 'active',
+    }],
+  });
+  const readData = name => current[name] || [];
+
+  const checked = assertPaymentAllocationPersistenceEntriesSafe([{
+    name: 'payment_allocations',
+    value: [{ ...current.payment_allocations[0], comment: 'changed allocation-only row' }],
+  }], { readData });
+  assert.equal(checked.checked, 1);
+  assert.deepEqual(checked.affectedPaymentIds, ['P-1']);
+  assert.deepEqual(checked.affectedRentalIds, ['R-1']);
+
+  relationError(
+    () => assertPaymentAllocationPersistenceEntriesSafe([{
+      name: 'payment_allocations',
+      value: [{ ...current.payment_allocations[0], rentalId: null }],
+    }], { readData }),
+    'COUNTERPARTY_RELATION_ID_REQUIRED',
+  );
+  relationError(
+    () => assertPaymentAllocationPersistenceEntriesSafe([{
+      name: 'payment_allocations',
+      value: [{ ...current.payment_allocations[0], paymentId: '' }],
+    }], { readData }),
+    'COUNTERPARTY_RELATION_ID_REQUIRED',
+  );
+
+  assert.equal(assertPaymentAllocationPersistenceEntriesSafe([{
+    name: 'payment_allocations',
+    value: [{ id: 'PA-history', status: 'cancelled' }],
+  }], { readData }).checked, 0);
+});
+
 test('persistence-entry guard covers authoritative Client, Counterparty, and role dependency mutations', () => {
   const current = state({
     counterparties: [counterparty('CP-A', ['customer'])],

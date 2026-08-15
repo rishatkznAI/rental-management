@@ -536,6 +536,7 @@ export default function RentalNew() {
       return;
     }
     const payload = {
+      counterpartyId: selectedClient.counterpartyId,
       clientId: selectId(selectedClient.id),
       name: newObjectName.trim(),
       address: newObjectAddress.trim(),

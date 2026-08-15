@@ -1317,7 +1317,7 @@ export interface ContractorProfile {
 
 export interface ClientObject {
   id: string;
-  clientId: string;
+  clientId?: string;
   counterpartyId?: string;
   name: string;
   address: string;
@@ -1330,6 +1330,13 @@ export interface ClientObject {
   createdAt?: string;
   updatedAt?: string;
 }
+
+type ClientObjectCreateRelationInput =
+  | { clientId: string; counterpartyId?: string }
+  | { clientId?: string; counterpartyId: string };
+
+export type ClientObjectCreateInput = Omit<ClientObject, 'id' | 'clientId' | 'counterpartyId'>
+  & ClientObjectCreateRelationInput;
 
 export interface ClientContract {
   id: string;

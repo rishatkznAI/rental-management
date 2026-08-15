@@ -129,6 +129,23 @@ test('rental creation UI makes client object and contract requirements explicit'
   assert.match(clientRelationsHooksSource, /setQueryData<ClientContract\[]>/);
 });
 
+test('standalone rental inline object creation sends matching Counterparty and Client relation ids', () => {
+  const handleCreateObject = extract(
+    rentalNewSource,
+    'const handleCreateObject = async () => {',
+    'const handleCreateContract = async () => {',
+  );
+  const objectPayload = extract(
+    handleCreateObject,
+    'const payload = {',
+    "const attempt = idempotencyKeyForAttempt('client-object'",
+  );
+
+  assert.match(objectPayload, /counterpartyId: selectedClient\.counterpartyId/);
+  assert.match(objectPayload, /clientId: selectId\(selectedClient\.id\)/);
+  assert.match(handleCreateObject, /createClientObject\.mutateAsync\(\{\s*\.\.\.payload,\s*idempotencyKey: attempt\.key/);
+});
+
 test('rental creation delegates URL parsing and canonicalization to the shared route contract', () => {
   assert.match(rentalNewSource, /useLocation/);
   assert.match(rentalNewSource, /parseRentalNewRoute/);

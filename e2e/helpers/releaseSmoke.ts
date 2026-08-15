@@ -304,10 +304,10 @@ async function expectExecutiveCockpitVisible(page: Page) {
   await expect(cockpit, 'executive cockpit KPI grid should be visible after login').toBeVisible();
 
   const kpiChecks = [
-    { testId: 'dashboard-kpi-overdue-debt', label: 'Просроченная дебиторка' },
+    { testId: 'dashboard-kpi-month-payments', label: 'Поступления месяца' },
     { testId: 'dashboard-kpi-fleet-utilization', label: 'Загрузка парка' },
-    { testId: 'dashboard-kpi-service-load', label: 'Загрузка сервиса' },
-    { testId: 'dashboard-kpi-operational-load', label: 'Нагрузка' },
+    { testId: 'dashboard-kpi-overdue-debt', label: 'Просроченная дебиторка' },
+    { testId: 'dashboard-kpi-active-rentals', label: 'Активные аренды' },
   ];
 
   for (const item of kpiChecks) {
@@ -322,9 +322,9 @@ async function expectExecutiveCockpitVisible(page: Page) {
   await expectDashboardCompanyHealthLayout(page, companyHealth);
   await expectNoHorizontalOverflow(page, 'dashboard executive cockpit');
 
-  const serviceLoadCard = page.getByTestId('dashboard-kpi-service-load');
-  await expect(serviceLoadCard, 'service CTA should target #/service')
-    .toHaveAttribute('href', /#\/service$/);
+  const fleetUtilizationCard = page.getByTestId('dashboard-kpi-fleet-utilization');
+  await expect(fleetUtilizationCard, 'fleet CTA should target rented equipment')
+    .toHaveAttribute('href', /#\/equipment\?status=rented$/);
 
   const viewport = page.viewportSize() ?? { width: 1440, height: 900 };
   const rects = {

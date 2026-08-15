@@ -263,8 +263,8 @@ test.describe('production smoke', () => {
       const { rental } = await createRentalPair(api, {
         client: client.company,
         equipment,
-        startDate: '2026-05-03',
-        endDate: '2026-05-10',
+        startDate: dateKeyFromToday(1),
+        endDate: dateKeyFromToday(8),
         manager,
       });
       const unsigned = await createDocument(api, {

@@ -49,6 +49,7 @@ export type ExecutiveAttentionSignal = {
 
 export type ExecutiveMonthPoint = {
   label: string;
+  dateLabel: string;
   revenue: number | null;
   payments: number | null;
   forecast: number | null;
@@ -186,6 +187,10 @@ function formatCompactMoney(value: number) {
   return value.toLocaleString('ru-RU');
 }
 
+function formatAccessibleMoney(value: number | null) {
+  return value === null ? 'Нет данных' : `${value.toLocaleString('ru-RU')} рублей`;
+}
+
 function OperationalState({ state, empty, partial }: { state: ExecutiveDataState; empty: string; partial?: string }) {
   if (state === 'loading') return <p className="text-sm text-muted-foreground" role="status">Обновляем данные…</p>;
   if (state === 'error') return <p className="text-sm text-danger-foreground" role="alert">Не удалось загрузить данные блока</p>;
@@ -203,7 +208,7 @@ function SectionHeader({ eyebrow, title, href }: { eyebrow?: string; title: stri
         <h2 className="app-shell-title mt-0.5 text-base font-semibold text-foreground">{title}</h2>
       </div>
       {href ? (
-        <Link to={href} className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+        <Link to={href} className="dashboard-card-action -mr-2 inline-flex min-h-[46px] min-w-11 shrink-0 items-center justify-end gap-1 px-2 text-xs font-semibold text-muted-foreground transition hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:mr-0 sm:min-h-0 sm:min-w-0 sm:p-0">
           Открыть <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       ) : null}
@@ -264,7 +269,7 @@ function AttentionPanel({ signals, state }: { signals: ExecutiveAttentionSignal[
           <Badge variant={signals.length > 0 ? 'danger' : 'success'}>{signals.length > 0 ? signals.length : 'OK'}</Badge>
         </div>
       </CardHeader>
-      <CardContent className="space-y-1.5 px-3 py-3" data-testid="dashboard-legacy-attention-list">
+      <CardContent className="space-y-1.5 px-3 py-3" data-testid="dashboard-attention-list">
         {signals.length === 0 ? (
           <div className="rounded-md border border-success/25 bg-success-soft px-3 py-3 text-sm text-success-foreground">
             <OperationalState state={state} empty="Критичных отклонений по доступным данным нет" />
@@ -272,7 +277,7 @@ function AttentionPanel({ signals, state }: { signals: ExecutiveAttentionSignal[
         ) : signals.slice(0, 5).map((signal) => {
           const severity = severityMeta[signal.severity];
           return (
-            <Link key={signal.id} to={signal.href} className="group grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md border border-border bg-background px-3 py-2.5 transition hover:border-primary/35 hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+            <Link key={signal.id} to={signal.href} className="dashboard-attention-action group grid min-h-[46px] min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-md border border-border bg-background px-3 py-2.5 transition hover:border-primary/35 hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:min-h-11">
               <span className="min-w-0">
                 <span className="flex min-w-0 flex-wrap items-center gap-2">
                   <span className={cn('rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase', severity.className)}>{severity.label}</span>
@@ -309,29 +314,52 @@ function MonthDynamics({ month }: Pick<ExecutiveCockpitV2Props, 'month'>) {
       <CardContent className="px-3 pb-3">
         <div className={cn('min-w-0', hasChart ? 'h-[210px] sm:h-[225px]' : 'h-[68px] sm:h-[60px]')}>
           {hasChart ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={month.points} margin={{ top: 8, right: 6, bottom: 0, left: -8 }}>
-                <defs>
-                  <linearGradient id="executiveRevenueFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.24} />
-                    <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="var(--rc-border)" strokeDasharray="2 7" vertical={false} />
-                <XAxis dataKey="label" axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={12} tick={{ fill: 'var(--rc-text-muted)', fontSize: 10 }} />
-                <YAxis axisLine={false} tickLine={false} width={46} tickFormatter={formatCompactMoney} tick={{ fill: 'var(--rc-text-muted)', fontSize: 10 }} />
-                <Tooltip formatter={(value, name) => [`${Number(value).toLocaleString('ru-RU')} ₽`, name === 'payments' ? 'Поступления' : name === 'forecast' ? 'Прогноз начислений' : 'Начисления']} contentStyle={{ borderRadius: 8, borderColor: 'var(--rc-border)', background: 'var(--rc-surface-elevated)', color: 'var(--foreground)' }} />
-                <Area type="monotone" dataKey="revenue" stroke="var(--primary)" strokeWidth={2.2} fill="url(#executiveRevenueFill)" connectNulls={false} dot={false} />
-                <Line type="monotone" dataKey="payments" stroke="var(--info)" strokeWidth={2} dot={false} connectNulls={false} />
-                <Line type="monotone" dataKey="forecast" stroke="var(--warning)" strokeWidth={1.8} strokeDasharray="5 5" dot={false} connectNulls={false} />
-              </AreaChart>
-            </ResponsiveContainer>
+            <div className="h-full w-full" aria-hidden="true">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={month.points} margin={{ top: 8, right: 6, bottom: 0, left: -8 }}>
+                  <defs>
+                    <linearGradient id="executiveRevenueFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.24} />
+                      <stop offset="100%" stopColor="var(--primary)" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="var(--rc-border)" strokeDasharray="2 7" vertical={false} />
+                  <XAxis dataKey="label" axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={12} tick={{ fill: 'var(--rc-text-muted)', fontSize: 10 }} />
+                  <YAxis axisLine={false} tickLine={false} width={46} tickFormatter={formatCompactMoney} tick={{ fill: 'var(--rc-text-muted)', fontSize: 10 }} />
+                  <Tooltip formatter={(value, name) => [`${Number(value).toLocaleString('ru-RU')} ₽`, name === 'payments' ? 'Поступления' : name === 'forecast' ? 'Прогноз начислений' : 'Начисления']} contentStyle={{ borderRadius: 8, borderColor: 'var(--rc-border)', background: 'var(--rc-surface-elevated)', color: 'var(--foreground)' }} />
+                  <Area type="monotone" dataKey="revenue" stroke="var(--primary)" strokeWidth={2.2} fill="url(#executiveRevenueFill)" connectNulls={false} dot={false} />
+                  <Line type="monotone" dataKey="payments" stroke="var(--info)" strokeWidth={2} dot={false} connectNulls={false} />
+                  <Line type="monotone" dataKey="forecast" stroke="var(--warning)" strokeWidth={1.8} strokeDasharray="5 5" dot={false} connectNulls={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           ) : (
             <div className="flex h-full items-center justify-center rounded-md border border-dashed border-border bg-background px-4 text-center">
               <OperationalState state={month.state} empty="За выбранный период начислений и поступлений нет" partial="Недостаточно данных, чтобы построить динамику" />
             </div>
           )}
         </div>
+        <table className="sr-only" data-testid="dashboard-month-dynamics-data">
+          <caption>Данные графика «Динамика месяца»</caption>
+          <thead>
+            <tr>
+              <th scope="col">Дата</th>
+              <th scope="col">Начисления (факт)</th>
+              <th scope="col">Поступления (факт)</th>
+              <th scope="col">Прогноз начислений</th>
+            </tr>
+          </thead>
+          <tbody>
+            {month.points.map(point => (
+              <tr key={point.dateLabel}>
+                <th scope="row">{point.dateLabel}</th>
+                <td>{formatAccessibleMoney(point.revenue)}</td>
+                <td>{formatAccessibleMoney(point.payments)}</td>
+                <td>{formatAccessibleMoney(point.forecast)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         <div className="mt-2 grid grid-cols-3 divide-x divide-border rounded-md border border-border bg-background py-2 text-center">
           {[['План', month.plan], ['Факт', month.fact], ['Прогноз', month.forecast]].map(([label, value]) => (
             <div key={label} className="min-w-0 px-2">

@@ -370,13 +370,24 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
   await expectCrmDisabledUiHidden(page, frontendUrl);
 
   await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'Операционный центр', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
 
-  await expect(page.getByTestId('dashboard-top-cockpit')).toBeVisible();
-  await expect(page.getByTestId('dashboard-key-signals')).toBeVisible();
-  await expect(page.getByTestId('dashboard-operational-summary')).toBeVisible();
-  await expect(page.getByTestId('dashboard-month-dynamics')).toBeVisible();
-  await expect(page.getByTestId('dashboard-company-health')).toBeVisible();
+  for (const testId of [
+    'dashboard-top-cockpit',
+    'dashboard-key-signals',
+    'dashboard-month-dynamics',
+    'dashboard-month-dynamics-data',
+    'dashboard-company-health',
+    'dashboard-fleet-utilization',
+    'dashboard-receivables-aging',
+    'dashboard-service-executive',
+  ]) {
+    await expect(page.getByTestId(testId), `${testId} should use the active Dashboard V2 contract`).toBeAttached();
+  }
+  const dynamicsData = page.getByTestId('dashboard-month-dynamics-data');
+  await expect(dynamicsData).toContainText('Начисления (факт)');
+  await expect(dynamicsData).toContainText('Поступления (факт)');
+  await expect(dynamicsData).toContainText('Прогноз начислений');
   const viewport = page.viewportSize() ?? { width: 1440, height: 900 };
   const visualRects = await page.evaluate(() => {
     const rectFor = (testId: string) => {
@@ -389,7 +400,6 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
         height: Math.round(rect.height),
       };
     };
-    const legacy = document.querySelector('[data-testid="dashboard-legacy-attention-list"]');
     const countVisibleHeadingsInViewport = (expectedText: string) => Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).filter(heading => {
       const normalizedText = (heading.textContent || '').replace(/\s+/g, ' ').trim();
       const rect = heading.getBoundingClientRect();
@@ -404,11 +414,9 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
     }).length;
     return {
       keySignals: rectFor('dashboard-key-signals'),
-      legacyAttentionList: rectFor('dashboard-legacy-attention-list'),
-      operationalSummary: rectFor('dashboard-operational-summary'),
+      attentionList: rectFor('dashboard-attention-list'),
       monthDynamics: rectFor('dashboard-month-dynamics'),
       companyHealth: rectFor('dashboard-company-health'),
-      legacyCollapsed: legacy?.tagName.toLowerCase() === 'details' && !(legacy as HTMLDetailsElement).open,
       firstViewportHeadingCounts: {
         monthDynamics: countVisibleHeadingsInViewport('Динамика месяца'),
         companyHealth: countVisibleHeadingsInViewport('Здоровье компании'),
@@ -416,77 +424,15 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
     };
   });
   expect(visualRects.keySignals?.top ?? Number.POSITIVE_INFINITY, 'key signals should be above fold').toBeLessThan(viewport.height);
-  expect(visualRects.legacyAttentionList?.top ?? 0, 'legacy attention list should be below key signals').toBeGreaterThan(visualRects.keySignals?.top ?? 0);
+  expect(visualRects.attentionList?.top ?? 0, 'attention list should be inside the key-signals card').toBeGreaterThan(visualRects.keySignals?.top ?? 0);
   expect(visualRects.firstViewportHeadingCounts.monthDynamics, 'first viewport should not contain duplicate month dynamics headings').toBeLessThanOrEqual(1);
   expect(visualRects.firstViewportHeadingCounts.companyHealth, 'first viewport should not contain duplicate company health headings').toBeLessThanOrEqual(1);
-  if ((visualRects.legacyAttentionList?.top ?? 0) < viewport.height) {
-    safeSmokeLog('legacyAttentionBelowFoldSkipped', { reason: 'covered_by_deploy_visual_smoke', viewport, visualRects });
-  }
-
-  const attentionBlock = page.getByTestId('dashboard-attention-block');
-  let actionQueue = page.getByTestId('management-action-queue-section');
-  if (await attentionBlock.count() > 0) {
-    await expect(attentionBlock).toBeVisible();
-    await expect(attentionBlock.getByRole('heading', { name: 'Главные сигналы сегодня' })).toBeVisible();
-    for (const label of ['критично', 'высоко', 'средне', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
-      await expect(attentionBlock.getByText(label, { exact: true }).first(), `dashboard attention KPI ${label} should be visible`).toBeVisible();
-    }
-    await expect(attentionBlock.getByText('Загружаем очередь внимания...', { exact: true })).toBeHidden();
-    const topActionRowCount = await attentionBlock.locator('a').evaluateAll(links =>
-      links.filter(link => {
-        const text = link.textContent?.replace(/\s+/g, ' ').trim() || '';
-        return text
-          && !['Открыть очередь', 'Показать без ответственного', 'Показать просроченные'].includes(text);
-      }).length,
-    );
-    const hasEmptyState = await attentionBlock.getByText('Критичных действий на сегодня нет.', { exact: true }).count();
-    expect(topActionRowCount + hasEmptyState, 'dashboard attention should render top actions or an empty state').toBeGreaterThan(0);
-    await expect(attentionBlock.getByRole('link', { name: 'Открыть очередь' })).toBeVisible();
-    await expect(attentionBlock.getByRole('link', { name: 'Показать без ответственного' })).toHaveAttribute('href', /actionQueueFilter=unassigned/);
-    await expect(attentionBlock.getByRole('link', { name: 'Показать просроченные' })).toHaveAttribute('href', /actionQueueFilter=overdue/);
-    safeSmokeLog('dashboardAttention', {
-      blockVisible: true,
-      kpiCardsVisible: true,
-      topActionRows: topActionRowCount,
-      emptyStateVisible: hasEmptyState > 0,
-      openQueueLink: true,
-      unassignedFilterLink: true,
-      overdueFilterLink: true,
-      viewport,
-      visualRects,
-    });
-
-    await attentionBlock.getByRole('link', { name: 'Открыть очередь' }).click();
-    actionQueue = page.getByTestId('management-action-queue-section');
-    await expect(actionQueue).toBeVisible();
-    await expect(page.getByText('Активный фильтр: Все', { exact: true })).toBeVisible();
-    await expect(actionQueue.getByRole('button', { name: 'Все', exact: true })).toHaveAttribute('aria-pressed', 'true');
-
-    await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-    await page.getByTestId('dashboard-attention-block').getByRole('link', { name: 'Показать без ответственного' }).click();
-    actionQueue = page.getByTestId('management-action-queue-section');
-    await expect(actionQueue).toBeVisible();
-    await expect(page.getByText('Активный фильтр: Без ответственного', { exact: true })).toBeVisible();
-    await expect(actionQueue.getByRole('button', { name: 'Без ответственного', exact: true })).toHaveAttribute('aria-pressed', 'true');
-
-    await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-    await page.getByTestId('dashboard-attention-block').getByRole('link', { name: 'Показать просроченные' }).click();
-    actionQueue = page.getByTestId('management-action-queue-section');
-    await expect(actionQueue).toBeVisible();
-    await expect(page.getByText('Активный фильтр: Просрочено', { exact: true })).toBeVisible();
-    await expect(actionQueue.getByRole('button', { name: 'Просрочено', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    safeSmokeLog('dashboardAttentionLinks', {
-      openQueueFilterVisible: true,
-      unassignedFilterVisible: true,
-      overdueFilterVisible: true,
-    });
-  } else {
-    safeSmokeLog('dashboardAttentionSkipped', { reason: 'covered_by_deploy_visual_smoke' });
-  }
+  await expect(page.locator('[data-testid^="dashboard-legacy-"]')).toHaveCount(0);
+  safeSmokeLog('dashboardV2', { viewport, visualRects, accessibleDynamics: true });
 
   await page.goto(productionAppUrl(frontendUrl, '/equipment'), { waitUntil: 'domcontentloaded' });
 
-  actionQueue = page.getByTestId('management-action-queue-section');
+  let actionQueue = page.getByTestId('management-action-queue-section');
   if (await actionQueue.count() > 0) {
     await expect(actionQueue).toBeVisible();
     await expectColumnHeader(actionQueue, /^(Статус исполнения|Исполнение)$/);

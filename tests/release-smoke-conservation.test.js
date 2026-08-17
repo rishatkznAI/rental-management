@@ -166,8 +166,9 @@ test('production UI selector smoke passes frontend marker release type into rele
   assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('actionQueueEmpty', \{ allowed: true \}\)/);
   assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('actionQueueRowsEmpty', \{ allowed: true \}\)/);
   assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('clientCardCrmHiddenSkipped', \{ reason: 'no_client_card_link' \}\)/);
-  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('legacyAttentionBelowFoldSkipped', \{ reason: 'covered_by_deploy_visual_smoke'/);
-  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('dashboardAttentionSkipped', \{ reason: 'covered_by_deploy_visual_smoke' \}\)/);
+  assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('dashboardV2', \{ viewport, visualRects, accessibleDynamics: true \}\)/);
+  assert.match(productionUiSelectorSmokeSource, /dashboard-month-dynamics-data/);
+  assert.match(productionUiSelectorSmokeSource, /\[data-testid\^="dashboard-legacy-"\]/);
   assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('equipmentActionQueueSkipped', \{ reason: 'section_not_rendered' \}\)/);
   assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('equipmentReadinessVisible', \{ mode: 'kpi-strip' \}\)/);
   assert.match(productionUiSelectorSmokeSource, /fleet readiness KPI/);

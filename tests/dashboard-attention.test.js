@@ -5,23 +5,15 @@ import path from 'node:path';
 import { buildDashboardAttentionSummary } from '../src/app/lib/dashboardAttention.js';
 
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
+const cockpitSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/dashboard/ExecutiveCockpitV2.tsx'), 'utf8');
 const themeSource = fs.readFileSync(path.join(process.cwd(), 'src/styles/theme.css'), 'utf8');
 const documentsSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Documents.tsx'), 'utf8');
 const documentsRouteSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/documents.js'), 'utf8');
 const equipmentServiceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/equipment.service.ts'), 'utf8');
 const equipmentHooksSource = fs.readFileSync(path.join(process.cwd(), 'src/app/hooks/useEquipment.ts'), 'utf8');
 const equipmentPageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Equipment.tsx'), 'utf8');
-const dashboardDesignStandardSource = fs.readFileSync(path.join(process.cwd(), 'docs/dashboard-design-standard.md'), 'utf8');
 const stagingSmokeSource = fs.readFileSync(path.join(process.cwd(), 'e2e/staging-smoke.spec.ts'), 'utf8');
 const productionUiSelectorSmokeSource = fs.readFileSync(path.join(process.cwd(), 'e2e/production-ui-selector-smoke.spec.ts'), 'utf8');
-
-function sourceBlock(source, startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  assert.notEqual(start, -1, `start marker not found: ${startMarker}`);
-  const end = source.indexOf(endMarker, start);
-  assert.notEqual(end, -1, `end marker not found: ${endMarker}`);
-  return source.slice(start, end);
-}
 
 test('dashboard attention summary calculates daily risks without NaN values', () => {
   const summary = buildDashboardAttentionSummary({
@@ -115,178 +107,104 @@ test('dashboard normalizes legacy rental equipment before mapping refs', () => {
 });
 
 test('dashboard renders executive signal strip from compact action queue API', () => {
-  assert.match(dashboardSource, /Главные сигналы сегодня/);
-  assert.match(dashboardSource, /data-testid="dashboard-risk-signal-strip"/);
+  assert.match(cockpitSource, /data-testid="dashboard-key-signals"/);
+  assert.match(cockpitSource, /data-testid="dashboard-attention-list"/);
+  assert.match(cockpitSource, /Требует внимания/);
   assert.match(equipmentServiceSource, /getManagementActionAttention: \(\): Promise<ManagementActionAttentionResponse> =>\s*api\.get<ManagementActionAttentionResponse>\('\/api\/management\/action-queue\?view=attention'\)/);
   assert.match(equipmentHooksSource, /useManagementActionAttention/);
   assert.match(dashboardSource, /useManagementActionAttention\(\{\s*enabled: canViewAttentionBlock && canViewEquipment/);
 });
 
-test('staging smoke follows the approved Dashboard attention contract shared with production', () => {
-  const standardBlock = sourceBlock(
-    dashboardDesignStandardSource,
-    '## 14. “Главные сигналы сегодня” Block',
-    '## 15. “Задачи сегодня” Block',
-  );
-  const commandScreenBlock = sourceBlock(
-    dashboardSource,
-    '<div className="rentcore-command-screen"',
-    'return (\n    <div className="space-y-4',
-  );
-
-  assert.match(standardBlock, /Required heading contract[\s\S]*Главные сигналы сегодня/);
-  assert.match(standardBlock, /Subtitle[\s\S]*Что требует внимания сейчас/);
-  assert.match(commandScreenBlock, /data-testid="dashboard-key-signals"[\s\S]*Главные сигналы сегодня[\s\S]*Что требует внимания сейчас/);
+test('staging smoke follows the active Dashboard V2 attention contract', () => {
+  assert.match(cockpitSource, /data-testid="dashboard-key-signals"[\s\S]*Требует внимания/);
+  assert.match(cockpitSource, /data-testid="dashboard-attention-list"/);
   assert.match(stagingSmokeSource, /getByTestId\('dashboard-key-signals'\)/);
-  assert.match(stagingSmokeSource, /dashboardAttentionBlock\.getByRole\('heading', \{ name: 'Главные сигналы сегодня' \}\)/);
-  assert.match(stagingSmokeSource, /dashboardAttentionBlock\.getByText\('Что требует внимания сейчас', \{ exact: true \}\)/);
-  assert.doesNotMatch(stagingSmokeSource, /Что требует внимания сегодня/);
-  assert.match(productionUiSelectorSmokeSource, /getByTestId\('dashboard-key-signals'\)/);
-  assert.match(productionUiSelectorSmokeSource, /getByTestId\('dashboard-attention-block'\)[\s\S]*Главные сигналы сегодня/);
+  assert.match(stagingSmokeSource, /dashboardAttentionBlock\.getByRole\('heading', \{ name: 'Требует внимания'/);
+  assert.match(stagingSmokeSource, /getByTestId\('dashboard-attention-list'\)/);
+  assert.match(productionUiSelectorSmokeSource, /dashboard-key-signals/);
+  assert.match(productionUiSelectorSmokeSource, /dashboard-attention-list/);
+  assert.doesNotMatch(stagingSmokeSource, /dashboard-legacy-attention-list/);
+  assert.doesNotMatch(productionUiSelectorSmokeSource, /dashboard-legacy-attention-list/);
 });
 
-test('dashboard executive cockpit renders adaptive KPI cards and compact risk signals', () => {
-  for (const label of ['Нагрузка', 'Индекс нагрузки компании', 'Открыть обзор', 'Утилизация парка', 'Загрузка сервиса', 'Поступления месяца', 'Здоровье компании']) {
-    assert.match(dashboardSource, new RegExp(label));
+test('dashboard executive cockpit renders the active V2 hierarchy', () => {
+  for (const label of ['Требует внимания', 'Динамика месяца', 'Здоровье компании', 'Парк', 'Деньги', 'Сервис']) {
+    assert.match(cockpitSource, new RegExp(label));
   }
-  for (const helper of ['OperationalLoadGauge', 'UtilizationGauge', 'StatusBars', 'CompanyHealthBars', 'RiskSignalStrip']) {
-    assert.match(dashboardSource, new RegExp(helper));
+  for (const testId of ['dashboard-executive-cockpit', 'dashboard-top-cockpit', 'dashboard-key-signals', 'dashboard-attention-list', 'dashboard-month-dynamics', 'dashboard-company-health']) {
+    assert.match(cockpitSource, new RegExp(`data-testid="${testId}"`));
   }
-  assert.match(dashboardSource, /data-testid="dashboard-executive-cockpit"/);
-  assert.match(dashboardSource, /data-testid="dashboard-top-cockpit"/);
-  assert.match(dashboardSource, /data-testid="dashboard-key-signals"/);
-  assert.match(dashboardSource, /data-testid="dashboard-legacy-attention-list"/);
-  assert.match(dashboardSource, /data-testid="dashboard-month-dynamics"/);
-  assert.match(dashboardSource, /data-testid="dashboard-company-health"/);
-  assert.match(dashboardSource, /data-testid="dashboard-operational-summary"/);
+  assert.equal(cockpitSource.match(/data-testid="dashboard-month-dynamics"/g)?.length, 1);
+  assert.equal(cockpitSource.match(/data-testid="dashboard-company-health"/g)?.length, 1);
   assert.match(dashboardSource, /dashboard-kpi-month-payments/);
-  assert.equal(dashboardSource.match(/data-testid="dashboard-month-dynamics"/g)?.length, 1);
-  assert.equal(dashboardSource.match(/data-testid="dashboard-company-health"/g)?.length, 1);
-  assert.equal(dashboardSource.match(/<h3 className="app-shell-title whitespace-nowrap text-\[15px\] font-semibold text-foreground">Динамика месяца<\/h3>/g)?.length, 1);
-  assert.match(dashboardSource, /data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/);
-  assert.match(dashboardSource, /operationalLoadScore/);
-  assert.match(dashboardSource, /operationalLoadTone/);
-  assert.match(dashboardSource, /receivablesTone/);
   assert.match(dashboardSource, /utilizationTone/);
-  assert.match(dashboardSource, /serviceTone/);
-  assert.match(dashboardSource, /Прочие/);
   assert.match(dashboardSource, /hasDebtSourceData/);
-  assert.match(dashboardSource, /hasPaymentsSourceData/);
-  assert.match(dashboardSource, /hasServiceSourceData/);
+  assert.match(dashboardSource, /executiveHealthDirectionVisibility/);
 });
 
 test('dashboard does not render the removed global setup banner', () => {
   assert.doesNotMatch(dashboardSource, /Дашборд ещё собирает управленческую картину/);
 });
 
-test('dashboard command board uses enterprise grid without dominant company health circle', () => {
-  const commandScreenBlock = sourceBlock(dashboardSource, '<div className="rentcore-command-screen"', 'return (\n    <div className="space-y-4');
-
-  assert.match(commandScreenBlock, /data-testid="dashboard-command-board"/);
-  assert.match(commandScreenBlock, /rentcore-dashboard-grid[\s\S]*data-testid="dashboard-command-board"/);
-  assert.match(commandScreenBlock, /rentcore-dashboard-signals[\s\S]*data-testid="dashboard-key-signals"/);
-  assert.match(commandScreenBlock, /rentcore-dashboard-tasks[\s\S]*data-testid="dashboard-tasks"/);
-  assert.match(commandScreenBlock, /rentcore-dashboard-month[\s\S]*data-testid="dashboard-month-dynamics"/);
-  assert.match(commandScreenBlock, /rentcore-dashboard-fleet[\s\S]*data-testid="dashboard-fleet-utilization"/);
-  assert.match(commandScreenBlock, /rentcore-dashboard-aging[\s\S]*data-testid="dashboard-receivables-aging"/);
-  assert.match(commandScreenBlock, /rentcore-dashboard-health[\s\S]*data-testid="dashboard-operational-summary"/);
-  assert.doesNotMatch(commandScreenBlock, /xl:justify-center[\s\S]*data-testid="dashboard-operational-summary"/);
-  assert.doesNotMatch(commandScreenBlock, /dashboard-company-health-svg/);
-  assert.doesNotMatch(commandScreenBlock, /text-5xl[\s\S]*N\/A|text-6xl[\s\S]*N\/A|text-7xl[\s\S]*N\/A/);
-  assert.doesNotMatch(commandScreenBlock, /xl:grid-rows-\[/);
-  assert.doesNotMatch(commandScreenBlock, /xl:overflow-hidden/);
-
-  assert.match(themeSource, /\.rentcore-dashboard-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\);[\s\S]*gap:\s*14px !important;[\s\S]*align-items:\s*stretch;/);
-  assert.match(themeSource, /@media \(min-width: 1200px\)[\s\S]*\.rentcore-dashboard-kpi-grid > \*\s*\{[\s\S]*span 3[\s\S]*\.rentcore-dashboard-health\s*\{[\s\S]*span 12/);
-  assert.match(themeSource, /@media \(min-width: 1600px\)[\s\S]*\.rentcore-dashboard-signals\s*\{[\s\S]*span 5[\s\S]*\.rentcore-dashboard-month\s*\{[\s\S]*span 7[\s\S]*\.rentcore-dashboard-health\s*\{[\s\S]*span 12[\s\S]*\.rentcore-dashboard-tasks,[\s\S]*\.rentcore-dashboard-fleet,[\s\S]*\.rentcore-dashboard-aging[\s\S]*span 4/);
+test('dashboard command board uses the V2 responsive grid without legacy layout CSS', () => {
+  assert.match(cockpitSource, /data-testid="dashboard-command-board"/);
+  assert.match(cockpitSource, /executive-v2-kpis order-2[\s\S]*xl:order-1/);
+  assert.match(cockpitSource, /executive-v2-attention order-1[\s\S]*xl:order-2/);
+  assert.match(cockpitSource, /executive-v2-month order-3/);
+  assert.match(cockpitSource, /executive-v2-health order-7[\s\S]*xl:order-4/);
+  assert.doesNotMatch(themeSource, /\.rentcore-dashboard-grid\s*\{/);
+  assert.doesNotMatch(themeSource, /\.rentcore-dashboard-(?:signals|tasks|month|fleet|aging|health)\s*\{/);
   assert.match(themeSource, /\.rentcore-command-screen\s*\{[\s\S]*min-height: 0;/);
   assert.match(themeSource, /\.rentcore-command-shell\s*\{[\s\S]*min-height: 0;/);
 });
 
-test('dashboard empty states explain source and action instead of showing generic blanks', () => {
+test('dashboard V2 empty states remain honest and compact', () => {
   for (const label of [
-    'Нет поступлений за месяц. Проверьте раздел Платежи, связь платежей с клиентами/арендами и выбранный период.',
-    'Нет данных по дебиторке. Просрочка не считается: нет строк задолженности. Проверьте начисления, закрытие аренд и финансовую синхронизацию.',
-    'Критичных задач на сегодня нет. Источник: аренды, доставки, платежи, сервис, документы и очередь действий.',
-    'Критичных действий на сегодня нет. Источник: очередь внимания техники, доставки, сервиса, документов и платежей.',
-    'Нет базы для полного расчёта: нужны записи из платежей, аренд, сервиса, документов и доставок.',
+    'Критичных отклонений по доступным данным нет',
+    'За выбранный период начислений и поступлений нет',
+    'Недостаточно данных для полного расчёта',
+    'Не удалось загрузить данные блока',
   ]) {
-    assert.match(dashboardSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(cockpitSource, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
-  assert.doesNotMatch(dashboardSource, /Недостаточно данных для графика\./);
+  assert.doesNotMatch(cockpitSource, /Недостаточно данных для графика\./);
 });
 
-test('dashboard signal strip renders counters, rows, empty and error states', () => {
-  for (const label of ['критично', 'высоко', 'средне', 'Просрочено', 'Сегодня', 'Без ответственного', 'Потери сейчас', 'Потеря в день']) {
-    assert.match(dashboardSource, new RegExp(label));
+test('dashboard V2 attention list renders severity, rows, and operational states', () => {
+  for (const label of ['Критично', 'Важно', 'Контроль', 'Критичных отклонений по доступным данным нет']) {
+    assert.match(cockpitSource, new RegExp(label));
   }
-  assert.match(dashboardSource, /topAttentionActions\.map/);
-  assert.match(dashboardSource, /Критичных действий на сегодня нет\./);
-  assert.match(dashboardSource, /Не удалось загрузить блок внимания/);
-  assert.match(dashboardSource, /Открыть очередь/);
-  assert.match(dashboardSource, /Показать без ответственного/);
-  assert.match(dashboardSource, /Показать просроченные/);
-  assert.match(dashboardSource, /\/equipment\?actionQueueFilter=unassigned/);
-  assert.match(dashboardSource, /\/equipment\?actionQueueFilter=overdue/);
+  assert.match(cockpitSource, /signals\.slice\(0, 5\)\.map/);
+  assert.match(cockpitSource, /role="alert"/);
+  assert.match(cockpitSource, /dashboard-attention-action[\s\S]*min-h-\[46px\]/);
   assert.doesNotMatch(dashboardSource, /\/equipment\?actionQueue=unassigned/);
   assert.doesNotMatch(dashboardSource, /\/equipment\?actionQueue=overdue/);
-  assert.doesNotMatch(dashboardSource, /title: 'Документы \/ задачи'/);
-  assert.doesNotMatch(dashboardSource, />undefined</);
-  assert.doesNotMatch(dashboardSource, />null</);
-  assert.doesNotMatch(dashboardSource, />\\[object Object\\]</);
 });
 
-test('dashboard cockpit renders executive KPI grid with fleet and service analytics', () => {
+test('dashboard V2 cockpit renders executive KPI, fleet, money, and service analytics', () => {
   for (const label of [
-    'data-testid="dashboard-executive-summary"',
     'dashboard-kpi-overdue-debt',
     'dashboard-kpi-fleet-utilization',
-    'dashboard-kpi-service-load',
-    'dashboard-kpi-operational-load',
-    'MiniAreaChart',
-    'UtilizationGauge',
-    'StatusBars',
-    'Утилизация парка',
-    'Средняя загрузка за период',
-    'Открыть технику в аренде',
-    'Загрузка сервиса',
-    'Ожидают запчасти',
-    'Готовы к закрытию',
-    'Открыть сервис',
-    'Нагрузка',
-    'Индекс нагрузки компании',
-    'Открыть обзор',
-    'Проверить долги',
+    'dashboard-kpi-month-revenue',
+    'dashboard-kpi-month-payments',
   ]) {
     assert.match(dashboardSource, new RegExp(label));
   }
-  assert.match(dashboardSource, /id: 'executive-fleet-utilization'[\s\S]*href: '\/equipment\?status=rented'/);
+  for (const testId of ['dashboard-fleet-utilization', 'dashboard-receivables-aging', 'dashboard-service-executive']) {
+    assert.match(cockpitSource, new RegExp(`data-testid="${testId}"`));
+  }
+  assert.match(dashboardSource, /id: 'dashboard-kpi-fleet-utilization'[\s\S]*href: '\/equipment\?status=rented'/);
   assert.match(equipmentPageSource, /const nextStatusFilter = requestedStatusFilter !== 'all'[\s\S]*\? requestedStatusFilter[\s\S]*: 'all'/);
   assert.match(equipmentPageSource, /setStatusFilter\(nextStatusFilter\)/);
   assert.match(equipmentPageSource, /setActiveTab\(tabByStatus\[nextStatusFilter\] \|\| 'all'\)/);
   assert.doesNotMatch(equipmentPageSource, /if \(!requestedStatusFilter \|\| requestedStatusFilter === 'all'\) return/);
-  assert.match(dashboardSource, /Donut gauge утилизации парка/);
-  assert.match(dashboardSource, /setSelectedKPI\('utilization'\)/);
-  assert.match(dashboardSource, /plannerHref: '\/planner'/);
-  assert.match(dashboardSource, /to="\/service"/);
-  assert.match(dashboardSource, /const serviceLoadGroups = openServiceTickets\.reduce/);
-  assert.match(dashboardSource, /без механика/);
-  assert.match(dashboardSource, /запчасти/);
-  assert.match(dashboardSource, /просрочено/);
-  assert.match(dashboardSource, /operationalLoadScore/);
-  assert.match(dashboardSource, /criticalOperationalIssues/);
-  assert.match(dashboardSource, /label: 'Прочие'/);
-  assert.match(dashboardSource, /const serviceLoadTotal = openServiceTickets\.length/);
-  assert.doesNotMatch(dashboardSource, /Документы \/ задачи/);
-  assert.doesNotMatch(dashboardSource, /serviceLoadUsesLiveData/);
-  assert.doesNotMatch(dashboardSource, /roleDashboardUtilizationPercent = activeEquipment > 0 \? utilization : 62/);
-  assert.doesNotMatch(dashboardSource, /serviceLoadTotal = serviceLoadUsesLiveData \? openServiceTickets\.length : 63/);
-  assert.doesNotMatch(dashboardSource, /Что сделать сейчас/);
-  assert.doesNotMatch(dashboardSource, /roleDashboardSignalCard/);
+  assert.match(dashboardSource, /const serviceBlockersCount = serviceBlockerTicketIds\.size/);
+  assert.match(dashboardSource, /fleet: canViewEquipment \?/);
+  assert.match(dashboardSource, /money: canViewMoney \?/);
+  assert.match(dashboardSource, /service: canViewService \?/);
 });
 
-test('dashboard document links open the unsigned documents list', () => {
-  assert.match(dashboardSource, /\/documents\?signature=unsigned/);
+test('unsigned document filtering remains available outside the cleaned Dashboard renderer', () => {
   assert.match(documentsSource, /searchParams\.get\('signature'\)/);
   assert.match(documentsSource, /setSignatureFilter\('unsigned'\)/);
   assert.match(documentsRouteSource, /query\.signature/);
@@ -294,9 +212,9 @@ test('dashboard document links open the unsigned documents list', () => {
   assert.match(documentsRouteSource, /return res\.json\(filterDocumentsForList\(documents, req\.query\)\)/);
 });
 
-test('dashboard unsigned document counters use the document control KPI source', () => {
+test('Dashboard V2 Company Health uses the document control KPI source', () => {
   assert.match(dashboardSource, /const unsignedDocumentsCount = documentControl\.kpi\.unsignedDocuments/);
-  assert.match(dashboardSource, /value: String\(unsignedDocumentsCount\)/);
-  assert.match(dashboardSource, /tone: unsignedDocumentsCount > 0 \? 'warning' : 'success'/);
+  assert.match(dashboardSource, /unsignedDocumentsCount,/);
+  assert.match(dashboardSource, /overdueDocumentsCount: documentControl\.kpi\.overdueSignature \+ documentControl\.kpi\.closedRentalsWithoutClosingDocs/);
   assert.doesNotMatch(dashboardSource, /const officeUnsignedDocuments = documents\.filter\(isUnsignedDocument\)/);
 });

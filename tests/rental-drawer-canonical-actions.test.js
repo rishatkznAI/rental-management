@@ -66,7 +66,7 @@ test('frontend rental lifecycle actions never write the read-only Gantt projecti
     assert.doesNotMatch(source, /rentalsService\.(?:createGanttEntry|updateGanttEntry|deleteGanttEntry|bulkReplaceGantt)\(/, name);
   }
   assert.match(rentalsSource, /rentalsService\.update\(canonicalRentalId, \{\s*comments: nextComments/);
-  assert.match(dashboardSource, /rentalsService\.update\(canonicalRentalId, \{\s*updSigned: nextSigned/);
+  assert.doesNotMatch(dashboardSource, /rentalsService\.(?:create|update|returnRental|delete)\(/);
   assert.match(equipmentDetailSource, /rentalsService\.returnRental\(canonicalRentalId/);
 });
 

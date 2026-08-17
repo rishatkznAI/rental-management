@@ -24,16 +24,10 @@ function objectBlockAfter(source, marker) {
 test('dashboard overdue receivables cards use overdue debt, not total client debt', () => {
   assert.match(dashboardSource, /const overdueReceivablesAmount = overduePayments\.reduce/);
   assert.match(dashboardSource, /const totalDebt = clientFinancials\.reduce/);
-
-  for (const marker of ["id: 'admin-debt'", "id: 'office-debt'", "id: 'overdue-debt'"]) {
-    const block = objectBlockAfter(dashboardSource, marker);
-    assert.match(block, /title: 'Просроченная дебиторка'|label: 'Просроченная дебиторка'/);
-    assert.match(block, /overdueReceivablesAmount/);
-    assert.doesNotMatch(block, /value: totalDebt > 0/);
-    assert.doesNotMatch(block, /tone: totalDebt > 0/);
-  }
-
-  assert.match(dashboardSource, /setSelectedKPI\('overdueDebt'\)/);
+  const block = objectBlockAfter(dashboardSource, "id: 'dashboard-kpi-overdue-debt'");
+  assert.match(block, /label: 'Просроченная дебиторка'/);
+  assert.match(block, /executiveOverdueReceivablesAmount/);
+  assert.doesNotMatch(block, /value: totalDebt/);
   assert.match(kpiModalSource, /\| 'overdueDebt'/);
   assert.match(kpiModalSource, /case 'overdueDebt':/);
 });
@@ -50,6 +44,7 @@ test('dashboard month revenue excludes cancelled archived rentals from money cha
   assert.match(dashboardSource, /import \{ buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows, shouldCountRental \}/);
   assert.match(dashboardSource, /const revenueRentalsStartedThisMonth = rentalsStartedThisMonth\.filter\(shouldCountRental\)/);
   assert.match(dashboardSource, /const monthlyRevenue = revenueRentalsStartedThisMonth\.reduce/);
-  assert.match(dashboardSource, /label: 'Начислено за месяц'[\s\S]{0,220}hint: `\$\{revenueRentalsStartedThisMonth\.length\} аренд`/);
-  assert.match(dashboardSource, /revenueRentalsStartedThisMonth\.forEach\(rental =>/);
+  assert.match(dashboardSource, /const executiveRevenueRentals = rentalsIntersectingThisMonth\.filter\(shouldCountRental\)/);
+  assert.match(dashboardSource, /const executiveRevenueActual = executiveRevenueSourceReady[\s\S]*executiveRevenueRentals\.reduce/);
+  assert.match(dashboardSource, /const executiveMonthPoints = monthDayBuckets\.map[\s\S]*executiveRevenueRentals\.reduce/);
 });

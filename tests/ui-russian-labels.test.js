@@ -4,10 +4,12 @@ import fs from 'node:fs';
 
 test('dashboard and tasks center visible priority summaries use Russian labels', () => {
   const dashboard = fs.readFileSync(new URL('../src/app/pages/Dashboard.tsx', import.meta.url), 'utf8');
+  const executiveCockpit = fs.readFileSync(new URL('../src/app/components/dashboard/ExecutiveCockpitV2.tsx', import.meta.url), 'utf8');
   const tasksCenter = fs.readFileSync(new URL('../src/app/pages/TasksCenter.tsx', import.meta.url), 'utf8');
 
-  assert.match(dashboard, /taskPrioritySummaryLabel\('critical'\)/);
-  assert.match(dashboard, /taskPrioritySummaryLabel\('high'\)/);
+  assert.match(executiveCockpit, /critical: \{ label: 'Критично'/);
+  assert.match(executiveCockpit, /high: \{ label: 'Важно'/);
+  assert.match(executiveCockpit, /medium: \{ label: 'Контроль'/);
   assert.doesNotMatch(dashboard, /Critical:\s*\{/);
   assert.doesNotMatch(dashboard, /High:\s*\{/);
   assert.doesNotMatch(dashboard, /High\/Critical/);

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
+const cockpitSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/dashboard/ExecutiveCockpitV2.tsx'), 'utf8');
 const themeSource = fs.readFileSync(path.join(process.cwd(), 'src/styles/theme.css'), 'utf8');
 const healthModelSource = fs.readFileSync(path.join(process.cwd(), 'src/app/lib/dashboardCompanyHealth.js'), 'utf8');
 
@@ -15,142 +16,31 @@ function sourceBlock(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-test('dashboard company health renders premium trend overview with stable compatibility selectors', () => {
-  const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
-  const trendBlock = sourceBlock(dashboardSource, 'function CompanyHealthTrendOverview', 'function CompanyHealthCommandCenter');
+test('Dashboard V2 renders one compact Company Health card', () => {
+  const block = sourceBlock(cockpitSource, 'function CompactHealth', 'function FleetEconomics');
 
-  assert.match(block, /role="region"/);
-  assert.match(block, /aria-label=\{hasScore \? `Здоровье компании \$\{progress\} из 100: \$\{label\}` : `Здоровье компании: \$\{label\}`\}/);
   assert.match(block, /data-testid="dashboard-company-health"/);
-  assert.match(block, /data-company-health-layout="executive"/);
-  assert.match(block, /company-health-premium/);
-  assert.match(block, /<CompanyHealthTrendOverview/);
   assert.match(block, /data-testid="dashboard-company-health-score"/);
-  assert.match(trendBlock, /data-testid="dashboard-radial-overview"/);
-  assert.match(trendBlock, /data-testid="dashboard-radial-core"/);
-  assert.match(trendBlock, /data-testid="dashboard-radial-node"/);
-  assert.match(trendBlock, /data-testid="dashboard-radial-empty"/);
-  assert.match(trendBlock, /Тренд здоровья компании/);
-  assert.match(trendBlock, /viewBox=\{`0 0 \$\{width\} \$\{height\}`\}/);
-  assert.match(block, /data-testid="dashboard-company-health-visual"/);
+  assert.match(block, /data-testid="dashboard-company-health-status"/);
+  assert.match(block, /data-testid="dashboard-company-health-coverage"/);
   assert.match(block, /data-testid="dashboard-company-health-directions"/);
-  assert.match(block, /data-testid="dashboard-company-health-completeness"/);
-  assert.match(block, /data-testid="dashboard-company-health-compact"/);
-  assert.match(block, /data-testid="dashboard-company-health-segments"/);
-  assert.match(block, /Индекс здоровья/);
-  assert.match(block, /Контуры/);
-  assert.match(block, /riskBadgeLabel/);
-  assert.match(block, /const completenessText = \[/);
-  assert.doesNotMatch(block, /<CompanyHealthBars items=\{bars\} \/>/);
-  assert.doesNotMatch(block, /rentcore-company-health-main/);
-  assert.doesNotMatch(block, /new ResizeObserver/);
-  assert.doesNotMatch(block, /window\.innerWidth/);
-  assert.doesNotMatch(dashboardSource, /Дашборд ещё собирает управленческую картину/);
+  assert.match(block, /health\.directions\.map/);
+  assert.match(block, /health\.score === null \? '—' : health\.score/);
+  assert.match(block, /health\.primaryRisk/);
+  assert.match(block, /health\.explanation/);
+  assert.equal(cockpitSource.match(/data-testid="dashboard-company-health"/g)?.length, 1);
 });
 
-test('dashboard company health trend uses line and area paths instead of radial math', () => {
-  const trendBlock = sourceBlock(dashboardSource, 'function CompanyHealthTrendOverview', 'function CompanyHealthCommandCenter');
-
-  assert.match(dashboardSource, /function smoothSvgPath/);
-  assert.match(trendBlock, /const periods = \['Янв', 'Фев', 'Мар', 'Апр', 'Май'\]/);
-  assert.match(trendBlock, /const series = \[/);
-  assert.match(trendBlock, /companyHealthAreaHealth/);
-  assert.match(trendBlock, /companyHealthTrendGlow/);
-  assert.match(trendBlock, /nodePoints\.map/);
-  assert.doesNotMatch(dashboardSource, /function polarToCartesian/);
-  assert.doesNotMatch(dashboardSource, /describeArc/);
-  assert.doesNotMatch(trendBlock, /<circle[^>]+r="52"/);
-});
-
-test('dashboard company health is one integrated executive analytics card', () => {
-  const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
-
-  assert.match(block, /const directionOrder = \['money', 'fleet', 'service', 'documents', 'delivery', 'returns'\]/);
-  assert.match(block, /\.sort\(\(a, b\) => directionOrder\.indexOf\(a\.id\) - directionOrder\.indexOf\(b\.id\)\)/);
-  assert.match(block, /data-company-health-layout="executive"/);
-  assert.match(block, /data-testid="dashboard-company-health-score"/);
-  assert.match(block, /data-testid="dashboard-company-health-segments"/);
-  assert.match(block, /data-testid="dashboard-company-health-visual"/);
-  assert.match(block, /data-testid="dashboard-company-health-directions"/);
-  assert.match(block, /data-testid="dashboard-company-health-compact"/);
-  assert.match(block, /data-testid="dashboard-company-health-completeness"/);
-  assert.match(block, /data-testid="dashboard-company-health-title"/);
-  assert.match(block, /company-health-header/);
-  assert.match(block, /company-health-status-row/);
-  assert.match(block, /company-health-segmented-bar/);
-  assert.match(block, /company-health-visual-panel/);
-  assert.match(block, /company-health-direction-summary/);
-  assert.match(block, /company-health-completeness-strip/);
-  assert.doesNotMatch(block, /company-health-score-panel/);
-  assert.doesNotMatch(block, /lg:grid-cols-\[220px_minmax/);
-  assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*grid-template-columns: minmax\(0, 1fr\);/);
-  assert.match(themeSource, /@media \(min-width: 1280px\)\s*\{[\s\S]*\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*max-width: 900px;/);
-});
-
-test('dashboard company health renders status row, segmented bar, chart, signals and local data strip', () => {
-  const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
-  const trendBlock = sourceBlock(dashboardSource, 'function CompanyHealthTrendOverview', 'function CompanyHealthCommandCenter');
-
-  assert.match(block, /data-testid="dashboard-company-health-title">Здоровье компании<\/CardTitle>/);
-  assert.match(block, /\{executiveStatus\}/);
-  assert.match(block, /data-testid="dashboard-company-health-score"/);
-  assert.match(block, /data-testid="dashboard-company-health-segments"/);
-  assert.match(block, /data-testid="dashboard-company-health-visual"/);
-  assert.match(block, /data-testid="dashboard-company-health-directions"/);
-  assert.match(block, /data-testid="dashboard-company-health-completeness"/);
-  assert.match(block, /businessSignals\.map\(item => <CompanyHealthSignalCard key=\{item\.id\} item=\{item\} \/>\)/);
-  assert.match(block, /title=\{warning \? warning\.replace/);
-  assert.match(trendBlock, /<path[\s\S]*strokeWidth=\{line\.key === 'health' \? 4 : 2\.5\}/);
-  assert.doesNotMatch(trendBlock, />Нет</);
-});
-
-test('dashboard company health exposes weighted score explanation', () => {
-  const block = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
-
-  assert.match(block, /data-testid="dashboard-company-health-explanation-toggle"/);
-  assert.match(block, /aria-expanded=\{isExplanationOpen\}/);
-  assert.match(block, /Расшифровка/);
-  assert.match(block, /data-testid="dashboard-company-health-explanation"/);
-  assert.match(block, /data-testid="dashboard-company-health-explanation-close"/);
-  assert.match(block, /data-testid="dashboard-company-health-explanation-total"/);
-  assert.match(block, /data-testid="dashboard-company-health-explanation-breakdown"/);
-  assert.match(block, /data-testid=\{`dashboard-company-health-explanation-\$\{direction\.key\}`\}/);
-  assert.match(block, /direction\.isEligible && direction\.score !== null/);
-  assert.match(block, /formatHealthContribution\(direction\.weightedContribution\)/);
-  assert.match(block, /Недостаточно данных · /);
-  assert.match(block, /direction\.subMetrics\?\.length/);
-  assert.match(block, /formatHealthSourceStatus\(metric\.sourceStatus\)/);
+test('Company Health keeps canonical direction inputs and permission filtering', () => {
+  assert.match(dashboardSource, /const executiveHealthDirections = companyHealthScoreBreakdown\.directions/);
+  assert.match(dashboardSource, /executiveHealthDirectionVisibility\[direction\.key\] === true/);
+  assert.match(dashboardSource, /health: \{[\s\S]*score: companyHealthDisplayScore/);
+  assert.match(dashboardSource, /coverage: `Покрытие/);
+  assert.match(dashboardSource, /Недоступные направления исключаются из оценки/);
   assert.doesNotMatch(dashboardSource, /нет данных, 50/);
-  assert.match(block, /direction\.recommendedAction/);
-  assert.match(block, /Действие:/);
-  assert.match(block, /data-testid="dashboard-company-health-explanation-focus"/);
-  assert.match(block, /Сначала исправить:/);
-  assert.match(block, /focusDirections/);
-  assert.match(block, /data-testid="dashboard-company-health-explanation-coverage"/);
-  assert.match(block, /Оценка по доступным данным:/);
-  assert.match(block, /Покрытие данных:/);
-  assert.match(block, /Доверие к оценке:/);
-  assert.match(block, /data-testid="dashboard-company-health-explanation-adjusted"/);
-  assert.match(block, /Итоговая оценка с учётом покрытия:/);
-  assert.match(block, /data-testid="dashboard-company-health-missing-critical"/);
-  assert.match(block, /data-testid="dashboard-company-health-excluded-directions"/);
-  assert.match(block, /data-source-status=\{metric\.sourceStatus\}/);
-  for (const sourceLabel of ['Реальные данные', 'Расчётные данные', 'Нет данных', 'Неоднозначный источник']) {
-    assert.match(dashboardSource, new RegExp(sourceLabel));
-  }
-
-  for (const formulaPart of ['Финансы 30%', 'Аренда 25%', 'Риски 20%', 'Сервис 15%', 'Клиенты 7%', 'Парк 3%']) {
-    assert.match(block, new RegExp(formulaPart));
-  }
-
-  assert.match(themeSource, /\.company-health-explanation-popover\s*\{[\s\S]*position: relative;[\s\S]*width: 100%;[\s\S]*max-height: min\(520px, 56vh\);[\s\S]*overflow: auto;/);
-  assert.match(themeSource, /@container \(max-width: 520px\)\s*\{[\s\S]*\.company-health-explanation-popover\s*\{[\s\S]*width: 100%;[\s\S]*max-height: min\(480px, 60vh\);/);
-  assert.doesNotMatch(themeSource, /\.company-health-explanation-popover\s*\{[\s\S]{0,180}position: absolute/);
 });
 
-test('dashboard Company Health Finance explanation separates factual amounts from missing plans', () => {
-  const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
-  const directionsBlock = sourceBlock(dashboardSource, 'const commandCenterDirections = [', '].filter(Boolean)');
+test('Company Health financial explanation preserves factual and missing-plan semantics', () => {
   const modelInputBlock = sourceBlock(dashboardSource, 'const companyHealthModel = buildCompanyHealthModel({', '});');
 
   assert.match(modelInputBlock, /accruedRentalRevenueAmount: companyHealthRentalRevenueActual/);
@@ -158,115 +48,72 @@ test('dashboard Company Health Finance explanation separates factual amounts fro
   assert.match(modelInputBlock, /actualReceiptsAvailable/);
   assert.match(modelInputBlock, /actualOperatingInflowsAmount/);
   assert.match(modelInputBlock, /actualOperatingOutflowsAmount: factualOperatingOutflows/);
-  assert.match(directionsBlock, /label: 'Поступило'/);
-  assert.match(directionsBlock, /label: 'Начислено'/);
-  assert.match(directionsBlock, /label: 'Просрочено'/);
-  assert.doesNotMatch(directionsBlock, /label: 'Ожидается'/);
-  assert.match(commandCenterBlock, /dashboard-company-health-explanation-\$\{direction\.key\}-facts/);
-  assert.match(healthModelSource, /Поступило:/);
-  assert.match(healthModelSource, /Начислено:/);
-  assert.match(healthModelSource, /План поступлений:/);
-  assert.match(healthModelSource, /Просрочено:/);
-  assert.match(healthModelSource, /Денежный поток:/);
-  assert.match(healthModelSource, /Расходы:/);
-  assert.match(healthModelSource, /План расходов:/);
-  assert.match(healthModelSource, /Утверждённый план поступлений не задан/);
-  assert.match(healthModelSource, /Утверждённый план расходов не задан/);
-  assert.match(healthModelSource, /Денежный поток: недостаточно данных/);
-  assert.match(commandCenterBlock, /metric: isEligible \? `\$\{directionScore\}\/100` : '—'/);
-  assert.match(commandCenterBlock, /stateLabel: isEligible \? `\$\{directionScore\}\/100` : 'Недостаточно данных'/);
+  for (const label of [
+    'Поступило:',
+    'Начислено:',
+    'План поступлений:',
+    'Просрочено:',
+    'Денежный поток:',
+    'Расходы:',
+    'План расходов:',
+    'Утверждённый план поступлений не задан',
+    'Утверждённый план расходов не задан',
+    'Денежный поток: недостаточно данных',
+  ]) {
+    assert.match(healthModelSource, new RegExp(label));
+  }
 });
 
-test('dashboard Company Health Risks explanation exposes exclusive aging states and ambiguous exclusion', () => {
-  const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
+test('Company Health risk explanation keeps exclusive debt aging states', () => {
   const modelInputBlock = sourceBlock(dashboardSource, 'const companyHealthModel = buildCompanyHealthModel({', '});');
 
   assert.match(dashboardSource, /buildCanonicalDebtAging\(mapRentalDebtRowsForCompanyHealth\(rentalDebtRows\)/);
   assert.match(modelInputBlock, /debtAging: companyHealthDebtAging/);
-  assert.match(healthModelSource, /Общая дебиторка:/);
-  assert.match(healthModelSource, /Просроченная дебиторка:/);
-  assert.match(healthModelSource, /Не наступил срок:/);
-  assert.match(healthModelSource, /1–30 дней:/);
-  assert.match(healthModelSource, /31–60 дней:/);
-  assert.match(healthModelSource, /61–90 дней:/);
-  assert.match(healthModelSource, /Более 90 дней:/);
-  assert.match(healthModelSource, /Исключено из расчёта из-за неоднозначной даты:/);
-  assert.match(healthModelSource, /Крупнейшая концентрация риска:/);
-  assert.match(healthModelSource, /Источник aging:/);
-  assert.match(healthModelSource, /Доверие:/);
-  assert.match(healthModelSource, /Недостаточно надёжных данных по срокам задолженности/);
+  for (const label of [
+    'Общая дебиторка:',
+    'Просроченная дебиторка:',
+    'Не наступил срок:',
+    '1–30 дней:',
+    '31–60 дней:',
+    '61–90 дней:',
+    'Более 90 дней:',
+    'Исключено из расчёта из-за неоднозначной даты:',
+    'Источник aging:',
+    'Доверие:',
+  ]) {
+    assert.match(healthModelSource, new RegExp(label));
+  }
   assert.doesNotMatch(healthModelSource, /Долги старше 30\/60\/90 дней/);
-  assert.doesNotMatch(healthModelSource, /30\+ и 60\+/);
-  assert.match(commandCenterBlock, /metric: isEligible \? `\$\{directionScore\}\/100` : '—'/);
-  assert.match(commandCenterBlock, /data-testid="dashboard-company-health-compact"/);
-  assert.match(commandCenterBlock, /data-testid="dashboard-company-health-explanation-coverage"/);
 });
 
-test('dashboard trend overview has empty and zero-value states without letting empty copy dominate', () => {
-  const trendBlock = sourceBlock(dashboardSource, 'function CompanyHealthTrendOverview', 'function CompanyHealthCommandCenter');
+test('Dashboard V2 Company Health layout is responsive without custom legacy geometry', () => {
+  const block = sourceBlock(cockpitSource, 'function CompactHealth', 'function FleetEconomics');
 
-  assert.match(trendBlock, /const hasScore = typeof score === 'number'/);
-  assert.match(trendBlock, /const progress = hasScore \? clampPercent\(score\) : 0/);
-  assert.match(trendBlock, /const shouldShowEmpty = !hasScore \|\| bars\.every\(item => item\.value <= 0\)/);
-  assert.match(trendBlock, /data-radial-state=\{shouldShowEmpty \? 'empty' : progress === 0 \? 'zero' : 'ready'\}/);
-  assert.match(trendBlock, /\{hasScore \? `\$\{progress\}\/100` : label\}/);
-  assert.match(trendBlock, /недостаточно данных/);
-  assert.doesNotMatch(trendBlock, /'Нет'/);
-  assert.doesNotMatch(trendBlock, /'N\/A'/);
+  assert.match(block, /order-7 col-span-12[\s\S]*xl:order-4/);
+  assert.match(block, /xl:grid-cols-\[220px_minmax\(0,1fr\)_minmax\(220px,0\.7fr\)\]/);
+  assert.match(block, /grid-cols-2[\s\S]*sm:grid-cols-3[\s\S]*xl:grid-cols-6/);
+  assert.doesNotMatch(block, /new ResizeObserver|window\.innerWidth|estimatedCardWidth/);
+  assert.doesNotMatch(themeSource, /\.rentcore-dashboard-health\s*\{/);
 });
 
-test('dashboard company health bottom row contains six compact business signal cards', () => {
-  const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
-  const cardBlock = sourceBlock(dashboardSource, 'function CompanyHealthSignalCard', 'function CompanyHealthTrendOverview');
-  const directionsBlock = sourceBlock(dashboardSource, 'const commandCenterDirections = [', '].filter(Boolean)');
-
-  assert.match(commandCenterBlock, /data-testid="dashboard-company-health-compact"/);
-  assert.match(commandCenterBlock, /const businessSignals: CompanyHealthSignal\[] = scoreDirectionOrder\.map/);
-  assert.match(commandCenterBlock, /businessSignals\.map\(item => <CompanyHealthSignalCard key=\{item\.id\} item=\{item\} \/>\)/);
-  assert.match(cardBlock, /<Link[\s\S]*className="rentcore-command-card company-health-signal/);
-  assert.match(cardBlock, /title=\{title\}/);
-  assert.match(cardBlock, /rentcore-command-card-title[\s\S]*\{item\.title\}/);
-  assert.match(cardBlock, /rentcore-command-card-compact-value[\s\S]*\{item\.metric\}/);
-  assert.match(cardBlock, /\{item\.detail\}/);
-  assert.doesNotMatch(cardBlock, /Статус:/);
-  assert.doesNotMatch(cardBlock, /line-clamp-1/);
-
-  for (const label of ['Аренда', 'Финансы', 'Сервис', 'Клиенты', 'Парк', 'Риски']) {
-    assert.match(commandCenterBlock, new RegExp(`'${label}'`));
+test('legacy Company Health renderer and selectors are absent', () => {
+  for (const legacyName of [
+    'CompanyHealthCommandCenter',
+    'CompanyHealthTrendOverview',
+    'CompanyHealthSignalCard',
+    'CompanyHealthBars',
+  ]) {
+    assert.doesNotMatch(dashboardSource, new RegExp(legacyName));
   }
-  for (const label of ['Деньги', 'Парк техники', 'Сервис', 'Доставка', 'Документы', 'Возвраты']) {
-    assert.match(directionsBlock, new RegExp(`title: '${label}'`));
+  for (const legacyTestId of [
+    'dashboard-radial-overview',
+    'dashboard-company-health-visual',
+    'dashboard-company-health-completeness',
+    'dashboard-company-health-compact',
+    'dashboard-company-health-segments',
+  ]) {
+    assert.doesNotMatch(cockpitSource, new RegExp(legacyTestId));
   }
-  assert.equal(directionsBlock.match(/id: '/g)?.length, 6);
-  assert.equal(directionsBlock.match(/source: '/g)?.length, 6);
-  assert.equal(directionsBlock.match(/action: /g)?.length, 6);
-  assert.match(commandCenterBlock, /metric: isEligible \? `\$\{directionScore\}\/100` : '—'/);
-  assert.match(commandCenterBlock, /stateLabel: isEligible \? `\$\{directionScore\}\/100` : 'Недостаточно данных'/);
-  assert.match(commandCenterBlock, /scoreBreakdown\?\.isPreliminary/);
-  assert.match(commandCenterBlock, /coverageSummary/);
-});
-
-test('dashboard company health header pills can shrink and wrap on mobile', () => {
-  const commandCenterBlock = sourceBlock(dashboardSource, 'function CompanyHealthCommandCenter', 'function RiskSignalStrip');
-
-  assert.match(commandCenterBlock, /className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0"/);
-  assert.match(commandCenterBlock, /className="company-health-pill min-w-0 max-w-full rounded-full px-3 py-1 text-sm font-extrabold text-white"/);
-  assert.match(commandCenterBlock, /riskBadgeLabel/);
-  assert.doesNotMatch(commandCenterBlock, /className="flex shrink-0 flex-wrap items-center gap-2"/);
-});
-
-test('dashboard company health layout avoids horizontal overflow on narrow containers', () => {
-  assert.match(themeSource, /\.rentcore-command-map\[data-company-health-layout="executive"\]\s*\{[\s\S]*width: 100%;/);
-  assert.match(themeSource, /\.rentcore-command-column\s*\{[\s\S]*min-width: 0;/);
-  assert.match(themeSource, /\.rentcore-command-compact-list\s*\{[\s\S]*width: 100%;/);
-  assert.match(themeSource, /\.rentcore-command-health-card\s*\{[\s\S]*container-type: inline-size;[\s\S]*min-height: 260px;/);
-  assert.match(themeSource, /\.rentcore-radial-overview\s*\{[\s\S]*width: 100%;[\s\S]*min-height: 156px;[\s\S]*height: 156px;[\s\S]*overflow: hidden;/);
-  assert.match(themeSource, /\.company-health-signals-grid\s*\{[\s\S]*grid-template-columns: repeat\(6, minmax\(0, 1fr\)\);/);
-  assert.match(themeSource, /@container \(max-width: 860px\)\s*\{[\s\S]*\.company-health-signals-grid\s*\{[\s\S]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
-  assert.match(themeSource, /@container \(max-width: 520px\)\s*\{[\s\S]*\.company-health-signals-grid\s*\{[\s\S]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
-  assert.match(themeSource, /\.rentcore-radial-empty\s*\{[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: normal;/);
-  assert.doesNotMatch(dashboardSource, /estimatedCardWidth > 0 && estimatedCardWidth < 180/);
-  assert.doesNotMatch(dashboardSource, /data-card-density=\{cardDensity\}/);
 });
 
 test('dashboard reference mode cannot override global app shell sidebar or logo', () => {
@@ -277,12 +124,10 @@ test('dashboard reference mode cannot override global app shell sidebar or logo'
   assert.doesNotMatch(themeSource, /rentcore-dashboard-reference-mode[\s\S]{0,220}app-shell-title/);
 });
 
-test('dashboard KPI cards prefer readable wrapping over compression', () => {
-  assert.match(themeSource, /\.rentcore-dashboard-kpi-grid\s*\{[\s\S]*grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\);/);
-  assert.match(dashboardSource, /rentcore-command-kpi group h-full min-w-0 w-full/);
-  assert.doesNotMatch(dashboardSource, /min-w-\[220px\]/);
-  assert.match(dashboardSource, /dashboard-kpi-value/);
+test('Dashboard V2 KPI cards prefer readable wrapping over fixed-width legacy cards', () => {
+  assert.match(cockpitSource, /rentcore-command-kpi group min-h-\[126px\]/);
+  assert.match(cockpitSource, /dashboard-kpi-value/);
+  assert.doesNotMatch(cockpitSource, /min-w-\[220px\]/);
   assert.match(themeSource, /\.dashboard-kpi-value\s*\{[\s\S]*word-break: normal;[\s\S]*overflow-wrap: normal;[\s\S]*hyphens: none;/);
-  assert.doesNotMatch(dashboardSource, /xl:grid-cols-7/);
-  assert.doesNotMatch(sourceBlock(dashboardSource, 'data-testid="dashboard-executive-cockpit"', 'data-testid="dashboard-key-signals"'), /break-words/);
+  assert.doesNotMatch(themeSource, /\.rentcore-dashboard-kpi-grid\s*\{/);
 });

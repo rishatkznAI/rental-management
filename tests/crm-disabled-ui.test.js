@@ -27,8 +27,9 @@ test('CRM UI is disabled by default behind the VITE_CRM_ENABLED flag', () => {
 test('CRM calls and visits are not mounted in customer-facing surfaces while disabled', () => {
   assert.match(clientDetailSource, /isCrmEnabled && client && can\('view', 'crm'\)/);
   assert.match(clientDetailSource, /isCrmEnabled && can\('create', 'crm'\)/);
-  assert.match(dashboardSource, /const activityUiEnabled = isCrmEnabled/);
-  assert.match(dashboardSource, /activityUiEnabled && \(/);
+  assert.match(dashboardSource, /const canViewCrm = isCrmEnabled && can\('view', 'crm'\) && canReadCollection\('crm_deals'\)/);
+  assert.match(dashboardSource, /sales: canViewCrm \? \{/);
+  assert.doesNotMatch(dashboardSource, /crm-add-(?:call|visit)|createActivity/);
   assert.match(settingsSource, /sidebarOrder\.filter\(section => section !== 'crm'\)/);
 });
 

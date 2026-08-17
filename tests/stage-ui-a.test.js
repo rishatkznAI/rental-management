@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const themeSource = readFileSync(new URL('../src/styles/theme.css', import.meta.url), 'utf8');
 const dashboardSource = readFileSync(new URL('../src/app/pages/Dashboard.tsx', import.meta.url), 'utf8');
+const executiveCockpitSource = readFileSync(new URL('../src/app/components/dashboard/ExecutiveCockpitV2.tsx', import.meta.url), 'utf8');
 const sidebarSource = readFileSync(new URL('../src/app/components/layout/Sidebar.tsx', import.meta.url), 'utf8');
 const layoutSource = readFileSync(new URL('../src/app/components/layout/Layout.tsx', import.meta.url), 'utf8');
 const loadingSource = readFileSync(new URL('../src/app/components/ui/AppLoadingState.tsx', import.meta.url), 'utf8');
@@ -84,23 +85,22 @@ test('Stage UI-A centralizes the cold industrial visual system', () => {
   assert.match(themeSource, /border:\s*1px solid var\(--rc-border\)/);
 });
 
-test('Stage UI-A dashboard uses four real primary KPI semantics and sequenced motion', () => {
+test('Stage UI-A dashboard uses four real executive KPI semantics without the retired reveal system', () => {
   const primaryKpiBlock = dashboardSource.slice(
-    dashboardSource.indexOf('const primaryDashboardKpis = ['),
-    dashboardSource.indexOf('const executiveControlRows ='),
+    dashboardSource.indexOf('const executiveKpis: ExecutiveKpi[] = ['),
+    dashboardSource.indexOf('const attentionState:'),
   );
 
-  for (const label of ['Поступления месяца', 'Загрузка парка', 'Просроченная дебиторка', 'Активные аренды']) {
+  for (const label of ['Выручка месяца', 'Загрузка парка', 'Просроченная дебиторка', 'Поступления месяца']) {
     assert.match(primaryKpiBlock, new RegExp(label));
   }
-  assert.equal(primaryKpiBlock.match(/id: 'executive-/g)?.length, 4);
-  assert.match(primaryKpiBlock, /monthlyPaidAmount/);
+  assert.equal(primaryKpiBlock.match(/id: 'dashboard-kpi-/g)?.length, 4);
+  assert.match(primaryKpiBlock, /executiveRevenueActual/);
   assert.match(primaryKpiBlock, /utilization/);
-  assert.match(primaryKpiBlock, /overdueReceivablesAmount/);
-  assert.match(primaryKpiBlock, /activeRentalsList\.length/);
-  assert.match(dashboardSource, /primaryDashboardKpis\.map\(\(card, index\)/);
-  assert.match(dashboardSource, /rentcore-dashboard-reveal-kpi/);
-  assert.match(dashboardSource, /isAnimationActive=\{!prefersReducedMotion\}/);
+  assert.match(primaryKpiBlock, /executiveOverdueReceivablesAmount/);
+  assert.match(primaryKpiBlock, /actualReceiptsAmount/);
+  assert.match(executiveCockpitSource, /\{kpis\.map\(\(kpi\) => \(/);
+  assert.doesNotMatch(dashboardSource, /rentcore-dashboard-reveal|prefersReducedMotion/);
   assert.doesNotMatch(primaryKpiBlock, /Math\.random|fake|mock/i);
 });
 

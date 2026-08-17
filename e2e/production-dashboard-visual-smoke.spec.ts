@@ -4,158 +4,31 @@ import { backendCommitGateResult } from '../scripts/release-preflight.mjs';
 
 test.use({ trace: 'off', screenshot: 'off', video: 'off' });
 
-type ViewportCase = {
-  name: 'desktop' | 'tablet' | 'mobile';
-  viewport: { width: number; height: number };
-};
+type UiIssue = { type: string; url: string; status?: number; text?: string };
+type Theme = 'light' | 'dark';
+type BuildInfo = { commit?: string; commitFull?: string; releaseType?: string };
 
-type UiIssue = {
-  type: string;
-  stage: string;
-  url?: string;
-  status?: number;
-  text?: string;
-};
-
-type DashboardLayoutSnapshot = {
-  dashboardOpened: boolean;
-  blockVisible: Record<string, boolean>;
-  overlaps: Array<{ a: string; b: string; x: number; y: number }>;
-  screenBelowAppHeader: boolean;
-  cockpitBelowCommandHeader: boolean;
-  healthVisible: boolean;
-  healthWidth: number;
-  healthWidthShare: number;
-  lowerGridAlignment: null | {
-    leftDelta: number;
-    rightDelta: number;
-    widthDelta: number;
-  };
-  lowerGridWhitespace: null | {
-    left: number;
-    right: number;
-  };
-  healthSvgCount: number;
-  healthScoreVisible: boolean;
-  healthScoreWidthShare: number;
-  healthSegmentsVisible: boolean;
-  healthVisualVisible: boolean;
-  healthVisualWidthShare: number;
-  healthDirectionsVisible: boolean;
-  healthDirectionsWidthShare: number;
-  healthCompletenessVisible: boolean;
-  radialWidthShare: number;
-  radialCoreText: string;
-  radialVisible: boolean;
-  radialCoreVisible: boolean;
-  radialEmptyPresent: boolean;
-  radialNodeCount: number;
-  radialNodesInside: boolean;
-  compactVisible: boolean;
-  compactCards: number;
-  setupBannerCount: number;
-  kpiReadability: Array<{
-    text: string;
-    cardWidth: number;
-    clipped: boolean;
-    wordBreak: string;
-    overflowWrap: string;
-  }>;
-  overflowX: number;
-  overflowOffenders: Array<{
-    tag: string;
-    testId: string;
-    className: string;
-    left: number;
-    right: number;
-    width: number;
-  }>;
-};
-
-type CompanyHealthApiTracker = {
-  inFlight: Map<string, number>;
-  statuses: Map<string, number[]>;
-  transitions: Array<{
-    event: 'start' | 'response' | 'finish' | 'failed';
-    path: string;
-    status?: number;
-  }>;
-};
-
-type CompanyHealthDirectionSnapshot = {
-  key: string;
-  title: string;
-  score: number | null;
-  coveragePercent: number;
-  tileText: string;
-  explanationText: string;
-  unavailableMetricStates: Array<{
-    sourceStatus: 'missing' | 'ambiguous';
-    text: string;
-  }>;
-};
-
-type CompanyHealthBusinessSnapshot = {
-  displayedAdjustedScore: number | null;
-  explanationAdjustedScore: number | null;
-  rawScore: number | null;
-  coveragePercent: number;
-  confidence: string;
-  label: string;
-  excludedDirections: string[];
-  missingCriticalMetrics: string[];
-  directions: CompanyHealthDirectionSnapshot[];
-};
-
-type CompanyHealthClosedSnapshot = {
-  scoreText: string;
-  coverageText: string;
-  label: string;
-  directionTiles: string[];
-  loadingMarkers: number;
-};
-
-type BuildInfo = {
-  commit?: string;
-  commitFull?: string;
-  releaseType?: string;
-};
-
-const VIEWPORT_CASES: ViewportCase[] = [
-  { name: 'desktop', viewport: { width: 1440, height: 900 } },
-  { name: 'tablet', viewport: { width: 768, height: 1024 } },
-  { name: 'mobile', viewport: { width: 390, height: 844 } },
-];
-
-const COMPANY_HEALTH_API_PATHS = [
-  '/api/equipment',
-  '/api/rentals',
-  '/api/gantt_rentals',
-  '/api/service',
-  '/api/clients',
-  '/api/payments',
-  '/api/payment_allocations',
-  '/api/documents',
-  '/api/deliveries',
-  '/api/reports/mechanics-workload',
-  '/api/management/action-queue',
+const VIEWPORTS = [
+  { name: 'desktop', width: 1440, height: 900, theme: 'light' as Theme },
+  { name: 'laptop', width: 1280, height: 800, theme: 'light' as Theme },
+  { name: 'tablet', width: 1024, height: 768, theme: 'light' as Theme },
+  { name: 'mobile', width: 390, height: 844, theme: 'light' as Theme },
+  { name: 'desktop-dark', width: 1440, height: 900, theme: 'dark' as Theme },
+  { name: 'mobile-dark', width: 390, height: 844, theme: 'dark' as Theme },
 ] as const;
 
-const COMPANY_HEALTH_DIRECTION_KEYS = ['rental', 'finance', 'service', 'clients', 'fleet', 'risks'] as const;
-
-function productionAppUrl(frontendUrl: string, route = '/') {
-  const normalizedRoute = route.startsWith('/') ? route : `/${route}`;
-  return `${frontendUrl.replace(/\/$/, '')}/?debugVersion=1&_smoke=${Date.now()}#${normalizedRoute}`;
-}
-
-function shortCommit(value = '') {
-  return String(value || '').trim().slice(0, 12);
+function productionAppUrl(frontendUrl: string) {
+  return `${frontendUrl.replace(/\/$/, '')}/?debugVersion=1&_smoke=${Date.now()}#/`;
 }
 
 function commitsMatch(actual = '', expected = '') {
   const left = String(actual || '').trim();
   const right = String(expected || '').trim();
   return Boolean(left && right && (left.startsWith(right) || right.startsWith(left)));
+}
+
+function shortCommit(value = '') {
+  return String(value || '').trim().slice(0, 12);
 }
 
 function normalizeDashboardSmokeReleaseType(value = '') {
@@ -173,6 +46,10 @@ function resolveDashboardSmokeReleaseType(input: {
     || normalizeDashboardSmokeReleaseType(input.frontendReleaseType)
     || normalizeDashboardSmokeReleaseType(input.backendReleaseType)
     || 'full-stack';
+}
+
+function logStage(stage: string, details: Record<string, unknown>) {
+  console.info(JSON.stringify({ stage, ...details }));
 }
 
 function assertBackendCommitMatchesPolicy(input: {
@@ -201,865 +78,198 @@ function assertBackendCommitMatchesPolicy(input: {
   return gate;
 }
 
-function sanitize(text = '', limit = 800) {
+function sanitize(text = '') {
   return text
     .replace(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[token]')
     .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [token]')
-    .slice(0, limit);
+    .slice(0, 800);
 }
 
-function companyHealthApiPath(url: string, apiUrl: string) {
-  try {
-    if (!url.startsWith(`${apiUrl}/`) && url !== apiUrl) return '';
-    const path = new URL(url).pathname;
-    return COMPANY_HEALTH_API_PATHS.includes(path as (typeof COMPANY_HEALTH_API_PATHS)[number]) ? path : '';
-  } catch {
-    return '';
-  }
-}
-
-function createCompanyHealthApiTracker(): CompanyHealthApiTracker {
-  return {
-    inFlight: new Map(),
-    statuses: new Map(),
-    transitions: [],
-  };
-}
-
-function resetCompanyHealthApiTracker(tracker: CompanyHealthApiTracker) {
-  tracker.inFlight.clear();
-  tracker.statuses.clear();
-  tracker.transitions.length = 0;
-}
-
-function updateCompanyHealthInFlight(tracker: CompanyHealthApiTracker, path: string, delta: number) {
-  const next = Math.max(0, (tracker.inFlight.get(path) || 0) + delta);
-  if (next === 0) tracker.inFlight.delete(path);
-  else tracker.inFlight.set(path, next);
-}
-
-function companyHealthRequestState(tracker: CompanyHealthApiTracker) {
-  const completed = Object.fromEntries(COMPANY_HEALTH_API_PATHS.map(path => [path, tracker.statuses.get(path) || []]));
-  const missing = COMPANY_HEALTH_API_PATHS.filter(path => !(tracker.statuses.get(path) || []).some(status => status >= 200 && status < 400));
-  const inFlight = Array.from(tracker.inFlight.values()).reduce((sum, count) => sum + count, 0);
-  return { completed, missing, inFlight };
-}
-
-function logStage(stage: string, fields: Record<string, unknown> = {}) {
-  console.log('[production-dashboard-visual-smoke] stage', JSON.stringify({ stage, ...fields }));
-}
-
-async function withStage<T>(
-  state: { currentStage: string },
-  stage: string,
-  action: () => Promise<T>,
-): Promise<T> {
-  state.currentStage = stage;
-  logStage(stage, { status: 'start' });
-  try {
-    const result = await action();
-    logStage(stage, { status: 'done' });
-    return result;
-  } catch (error) {
-    logStage(stage, {
-      status: 'failed',
-      message: error instanceof Error ? sanitize(error.message) : sanitize(String(error)),
-    });
-    throw error;
-  }
-}
-
-async function installReadOnlyGuard(
-  page: Page,
-  apiUrl: string,
-  issues: UiIssue[],
-  getStage: () => string,
-  companyHealthRequests: CompanyHealthApiTracker,
-) {
-  await page.route('**/api/**', async (route) => {
-    const request = route.request();
-    const method = request.method().toUpperCase();
-    if (['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-      await route.continue();
-      return;
-    }
-    issues.push({ type: 'blocked-write', stage: getStage(), url: request.url(), text: method });
-    await route.abort('blockedbyclient');
+async function installReadOnlyDiagnostics(page: Page, apiUrl: string, issues: UiIssue[]) {
+  await page.route('**/api/**', async route => {
+    const method = route.request().method().toUpperCase();
+    if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return route.continue();
+    issues.push({ type: 'blocked-write', url: route.request().url(), text: method });
+    return route.abort('blockedbyclient');
   });
-
-  page.on('request', (request) => {
-    if (request.method().toUpperCase() !== 'GET') return;
-    const path = companyHealthApiPath(request.url(), apiUrl);
-    if (!path) return;
-    updateCompanyHealthInFlight(companyHealthRequests, path, 1);
-    companyHealthRequests.transitions.push({ event: 'start', path });
+  page.on('console', message => {
+    if (message.type() !== 'error' || /ResizeObserver loop|favicon/i.test(message.text())) return;
+    issues.push({ type: 'console.error', url: page.url(), text: sanitize(message.text()) });
   });
-
-  page.on('console', (message) => {
-    if (message.type() !== 'error') return;
-    const text = message.text();
-    if (/ResizeObserver loop|Download the React DevTools|favicon/i.test(text)) return;
-    issues.push({ type: 'console.error', stage: getStage(), url: page.url(), text: sanitize(text) });
-  });
-
-  page.on('pageerror', (error) => {
-    issues.push({ type: 'pageerror', stage: getStage(), url: page.url(), text: sanitize(error.stack || error.message) });
-  });
-
-  page.on('response', (response) => {
+  page.on('pageerror', error => issues.push({ type: 'pageerror', url: page.url(), text: sanitize(error.stack || error.message) }));
+  page.on('response', response => {
     const status = response.status();
     const url = response.url();
-    const path = new URL(url).pathname;
-    const isApi = url.startsWith(apiUrl) || /\/api\//.test(url);
-    const companyHealthPath = response.request().method().toUpperCase() === 'GET'
-      ? companyHealthApiPath(url, apiUrl)
-      : '';
-    if (companyHealthPath) {
-      companyHealthRequests.statuses.set(companyHealthPath, [
-        ...(companyHealthRequests.statuses.get(companyHealthPath) || []),
-        status,
-      ]);
-      companyHealthRequests.transitions.push({ event: 'response', path: companyHealthPath, status });
-    }
-    if (status >= 500) {
-      issues.push({ type: 'http-5xx', stage: getStage(), url, status });
-      return;
-    }
-    if (isApi && [401, 403].includes(status) && path !== '/api/auth/me') {
-      issues.push({ type: 'authz-response', stage: getStage(), url, status });
+    if (status >= 500 || (/\/api\//.test(url) && [401, 403].includes(status) && !url.endsWith('/api/auth/me'))) {
+      issues.push({ type: 'http', url, status });
     }
   });
-
-  page.on('requestfinished', (request) => {
-    if (request.method().toUpperCase() !== 'GET') return;
-    const path = companyHealthApiPath(request.url(), apiUrl);
-    if (!path) return;
-    updateCompanyHealthInFlight(companyHealthRequests, path, -1);
-    companyHealthRequests.transitions.push({ event: 'finish', path });
-  });
-
-  page.on('requestfailed', (request) => {
-    const companyHealthPath = request.method().toUpperCase() === 'GET'
-      ? companyHealthApiPath(request.url(), apiUrl)
-      : '';
-    if (companyHealthPath) {
-      updateCompanyHealthInFlight(companyHealthRequests, companyHealthPath, -1);
-      companyHealthRequests.transitions.push({ event: 'failed', path: companyHealthPath });
-    }
+  page.on('requestfailed', request => {
     const failure = request.failure()?.errorText || '';
     if (failure === 'net::ERR_ABORTED' || /favicon|\.map($|\?)/.test(request.url())) return;
-    issues.push({ type: 'requestfailed', stage: getStage(), url: request.url(), text: sanitize(failure) });
+    issues.push({ type: 'requestfailed', url: request.url(), text: sanitize(failure) });
   });
 }
 
-async function dashboardLayoutSnapshot(page: Page): Promise<DashboardLayoutSnapshot> {
-  return await page.evaluate(() => {
-    const isVisible = (element: Element | null) => {
-      if (!element) return false;
-      const rect = element.getBoundingClientRect();
-      const style = window.getComputedStyle(element);
-      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-    };
+async function setTheme(page: Page, theme: Theme) {
+  await page.evaluate(nextTheme => {
+    window.localStorage.setItem('theme', nextTheme);
+    document.documentElement.classList.toggle('dark', nextTheme === 'dark');
+  }, theme);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*dark)/);
+}
 
-    const rectOf = (element: Element | null) => {
-      if (!element) return { width: 0, height: 0 };
-      const rect = element.getBoundingClientRect();
-      return { width: Math.round(rect.width), height: Math.round(rect.height) };
-    };
-    const fullRectOf = (element: Element | null) => {
+async function dashboardSnapshot(page: Page) {
+  return page.evaluate(() => {
+    const rect = (testId: string) => {
+      const element = document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
       if (!element) return null;
-      const rect = element.getBoundingClientRect();
-      const style = window.getComputedStyle(element);
-      return {
-        top: Math.round(rect.top),
-        bottom: Math.round(rect.bottom),
-        left: Math.round(rect.left),
-        right: Math.round(rect.right),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-        visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
-      };
+      const box = element.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom, width: box.width, height: box.height };
     };
-
     const viewportWidth = document.documentElement.clientWidth;
-    const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
-    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
-      .filter((element) => {
-        const style = window.getComputedStyle(element);
-        if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
-        const rect = element.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0 && rect.right > viewportWidth + 1;
-      })
-      .slice(0, 8)
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          tag: element.tagName.toLowerCase(),
-          testId: element.getAttribute('data-testid') || '',
-          className: String(element.className || '').slice(0, 120),
-          left: Math.round(rect.left),
-          right: Math.round(rect.right),
-          width: Math.round(rect.width),
-        };
-      });
-
-    const health = document.querySelector('[data-testid="dashboard-company-health"]');
-    const board = document.querySelector('[data-testid="dashboard-command-board"]');
-    const healthScore = health?.querySelector('[data-testid="dashboard-company-health-score"]') ?? null;
-    const healthSegments = health?.querySelector('[data-testid="dashboard-company-health-segments"]') ?? null;
-    const healthVisual = health?.querySelector('[data-testid="dashboard-company-health-visual"]') ?? null;
-    const healthDirections = health?.querySelector('[data-testid="dashboard-company-health-directions"]') ?? null;
-    const healthCompleteness = health?.querySelector('[data-testid="dashboard-company-health-completeness"]') ?? null;
-    const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]') ?? null;
-    const radial = health?.querySelector('[data-testid="dashboard-radial-overview"]') ?? null;
-    const radialCore = health?.querySelector('[data-testid="dashboard-radial-core"]') ?? null;
-    const radialEmpty = health?.querySelector('[data-testid="dashboard-radial-empty"]') ?? null;
-    const healthRect = rectOf(health ?? null);
-    const boardRect = rectOf(board);
-    const boardFullRect = fullRectOf(board);
-    const radialBox = rectOf(radial);
-    const radialRect = radial?.getBoundingClientRect();
-    const radialNodes = Array.from(health?.querySelectorAll('[data-testid="dashboard-radial-node"]') ?? []);
-    const radialNodesInside = radialRect ? radialNodes.every((node) => {
-      const rect = node.getBoundingClientRect();
-      return rect.left >= radialRect.left - 1
-        && rect.right <= radialRect.right + 1
-        && rect.top >= radialRect.top - 1
-        && rect.bottom <= radialRect.bottom + 1;
-    }) : false;
-    const compactCards = compact?.querySelectorAll('a.rentcore-command-card').length || 0;
-    const blockSelectors = {
-      keySignals: '[data-testid="dashboard-key-signals"]',
-      tasks: '[data-testid="dashboard-tasks"]',
-      monthDynamics: '[data-testid="dashboard-month-dynamics"]',
-      fleet: '[data-testid="dashboard-fleet-utilization"]',
-      receivables: '[data-testid="dashboard-receivables-aging"]',
-      health: '[data-testid="dashboard-company-health"]',
-    };
-    const blockRects = Object.fromEntries(
-      Object.entries(blockSelectors).map(([key, selector]) => [key, fullRectOf(document.querySelector(selector))]),
-    ) as Record<string, ReturnType<typeof fullRectOf>>;
-    const blockNames = Object.keys(blockSelectors);
-    const overlaps: DashboardLayoutSnapshot['overlaps'] = [];
-    for (let index = 0; index < blockNames.length; index += 1) {
-      for (let nextIndex = index + 1; nextIndex < blockNames.length; nextIndex += 1) {
-        const aName = blockNames[index];
-        const bName = blockNames[nextIndex];
-        const a = blockRects[aName];
-        const b = blockRects[bName];
-        if (!a || !b) continue;
-        const x = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
-        const y = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
-        if (x > 1 && y > 1) overlaps.push({ a: aName, b: bName, x, y });
-      }
-    }
-    const appHeader = fullRectOf(document.querySelector('body > div header'));
-    const commandHeader = fullRectOf(document.querySelector('.rentcore-command-header'));
-    const screen = fullRectOf(document.querySelector('.rentcore-command-screen'));
-    const cockpit = fullRectOf(document.querySelector('[data-testid="dashboard-top-cockpit"]'));
-    const kpiCards = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="dashboard-executive-cockpit"] .rentcore-command-kpi'));
-    const kpiReadability = kpiCards.map((card) => {
-      const value = card.querySelector<HTMLElement>('.dashboard-kpi-value');
-      const cardRect = card.getBoundingClientRect();
-      const valueRect = value?.getBoundingClientRect();
-      const style = value ? window.getComputedStyle(value) : null;
-      return {
-        text: value?.textContent?.trim() || '',
-        cardWidth: Math.round(cardRect.width),
-        clipped: Boolean(valueRect && (valueRect.left < cardRect.left - 1 || valueRect.right > cardRect.right + 1)),
-        wordBreak: style?.wordBreak || '',
-        overflowWrap: style?.overflowWrap || '',
-      };
+    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*')).filter(element => {
+      const style = getComputedStyle(element);
+      if (element.closest('.sr-only') || style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
+      const box = element.getBoundingClientRect();
+      return box.width > 0 && box.right > viewportWidth + 1;
+    }).slice(0, 10).map(element => ({ tag: element.tagName, testId: element.dataset.testid || '', right: element.getBoundingClientRect().right }));
+    const touchTargets = Array.from(document.querySelectorAll<HTMLElement>('.dashboard-card-action, .dashboard-attention-action')).map(element => {
+      const box = element.getBoundingClientRect();
+      return { text: (element.textContent || '').trim(), width: box.width, height: box.height };
     });
-
+    const headers = Array.from(document.querySelectorAll('[data-testid="dashboard-month-dynamics-data"] th[scope="col"]')).map(node => (node.textContent || '').trim());
+    const cells = Array.from(document.querySelectorAll('[data-testid="dashboard-month-dynamics-data"] tbody td')).map(node => (node.textContent || '').trim());
     return {
-      dashboardOpened: Boolean(document.querySelector('[data-testid="dashboard-executive-cockpit"]')),
-      blockVisible: Object.fromEntries(Object.entries(blockRects).map(([key, rect]) => [key, Boolean(rect?.visible)])),
-      overlaps,
-      screenBelowAppHeader: Boolean(screen && appHeader && screen.top >= appHeader.bottom - 1),
-      cockpitBelowCommandHeader: Boolean(cockpit && commandHeader && cockpit.top >= commandHeader.bottom - 1),
-      healthVisible: isVisible(health ?? null),
-      healthWidth: healthRect.width,
-      healthWidthShare: healthRect.width / Math.max(boardRect.width, 1),
-      lowerGridAlignment: blockRects.fleet && blockRects.receivables && blockRects.health ? {
-        leftDelta: Math.abs(blockRects.health.left - blockRects.receivables.left),
-        rightDelta: Math.abs(blockRects.health.right - blockRects.fleet.right),
-        widthDelta: Math.abs(blockRects.health.width - (blockRects.fleet.right - blockRects.receivables.left)),
-      } : null,
-      lowerGridWhitespace: blockRects.health && boardFullRect ? {
-        left: Math.max(0, blockRects.health.left - boardFullRect.left),
-        right: Math.max(0, boardFullRect.right - blockRects.health.right),
-      } : null,
-      healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
-      healthScoreVisible: isVisible(healthScore),
-      healthScoreWidthShare: rectOf(healthScore).width / Math.max(healthRect.width, 1),
-      healthSegmentsVisible: isVisible(healthSegments),
-      healthVisualVisible: isVisible(healthVisual),
-      healthVisualWidthShare: rectOf(healthVisual).width / Math.max(healthRect.width, 1),
-      healthDirectionsVisible: isVisible(healthDirections),
-      healthDirectionsWidthShare: rectOf(healthDirections).width / Math.max(healthRect.width, 1),
-      healthCompletenessVisible: isVisible(healthCompleteness),
-      radialWidthShare: radialBox.width / Math.max(healthRect.width, 1),
-      radialCoreText: radialCore?.textContent?.trim() || '',
-      radialVisible: isVisible(radial),
-      radialCoreVisible: isVisible(radialCore),
-      radialEmptyPresent: Boolean(radialEmpty),
-      radialNodeCount: radialNodes.length,
-      radialNodesInside,
-      compactVisible: isVisible(compact),
-      compactCards,
-      setupBannerCount: Array.from(document.body.querySelectorAll('*')).filter(element => element.textContent?.includes('Дашборд ещё собирает управленческую картину')).length,
-      kpiReadability,
-      overflowX: scrollWidth - viewportWidth,
-      overflowOffenders: offenders,
+      overflowX: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) - viewportWidth,
+      offenders,
+      legacySelectors: document.querySelectorAll('[data-testid^="dashboard-legacy-"]').length,
+      chartPresent: document.querySelectorAll('[data-testid="dashboard-month-dynamics"] .recharts-responsive-container').length > 0,
+      tableRows: document.querySelectorAll('[data-testid="dashboard-month-dynamics-data"] tbody tr').length,
+      headers,
+      cells,
+      touchTargets,
+      attention: rect('dashboard-key-signals'),
+      kpis: rect('dashboard-top-cockpit'),
+      month: rect('dashboard-month-dynamics'),
+      money: rect('dashboard-receivables-aging'),
+      fleet: rect('dashboard-fleet-utilization'),
+      service: rect('dashboard-service-executive'),
+      health: rect('dashboard-company-health'),
     };
   });
 }
 
-async function waitForCompanyHealthRequests(
-  tracker: CompanyHealthApiTracker,
-  viewportName: ViewportCase['name'],
-) {
-  await expect.poll(
-    () => {
-      const current = companyHealthRequestState(tracker);
-      return { missing: current.missing, inFlight: current.inFlight };
-    },
-    {
-      message: `${viewportName}: all Company Health source requests should finish successfully`,
-      timeout: 30_000,
-    },
-  ).toEqual({ missing: [], inFlight: 0 });
+async function verifyDashboard(page: Page, testInfo: TestInfo, viewport: typeof VIEWPORTS[number]) {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height });
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible({ timeout: 20_000 });
+  await setTheme(page, viewport.theme);
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible({ timeout: 20_000 });
 
-  const settled = companyHealthRequestState(tracker);
-  logStage(`${viewportName}: company health requests settled`, {
-    completed: settled.completed,
-    transitions: tracker.transitions,
-  });
-  return settled;
-}
+  for (const testId of [
+    'dashboard-executive-v2',
+    'dashboard-top-cockpit',
+    'dashboard-key-signals',
+    'dashboard-month-dynamics',
+    'dashboard-month-dynamics-data',
+    'dashboard-company-health',
+    'dashboard-fleet-utilization',
+    'dashboard-receivables-aging',
+    'dashboard-service-executive',
+  ]) {
+    await expect(page.getByTestId(testId), `${viewport.name}: ${testId}`).toBeAttached();
+  }
 
-async function readClosedCompanyHealthSnapshot(page: Page): Promise<CompanyHealthClosedSnapshot> {
-  return await page.evaluate(() => {
-    const health = document.querySelector('[data-testid="dashboard-company-health"]');
-    const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]');
-    const score = health?.querySelector('[data-testid="dashboard-company-health-score"] > div:first-child strong');
-    const coverage = health?.querySelector('[data-testid="dashboard-company-health-coverage"]');
-    const label = health?.querySelector('[data-testid="dashboard-company-health-status"]');
-    const directionTiles = Array.from(compact?.querySelectorAll<HTMLElement>('a.rentcore-command-card') || [])
-      .map(item => item.innerText.replace(/\s+/g, ' ').trim());
-    const loadingMarkers = health?.querySelectorAll('[aria-busy="true"], [data-loading="true"], [data-testid*="skeleton"]').length || 0;
-    return {
-      scoreText: score?.textContent?.replace(/\s+/g, ' ').trim() || '',
-      coverageText: coverage?.textContent?.replace(/\s+/g, ' ').trim() || '',
-      label: label?.textContent?.replace(/\s+/g, ' ').trim() || '',
-      directionTiles,
-      loadingMarkers,
-    };
-  });
-}
+  const snapshot = await dashboardSnapshot(page);
+  expect(snapshot.overflowX, JSON.stringify(snapshot)).toBeLessThanOrEqual(1);
+  expect(snapshot.offenders, JSON.stringify(snapshot)).toEqual([]);
+  expect(snapshot.legacySelectors).toBe(0);
+  expect(snapshot.tableRows).toBeGreaterThan(0);
+  expect(snapshot.headers).toEqual(['Дата', 'Начисления (факт)', 'Поступления (факт)', 'Прогноз начислений']);
+  expect(snapshot.cells.some(value => /рублей|Нет данных/.test(value)), JSON.stringify(snapshot.cells.slice(0, 8))).toBeTruthy();
+  if (viewport.name.startsWith('mobile')) {
+    expect(snapshot.attention?.top || 0).toBeLessThan(snapshot.kpis?.top || 0);
+    expect(snapshot.kpis?.top || 0).toBeLessThan(snapshot.month?.top || 0);
+    expect(snapshot.money?.top || 0).toBeLessThan(snapshot.fleet?.top || 0);
+    expect(snapshot.fleet?.top || 0).toBeLessThan(snapshot.service?.top || 0);
+    expect(snapshot.service?.top || 0).toBeLessThan(snapshot.health?.top || 0);
+    expect(snapshot.touchTargets.length).toBeGreaterThan(0);
+    expect(snapshot.touchTargets.filter(target => target.height < 44), JSON.stringify(snapshot.touchTargets)).toEqual([]);
+  } else if (viewport.width >= 1280) {
+    expect(snapshot.kpis?.top || 0).toBeLessThan(snapshot.attention?.top || 0);
+  }
 
-async function waitForStableClosedCompanyHealth(
-  page: Page,
-  viewportName: ViewportCase['name'],
-) {
-  let previousSignature = '';
-  let stableReads = 0;
-  let latest: CompanyHealthClosedSnapshot | null = null;
-  await expect.poll(
-    async () => {
-      latest = await readClosedCompanyHealthSnapshot(page);
-      const valid = latest.directionTiles.length === 6
-        && latest.loadingMarkers === 0
-        && /Покрытие \d+% · доверие \S+/i.test(latest.coverageText)
-        && Boolean(latest.scoreText)
-        && Boolean(latest.label);
-      const signature = valid ? JSON.stringify(latest) : '';
-      stableReads = signature && signature === previousSignature ? stableReads + 1 : signature ? 1 : 0;
-      previousSignature = signature;
-      return valid && stableReads >= 3;
-    },
-    {
-      message: `${viewportName}: hydrated Company Health DOM should be stable for three consecutive reads`,
-      timeout: 15_000,
-    },
-  ).toBe(true);
-  expect(latest, `${viewportName}: stable Company Health snapshot should exist`).not.toBeNull();
-  logStage(`${viewportName}: company health ready`, latest as unknown as Record<string, unknown>);
-  return latest!;
-}
-
-async function readCompanyHealthBusinessSnapshot(page: Page): Promise<CompanyHealthBusinessSnapshot> {
-  return await page.evaluate((directionKeys) => {
-    const health = document.querySelector('[data-testid="dashboard-company-health"]');
-    const text = (selector: string) => health?.querySelector(selector)?.textContent?.replace(/\s+/g, ' ').trim() || '';
-    const parseScore = (value: string) => {
-      const match = value.match(/(\d+)\s*\/\s*100/);
-      return match ? Number(match[1]) : null;
-    };
-    const coverageText = text('[data-testid="dashboard-company-health-explanation-coverage"]');
-    const adjustedText = text('[data-testid="dashboard-company-health-explanation-adjusted"]');
-    const totalText = text('[data-testid="dashboard-company-health-explanation-total"]');
-    const excludedText = text('[data-testid="dashboard-company-health-excluded-directions"]');
-    const missingText = text('[data-testid="dashboard-company-health-missing-critical"]');
-    const rawScore = coverageText.match(/Оценка по доступным данным:\s*(\d+|—)\s*\/\s*100/i)?.[1] || '—';
-    const coveragePercent = Number(coverageText.match(/Покрытие данных:\s*(\d+)%/i)?.[1] || Number.NaN);
-    const confidence = coverageText.match(/Доверие к оценке:\s*([^·]+)$/i)?.[1]?.trim() || '';
-    const compactTiles = Array.from(health?.querySelectorAll<HTMLElement>('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card') || []);
-    const directions = directionKeys.map((key, index) => {
-      const row = health?.querySelector<HTMLElement>(`[data-testid="dashboard-company-health-explanation-${key}"]`) || null;
-      const tile = compactTiles[index] || null;
-      const scoreText = row?.querySelector(':scope > div:first-child span:last-child')?.textContent?.replace(/\s+/g, ' ').trim() || '';
-      const tileTitle = tile?.querySelector('.rentcore-command-card-title')?.textContent?.replace(/\s+/g, ' ').trim() || key;
-      const tileValue = tile?.querySelector('.rentcore-command-card-compact-value')?.textContent?.replace(/\s+/g, ' ').trim() || '';
-      const tileCoverage = tile?.querySelector('.rentcore-command-card-copy')?.textContent?.match(/Покрытие\s+(\d+)%/i)?.[1];
-      const unavailableMetricStates = Array.from(row?.querySelectorAll<HTMLElement>('[data-source-status="missing"], [data-source-status="ambiguous"]') || [])
-        .map(metric => ({
-          sourceStatus: metric.getAttribute('data-source-status') as 'missing' | 'ambiguous',
-          text: metric.textContent?.replace(/\s+/g, ' ').trim() || '',
-        }));
-      return {
-        key,
-        title: tileTitle,
-        score: parseScore(scoreText),
-        coveragePercent: Number(tileCoverage || Number.NaN),
-        tileText: `${tileTitle} ${tileValue} ${tile?.querySelector('.rentcore-command-card-copy')?.textContent || ''}`.replace(/\s+/g, ' ').trim(),
-        explanationText: row?.innerText.replace(/\s+/g, ' ').trim() || '',
-        unavailableMetricStates,
-      };
-    });
-    const stripList = (value: string, prefix: RegExp, separator: string) => value
-      .replace(prefix, '')
-      .split(separator)
-      .map(item => item.trim())
-      .filter(Boolean);
-    return {
-      displayedAdjustedScore: parseScore(totalText),
-      explanationAdjustedScore: parseScore(adjustedText),
-      rawScore: rawScore === '—' ? null : Number(rawScore),
-      coveragePercent,
-      confidence,
-      label: text('[data-testid="dashboard-company-health-status"]'),
-      excludedDirections: excludedText
-        ? stripList(excludedText, /^Не участвуют из-за покрытия ниже 30%:\s*/i, ',')
-        : [],
-      missingCriticalMetrics: missingText
-        ? stripList(missingText, /^Критические метрики без оценки:\s*/i, ';')
-        : [],
-      directions,
-    };
-  }, [...COMPANY_HEALTH_DIRECTION_KEYS]);
-}
-
-async function waitForStableBusinessSnapshot(
-  page: Page,
-  viewportName: ViewportCase['name'],
-) {
-  let previousSignature = '';
-  let stableReads = 0;
-  let latest: CompanyHealthBusinessSnapshot | null = null;
-  await expect.poll(
-    async () => {
-      latest = await readCompanyHealthBusinessSnapshot(page);
-      const valid = latest.directions.length === 6
-        && Number.isFinite(latest.coveragePercent)
-        && Boolean(latest.confidence)
-        && latest.displayedAdjustedScore === latest.explanationAdjustedScore
-        && latest.directions.every(direction => Number.isFinite(direction.coveragePercent));
-      const signature = valid ? JSON.stringify(latest) : '';
-      stableReads = signature && signature === previousSignature ? stableReads + 1 : signature ? 1 : 0;
-      previousSignature = signature;
-      return valid && stableReads >= 3;
-    },
-    {
-      message: `${viewportName}: open Company Health breakdown should be complete and stable`,
-      timeout: 15_000,
-    },
-  ).toBe(true);
-  expect(latest, `${viewportName}: stable Company Health business snapshot should exist`).not.toBeNull();
-  return latest!;
-}
-
-async function captureCompanyHealthCard(page: Page, testInfo: TestInfo, fileName: string) {
-  const health = page.getByTestId('dashboard-company-health');
-  expect(await health.count(), `${fileName}: Company Health card should be unique`).toBe(1);
-  await health.screenshot({
-    path: testInfo.outputPath(fileName),
-    timeout: 15_000,
+  await page.screenshot({
+    path: testInfo.outputPath(`production-dashboard-${viewport.name}.png`),
+    fullPage: true,
+    timeout: 20_000,
   });
 }
 
-async function openAndVerifyCompanyHealthExplanation(
-  page: Page,
-  viewportCase: ViewportCase,
-  state: { currentStage: string },
-  testInfo: TestInfo,
-) {
-  await withStage(state, `${viewportCase.name}: company health closed screenshot`, async () => {
-    await captureCompanyHealthCard(page, testInfo, `production-dashboard-${viewportCase.name}-company-health-closed.png`);
-  });
+test('production authenticated Dashboard V2 visual, accessibility, and mobile smoke', async ({ page }, testInfo) => {
+  test.setTimeout(240_000);
 
-  await withStage(state, `${viewportCase.name}: explanation opened`, async () => {
-    const toggle = page.getByTestId('dashboard-company-health-explanation-toggle');
-    expect(await toggle.count(), `${viewportCase.name}: explanation toggle should be unique`).toBe(1);
-    await toggle.click();
-    await expect(page.getByTestId('dashboard-company-health-explanation')).toBeVisible({ timeout: 10_000 });
-  });
-
-  const business = await withStage(state, `${viewportCase.name}: business snapshot`, async () => {
-    const value = await waitForStableBusinessSnapshot(page, viewportCase.name);
-    logStage(`${viewportCase.name}: company health business values`, value as unknown as Record<string, unknown>);
-    return value;
-  });
-
-  await withStage(state, `${viewportCase.name}: business assertions`, async () => {
-    expect(business.directions, `${viewportCase.name}: Company Health should expose exactly six direction states`).toHaveLength(6);
-    expect(business.displayedAdjustedScore, `${viewportCase.name}: displayed score should match explanation adjusted total`).toBe(business.explanationAdjustedScore);
-    expect(business.confidence, `${viewportCase.name}: confidence should be present`).not.toBe('');
-    expect(Number.isFinite(business.coveragePercent), `${viewportCase.name}: coverage should be present`).toBe(true);
-    business.directions.forEach(direction => {
-      if (direction.score === null) {
-        expect(direction.tileText, `${viewportCase.name}: insufficient ${direction.title} tile should show an em dash`).toContain('—');
-      }
-      direction.unavailableMetricStates.forEach(metric => {
-        expect(metric.text, `${viewportCase.name}: ${metric.sourceStatus} metric should not show a numeric score`).toContain('—/100');
-        expect(metric.text, `${viewportCase.name}: ${metric.sourceStatus} metric should not show a fake numeric score`).not.toMatch(/\b\d+\/100/);
-      });
-    });
-    if (business.coveragePercent < 30) {
-      expect(business.displayedAdjustedScore, `${viewportCase.name}: coverage below 30% should not show a numeric score`).toBeNull();
-      expect(business.label, `${viewportCase.name}: coverage below 30% should show the insufficient label`).toContain('Недостаточно данных для оценки');
-    } else if (business.coveragePercent < 60) {
-      expect(business.label, `${viewportCase.name}: coverage from 30% through 59% should be preliminary`).toContain('Предварительная оценка');
-    }
-  });
-
-  await withStage(state, `${viewportCase.name}: explanation containment`, async () => {
-    const containment = await page.evaluate(() => {
-      const health = document.querySelector('[data-testid="dashboard-company-health"]')?.getBoundingClientRect();
-      const explanation = document.querySelector('[data-testid="dashboard-company-health-explanation"]')?.getBoundingClientRect();
-      const viewportWidth = document.documentElement.clientWidth;
-      const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
-      return {
-        inside: Boolean(health && explanation
-          && explanation.left >= health.left - 1
-          && explanation.right <= health.right + 1
-          && explanation.top >= health.top - 1
-          && explanation.bottom <= health.bottom + 1),
-        overflowX: scrollWidth - viewportWidth,
-      };
-    });
-    expect(containment.inside, `${viewportCase.name}: explanation should remain inside Company Health card`).toBe(true);
-    expect(containment.overflowX, `${viewportCase.name}: open explanation overflow should be exactly zero`).toBe(0);
-    await captureCompanyHealthCard(page, testInfo, `production-dashboard-${viewportCase.name}-company-health-open.png`);
-  });
-
-  await withStage(state, `${viewportCase.name}: explanation closed`, async () => {
-    const close = page.getByTestId('dashboard-company-health-explanation-close');
-    expect(await close.count(), `${viewportCase.name}: explanation close control should be unique`).toBe(1);
-    await close.click();
-    await expect(page.getByTestId('dashboard-company-health-explanation')).toHaveCount(0);
-  });
-
-  return business;
-}
-
-function comparableCompanyHealthSnapshot(snapshot: CompanyHealthBusinessSnapshot) {
-  return {
-    displayedAdjustedScore: snapshot.displayedAdjustedScore,
-    rawScore: snapshot.rawScore,
-    coveragePercent: snapshot.coveragePercent,
-    confidence: snapshot.confidence,
-    label: snapshot.label,
-    excludedDirections: snapshot.excludedDirections,
-    missingCriticalMetrics: snapshot.missingCriticalMetrics,
-    directions: snapshot.directions.map(direction => ({
-      key: direction.key,
-      title: direction.title,
-      score: direction.score,
-      coveragePercent: direction.coveragePercent,
-      unavailableMetricStates: direction.unavailableMetricStates,
-    })),
-  };
-}
-
-async function expectDashboardContract(
-  page: Page,
-  viewportCase: ViewportCase,
-  state: { currentStage: string },
-  testInfo: TestInfo,
-): Promise<DashboardLayoutSnapshot> {
-  await withStage(state, `${viewportCase.name}: dashboard opened`, async () => {
-    await expect(
-      page.getByRole('heading', { name: 'Операционный центр', exact: true }),
-      `${viewportCase.name}: authenticated Dashboard heading should be visible`,
-    ).toBeVisible({ timeout: 20_000 });
-    await expect(
-      page.getByTestId('dashboard-executive-cockpit'),
-      `${viewportCase.name}: Dashboard cockpit should be visible`,
-    ).toBeVisible({ timeout: 20_000 });
-    await expect(
-      page.getByTestId('dashboard-company-health'),
-      `${viewportCase.name}: company health block should be visible`,
-    ).toBeVisible({ timeout: 20_000 });
-  });
-
-  const snapshot = await withStage(state, `${viewportCase.name}: layout snapshot`, async () => {
-    const value = await dashboardLayoutSnapshot(page);
-    logStage(`${viewportCase.name}: layout`, value as unknown as Record<string, unknown>);
-    return value;
-  });
-
-  await withStage(state, `${viewportCase.name}: dashboard layout assertions`, async () => {
-    expect(snapshot.dashboardOpened, `${viewportCase.name}: authenticated Dashboard should be open`).toBe(true);
-    expect(snapshot.blockVisible, `${viewportCase.name}: production-critical Dashboard blocks should be visible`).toEqual({
-      keySignals: true,
-      tasks: true,
-      monthDynamics: true,
-      fleet: true,
-      receivables: true,
-      health: true,
-    });
-    expect(snapshot.overlaps, `${viewportCase.name}: production-critical Dashboard blocks should not overlap`).toEqual([]);
-    expect(snapshot.screenBelowAppHeader, `${viewportCase.name}: Dashboard screen should start below app header`).toBe(true);
-    expect(snapshot.cockpitBelowCommandHeader, `${viewportCase.name}: KPI row should start below command header`).toBe(true);
-    expect(snapshot.setupBannerCount, `${viewportCase.name}: removed setup banner should not be visible`).toBe(0);
-    expect(snapshot.healthVisible, `${viewportCase.name}: company health executive module should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.healthSvgCount, `${viewportCase.name}: company health should not render dominant SVG circle (${JSON.stringify(snapshot)})`).toBe(0);
-    expect(snapshot.healthScoreVisible, `${viewportCase.name}: company health score summary should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.healthSegmentsVisible, `${viewportCase.name}: company health segmented bar should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.healthVisualVisible, `${viewportCase.name}: company health visual panel should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.healthDirectionsVisible, `${viewportCase.name}: company health direction summary should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.healthCompletenessVisible, `${viewportCase.name}: company health local data strip should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.radialVisible, `${viewportCase.name}: radial overview should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.radialCoreVisible, `${viewportCase.name}: radial core should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.radialEmptyPresent, `${viewportCase.name}: radial empty compatibility selector should remain present (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.radialCoreText, `${viewportCase.name}: radial core should not show a huge Нет placeholder`).not.toContain('Нет');
-    expect(snapshot.radialNodeCount, `${viewportCase.name}: radial overview should render business contour nodes`).toBeGreaterThanOrEqual(6);
-    expect(snapshot.radialNodesInside, `${viewportCase.name}: radial nodes should stay inside overview (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.compactVisible, `${viewportCase.name}: compact wrapper should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-    expect(snapshot.compactCards, `${viewportCase.name}: compact wrapper should contain six direction cards`).toBe(6);
-    expect(snapshot.kpiReadability, `${viewportCase.name}: KPI values should render`).not.toEqual([]);
-    expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewportCase.name}: KPI values should not clip`).toEqual([]);
-    expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewportCase.name}: KPI values should not force letter wrapping`).toEqual([]);
-    if (viewportCase.name === 'desktop') {
-      expect(snapshot.healthWidth, `${viewportCase.name}: company health should use the full 12-column row`).toBeGreaterThanOrEqual(1000);
-      expect(snapshot.healthWidthShare, `${viewportCase.name}: company health should fill the available board width`).toBeGreaterThanOrEqual(0.95);
-      expect(snapshot.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should align with receivables left edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-      expect(snapshot.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should align with fleet right edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-      expect(snapshot.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should span the receivables plus fleet row (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-      expect(snapshot.lowerGridWhitespace?.left ?? Number.POSITIVE_INFINITY, `${viewportCase.name}: company health should not float in a centered empty row (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(16);
-      expect(snapshot.healthScoreWidthShare, `${viewportCase.name}: status row should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
-      expect(snapshot.healthVisualWidthShare, `${viewportCase.name}: health chart should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
-      expect(snapshot.healthDirectionsWidthShare, `${viewportCase.name}: business signals should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
-      expect(snapshot.radialWidthShare, `${viewportCase.name}: compatibility chart shell should span the visual area (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.9);
-      expect(Math.min(...snapshot.kpiReadability.map(item => item.cardWidth)), `${viewportCase.name}: KPI cards should keep readable width`).toBeGreaterThanOrEqual(220);
-    }
-  });
-
-  await withStage(state, `${viewportCase.name}: overflow checked`, async () => {
-    expect(snapshot.overflowX, `${viewportCase.name}: document should not scroll horizontally (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-    expect(snapshot.overflowOffenders, `${viewportCase.name}: visible elements should stay inside viewport`).toEqual([]);
-  });
-
-  await withStage(state, `${viewportCase.name}: screenshot captured`, async () => {
-    await page.screenshot({
-      path: testInfo.outputPath(`production-dashboard-${viewportCase.name}.png`),
-      fullPage: false,
-      timeout: 15_000,
-    });
-  });
-
-  return snapshot;
-}
-
-test('production authenticated dashboard visual smoke', async ({ page }, testInfo) => {
-  test.setTimeout(180_000);
-
-  const state = { currentStage: 'start' };
-  const issues: UiIssue[] = [];
   const apiUrl = requiredEnv('PRODUCTION_API_URL', 'production dashboard visual smoke').replace(/\/$/, '');
   const frontendUrl = requiredEnv('PRODUCTION_FRONTEND_URL', 'production dashboard visual smoke').replace(/\/$/, '');
   const expectedCommit = String(process.env.EXPECTED_RELEASE_COMMIT || '').trim();
-  const companyHealthRequests = createCompanyHealthApiTracker();
-
-  logStage('start', {
-    expectedCommit: shortCommit(expectedCommit),
-    frontendUrl,
-    apiUrl,
-  });
-
-  await installReadOnlyGuard(page, apiUrl, issues, () => state.currentStage, companyHealthRequests);
+  const issues: UiIssue[] = [];
+  await installReadOnlyDiagnostics(page, apiUrl, issues);
 
   const api = await playwrightRequest.newContext({ baseURL: apiUrl });
   let token = '';
   let backendBuild: BuildInfo | null = null;
-  let backendCommit = '';
-  let releaseType = resolveDashboardSmokeReleaseType({
-    envReleaseType: String(process.env.RELEASE_TYPE || ''),
-  });
   try {
-    await withStage(state, 'production preflight', async () => {
-      const versionResponse = await api.get('/api/version', { timeout: 15_000 });
-      expect(versionResponse.ok(), `production /api/version should return 200: ${versionResponse.status()}`).toBeTruthy();
-      const version = await versionResponse.json() as {
-        ok?: boolean;
-        build?: BuildInfo;
-        app?: { disabled?: boolean };
-      };
-      expect(version.ok, 'production /api/version should report ok=true').toBe(true);
-      expect(version.app?.disabled, 'production app.disabled should be false for authenticated visual smoke').toBe(false);
-      backendBuild = version.build || null;
-      backendCommit = version.build?.commitFull || version.build?.commit || '';
-      releaseType = resolveDashboardSmokeReleaseType({
-        envReleaseType: String(process.env.RELEASE_TYPE || ''),
-        backendReleaseType: backendBuild?.releaseType,
-      });
-      logStage('releaseType', { releaseType });
+    const versionResponse = await api.get('/api/version', { timeout: 15_000 });
+    expect(versionResponse.ok()).toBeTruthy();
+    const version = await versionResponse.json() as { ok?: boolean; build?: BuildInfo; app?: { disabled?: boolean } };
+    expect(version.ok).toBe(true);
+    expect(version.app?.disabled).toBe(false);
+    backendBuild = version.build || null;
+    const loginResponse = await api.post('/api/auth/login', {
+      data: {
+        email: requiredEnv('PRODUCTION_ADMIN_EMAIL', 'production dashboard visual smoke'),
+        password: requiredEnv('PRODUCTION_ADMIN_PASSWORD', 'production dashboard visual smoke'),
+      },
+      timeout: 20_000,
     });
-
-    await withStage(state, 'login done', async () => {
-      const loginResponse = await api.post('/api/auth/login', {
-        data: {
-          email: requiredEnv('PRODUCTION_ADMIN_EMAIL', 'production dashboard visual smoke'),
-          password: requiredEnv('PRODUCTION_ADMIN_PASSWORD', 'production dashboard visual smoke'),
-        },
-        timeout: 20_000,
-      });
-      expect(loginResponse.ok(), `production login should return 200: ${loginResponse.status()}`).toBeTruthy();
-      const login = await loginResponse.json() as { token?: string };
-      expect(login.token, 'production login should return token').toBeTruthy();
-      token = login.token || '';
-    });
+    expect(loginResponse.ok()).toBeTruthy();
+    token = ((await loginResponse.json()) as { token?: string }).token || '';
+    expect(token).toBeTruthy();
   } finally {
     await api.dispose();
   }
 
-  await page.addInitScript((authToken) => {
-    window.localStorage.setItem('app_auth_token', authToken);
-    window.localStorage.setItem('theme', 'dark');
-    document.documentElement?.classList.add('dark');
-  }, token);
-
-  const snapshots: Record<string, DashboardLayoutSnapshot> = {};
-  const companyHealthSnapshots: Record<string, CompanyHealthBusinessSnapshot> = {};
-  let frontendCommit = '';
-  let frontendApiBaseUrl = '';
-  try {
-    for (const viewportCase of VIEWPORT_CASES) {
-      await withStage(state, `${viewportCase.name}: viewport set`, async () => {
-        await page.setViewportSize(viewportCase.viewport);
+  await page.addInitScript(authToken => window.localStorage.setItem('app_auth_token', authToken), token);
+  for (const viewport of VIEWPORTS) {
+    await page.goto(productionAppUrl(frontendUrl), { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit), null, { timeout: 15_000 });
+    const marker = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
+    expect(marker?.apiBaseUrl).toBe(apiUrl);
+    const releaseType = resolveDashboardSmokeReleaseType({
+      envReleaseType: String(process.env.RELEASE_TYPE || ''),
+      frontendReleaseType: marker?.releaseType,
+      backendReleaseType: backendBuild?.releaseType,
+    });
+    if (expectedCommit) {
+      expect(commitsMatch(marker?.commit || '', expectedCommit)).toBeTruthy();
+      assertBackendCommitMatchesPolicy({
+        backendBuild,
+        expectedCommit,
+        releaseType,
+        label: 'backend expected release commit',
       });
-
-      await withStage(state, `${viewportCase.name}: dashboard navigation`, async () => {
-        resetCompanyHealthApiTracker(companyHealthRequests);
-        await page.goto(productionAppUrl(frontendUrl, '/'), {
-          waitUntil: 'domcontentloaded',
-          timeout: 30_000,
-        });
-      });
-
-      await withStage(state, `${viewportCase.name}: marker checked`, async () => {
-        await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit), null, { timeout: 15_000 });
-        const marker = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
-        frontendCommit = marker?.commit || frontendCommit;
-        frontendApiBaseUrl = marker?.apiBaseUrl || frontendApiBaseUrl;
-        releaseType = resolveDashboardSmokeReleaseType({
-          envReleaseType: String(process.env.RELEASE_TYPE || ''),
-          frontendReleaseType: marker?.releaseType,
-          backendReleaseType: backendBuild?.releaseType,
-        });
-        expect(marker?.apiBaseUrl, 'frontend marker should point at production API').toBe(apiUrl);
-        if (expectedCommit) {
-          expect(
-            commitsMatch(marker?.commit || '', shortCommit(expectedCommit)),
-            `frontend marker should match expected production commit: expected=${shortCommit(expectedCommit)} frontend=${marker?.commit || 'missing'}`,
-          ).toBeTruthy();
-          assertBackendCommitMatchesPolicy({
-            backendBuild,
-            expectedCommit,
-            releaseType,
-            label: 'backend expected release commit',
-          });
-        }
-        if (marker?.commit && backendBuild?.commit) {
-          assertBackendCommitMatchesPolicy({
-            backendBuild,
-            expectedCommit: marker.commit,
-            releaseType,
-            label: 'frontend/backend commit match',
-          });
-        }
-      });
-
-      await withStage(state, `${viewportCase.name}: company health requests`, async () => {
-        await waitForCompanyHealthRequests(companyHealthRequests, viewportCase.name);
-      });
-
-      await withStage(state, `${viewportCase.name}: company health hydration`, async () => {
-        await waitForStableClosedCompanyHealth(page, viewportCase.name);
-      });
-
-      snapshots[viewportCase.name] = await expectDashboardContract(page, viewportCase, state, testInfo);
-      companyHealthSnapshots[viewportCase.name] = await openAndVerifyCompanyHealthExplanation(page, viewportCase, state, testInfo);
     }
-
-    await withStage(state, 'company health viewport consistency', async () => {
-      const desktop = comparableCompanyHealthSnapshot(companyHealthSnapshots.desktop);
-      expect(
-        comparableCompanyHealthSnapshot(companyHealthSnapshots.tablet),
-        `tablet Company Health business state should match desktop: ${JSON.stringify(companyHealthSnapshots)}`,
-      ).toEqual(desktop);
-      expect(
-        comparableCompanyHealthSnapshot(companyHealthSnapshots.mobile),
-        `mobile Company Health business state should match desktop: ${JSON.stringify(companyHealthSnapshots)}`,
-      ).toEqual(desktop);
-    });
-
-    await withStage(state, 'console/api checked', async () => {
-      expect(issues, `Dashboard smoke should not emit console/page/API errors. Last stage: ${state.currentStage}`).toEqual([]);
-    });
-
-    const errorCounts = {
-      consoleErrors: issues.filter(issue => issue.type === 'console.error').length,
-      pageErrors: issues.filter(issue => issue.type === 'pageerror').length,
-      apiErrors: issues.filter(issue => ['http-5xx', 'authz-response', 'requestfailed'].includes(issue.type)).length,
-    };
-
-    logStage('final result', {
-      expectedCommit: shortCommit(expectedCommit),
-      frontendCommit,
-      backendCommit,
-      releaseType,
-      apiBaseUrl: frontendApiBaseUrl,
-      compactCards: {
-        tablet: snapshots.tablet?.compactCards ?? 0,
-        mobile: snapshots.mobile?.compactCards ?? 0,
-      },
-      horizontalOverflow: {
-        desktop: snapshots.desktop?.overflowX ?? 0,
-        tablet: snapshots.tablet?.overflowX ?? 0,
-        mobile: snapshots.mobile?.overflowX ?? 0,
-      },
-      companyHealth: comparableCompanyHealthSnapshot(companyHealthSnapshots.desktop),
-      ...errorCounts,
-      errors: issues.length,
-    });
-  } catch (error) {
-    const lastSnapshot = snapshots.mobile || snapshots.tablet || snapshots.desktop || null;
-    console.error('[production-dashboard-visual-smoke] failure', JSON.stringify({
-      lastStage: state.currentStage,
-      compactCards: {
-        tablet: snapshots.tablet?.compactCards ?? 0,
-        mobile: snapshots.mobile?.compactCards ?? 0,
-      },
-      issues,
-      companyHealthRequests: companyHealthRequestState(companyHealthRequests),
-      companyHealthTransitions: companyHealthRequests.transitions,
-      companyHealthSnapshots,
-      lastSnapshot,
-      message: error instanceof Error ? sanitize(error.message) : sanitize(String(error)),
-    }));
-    throw error;
+    if (marker?.commit && backendBuild?.commit) {
+      assertBackendCommitMatchesPolicy({
+        backendBuild,
+        expectedCommit: marker.commit,
+        releaseType,
+        label: 'frontend/backend commit match',
+      });
+    }
+    await verifyDashboard(page, testInfo, viewport);
   }
+
+  expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);
 });

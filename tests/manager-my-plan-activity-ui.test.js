@@ -6,32 +6,18 @@ import path from 'node:path';
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
 const serviceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/manager-my-plan.service.ts'), 'utf8');
 
-function managerPlanBlockSource() {
-  const blockStart = dashboardSource.indexOf('function ManagerMyPlanBlock');
-  const blockEnd = dashboardSource.indexOf('const DASHBOARD_CHART_COLORS');
-  assert.ok(blockStart >= 0 && blockEnd > blockStart);
-  return dashboardSource.slice(blockStart, blockEnd);
-}
-
-test('Dashboard contains upgraded manager activity blocks', () => {
-  const block = managerPlanBlockSource();
-  assert.match(block, /План активности/);
-  assert.match(block, /Прогресс активности/);
-  assert.match(block, /Последние действия/);
-  assert.match(block, /Быстро добавить активность/);
-  assert.match(block, /data-testid="manager-plan-quick-add-activity"/);
-  assert.match(block, /Звонок/);
-  assert.match(block, /Выезд/);
-  assert.match(block, /Заметка/);
+test('Dashboard preserves the manager activity read request without mounting retired blocks', () => {
+  assert.match(dashboardSource, /queryKey: \['manager-my-plan', user\?\.id\]/);
+  assert.match(dashboardSource, /queryFn: managerMyPlanService\.get/);
+  assert.match(dashboardSource, /enabled: canViewManagerMyPlan/);
+  assert.doesNotMatch(dashboardSource, /function ManagerMyPlanBlock|manager-plan-quick-add-activity/);
+  assert.match(dashboardSource, /return <ExecutiveCockpitV2 \{\.\.\.executiveCockpitProps\} \/>/);
 });
 
-test('Dashboard activity UI has safe empty states and no destructive controls', () => {
-  const block = managerPlanBlockSource();
-  assert.match(block, /Пока нет зафиксированных действий/);
-  assert.match(block, /На сегодня нет критичных задач/);
-  assert.doesNotMatch(block, />\\s*(Удалить|Архивировать|Списать)\\s*</);
-  assert.doesNotMatch(block, /api\.(patch|put|del)\(/);
-  assert.doesNotMatch(block, /password|token|cookie|secret|privateKey|authorization|hash/i);
+test('Dashboard manager activity integration remains read-only', () => {
+  assert.doesNotMatch(dashboardSource, /managerMyPlanService\.(?:createActivity|patch|put|del)/);
+  assert.doesNotMatch(dashboardSource, /api\.(patch|put|del)\(/);
+  assert.doesNotMatch(dashboardSource, /password|token|cookie|secret|privateKey|authorization|hash/i);
 });
 
 test('manager activity service only exposes create activity endpoint for MVP writes', () => {

@@ -125,12 +125,17 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
     'duplicate Динамика месяца',
     'duplicate Здоровье компании',
     'production-dashboard-cockpit-desktop.png',
+    'production-dashboard-cockpit-light-desktop.png',
     'production-dashboard-cockpit-mobile.png',
     'production-dashboard-cockpit-tablet.png',
   ]) {
     assert.match(releaseSmokeSource, new RegExp(marker));
   }
   assert.ok(releaseSmokeSource.includes(".toHaveAttribute('href', /#\\/equipment\\?status=rented$/);"));
+  assert.match(releaseSmokeSource, /company health must not compare revenue to an unavailable plan/);
+  assert.match(releaseSmokeSource, /not\.toContainText\(\/Выручка аренды \(\?:ниже\|близка\) к плану\//);
+  assert.match(releaseSmokeSource, /window\.localStorage\.setItem\('theme', 'dark'\)/);
+  assert.match(releaseSmokeSource, /window\.localStorage\.setItem\('theme', 'light'\)/);
   assert.match(releaseSmokeSource, /captureExecutiveCockpitScreenshots\(page, normalizedConfig\.frontendUrl, testInfo\)/);
 });
 

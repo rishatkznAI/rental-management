@@ -640,8 +640,12 @@ function buildRentalDirection(input, contours) {
   const utilization = firstFiniteInput(input, ['utilization']);
   const activeEquipment = firstFiniteInput(input, ['activeEquipment', 'activeFleetCount']);
   const availableEquipment = firstFiniteInput(input, ['availableEquipment']);
-  const rentalRevenueActual = firstFiniteInput(input, ['rentalRevenueActual', 'monthlyRevenue']);
-  const rentalRevenuePlan = firstFiniteInput(input, ['rentalRevenuePlan', 'fleetMonthlyRevenuePlan']);
+  const rentalRevenueActual = input.rentalRevenueActualAvailable === false
+    ? null
+    : firstFiniteInput(input, ['rentalRevenueActual', 'monthlyRevenue']);
+  const rentalRevenuePlan = input.rentalRevenuePlanAvailable === true
+    ? firstFiniteInput(input, ['rentalRevenuePlan', 'fleetMonthlyRevenuePlan'])
+    : null;
   const starts = firstFiniteInput(input, ['rentalStartsThisMonth', 'newRentalsCount']);
   const returns = firstFiniteInput(input, ['rentalReturnsThisMonth', 'rentalsReturningThisMonth']);
   const extensions = firstFiniteInput(input, ['rentalExtensionsThisMonth', 'extendedRentalsCount']);

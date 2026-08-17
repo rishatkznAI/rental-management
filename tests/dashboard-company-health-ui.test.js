@@ -153,7 +153,7 @@ test('dashboard Company Health Finance explanation separates factual amounts fro
   const directionsBlock = sourceBlock(dashboardSource, 'const commandCenterDirections = [', '].filter(Boolean)');
   const modelInputBlock = sourceBlock(dashboardSource, 'const companyHealthModel = buildCompanyHealthModel({', '});');
 
-  assert.match(modelInputBlock, /accruedRentalRevenueAmount: monthlyRevenue/);
+  assert.match(modelInputBlock, /accruedRentalRevenueAmount: companyHealthRentalRevenueActual/);
   assert.match(modelInputBlock, /actualReceiptsAmount/);
   assert.match(modelInputBlock, /actualReceiptsAvailable/);
   assert.match(modelInputBlock, /actualOperatingInflowsAmount/);

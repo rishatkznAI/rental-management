@@ -9,7 +9,7 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
 ] as const;
 
-type Scenario = 'healthy' | 'troubled' | 'empty' | 'partial';
+type Scenario = 'healthy' | 'troubled' | 'empty' | 'partial' | 'partial-plan';
 
 function dateOffset(days: number) {
   const date = new Date();
@@ -28,7 +28,7 @@ function dashboardFixture(scenario: Scenario) {
     { id: 'eq-1', category: 'own', status: 'rented', activeInFleet: true, inventoryNumber: 'INV-001', manufacturer: 'Mantall', model: 'HZ260', plannedMonthlyRevenue: 300000 },
     { id: 'eq-2', category: 'own', status: scenario === 'troubled' ? 'in_service' : 'rented', activeInFleet: true, inventoryNumber: 'INV-002', manufacturer: 'Mantall', model: 'XE80', plannedMonthlyRevenue: 240000 },
     { id: 'eq-3', category: 'own', status: 'rented', activeInFleet: true, inventoryNumber: 'INV-003', manufacturer: 'Dingli', model: 'JCPT', plannedMonthlyRevenue: 180000 },
-    { id: 'eq-4', category: 'own', status: 'available', activeInFleet: true, inventoryNumber: 'INV-004', manufacturer: 'LGMG', model: 'AS1212', plannedMonthlyRevenue: 150000 },
+    { id: 'eq-4', category: 'own', status: 'available', activeInFleet: true, inventoryNumber: 'INV-004', manufacturer: 'LGMG', model: 'AS1212', plannedMonthlyRevenue: scenario === 'partial-plan' ? undefined : 150000 },
   ];
   const clients = [
     { id: 'client-1', counterpartyId: 'cp-1', company: 'ООО Строй', status: 'active', manager: 'Администратор', creditLimit: 1000000 },
@@ -40,7 +40,7 @@ function dashboardFixture(scenario: Scenario) {
     { id: 'rent-3', counterpartyId: 'cp-1', clientId: 'client-1', client: 'ООО Строй', equipmentId: 'eq-3', equipmentInv: 'INV-003', startDate: dateOffset(-3), endDate: dateOffset(18), status: 'active', amount: 160000, manager: 'Администратор', expectedPaymentDate: dateOffset(10) },
   ];
   const rentals = gantt_rentals.map(rental => ({ ...rental, plannedReturnDate: rental.endDate, equipment: [rental.equipmentInv], price: rental.amount, rate: '', discount: 0, deliveryAddress: '', contact: '' }));
-  const payments = scenario === 'healthy' ? [
+  const payments = scenario === 'healthy' || scenario === 'partial-plan' ? [
     { id: 'pay-1', invoiceNumber: 'INV-PAY-1', counterpartyId: 'cp-1', clientId: 'client-1', rentalId: 'rent-1', amount: 280000, paidAmount: 280000, dueDate: dateOffset(-2), paidDate: dateOffset(-1), status: 'paid' },
     { id: 'pay-2', invoiceNumber: 'INV-PAY-2', counterpartyId: 'cp-2', clientId: 'client-2', rentalId: 'rent-2', amount: 210000, paidAmount: 210000, dueDate: dateOffset(-1), paidDate: dateOffset(0), status: 'paid' },
   ] : [];
@@ -173,6 +173,16 @@ test.describe('Dashboard V2 data states', () => {
       expect(pageErrors, pageErrors.join('\n')).toEqual([]);
     });
   }
+});
+
+test('incomplete fleet plan never produces a Company Health plan comparison', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await loginAsAdmin(page);
+  await installScenario(page, 'partial-plan');
+  await navigateInApp(page, '/');
+
+  await expect(page.getByTestId('dashboard-month-dynamics')).toContainText('Не задан');
+  await expect(page.getByTestId('dashboard-company-health')).not.toContainText(/Выручка аренды (?:ниже|близка) к плану/);
 });
 
 test('payments-only dashboard never exposes forbidden Finance or Service drill-downs', async ({ page }) => {

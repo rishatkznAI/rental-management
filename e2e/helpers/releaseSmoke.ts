@@ -322,6 +322,11 @@ async function expectExecutiveCockpitVisible(page: Page) {
   await expect(keySignals.getByRole('heading', { name: /Требует внимания|Очередь внимания|Главные сигналы сегодня/ }), 'dashboard signal strip should be visible').toBeVisible();
   await expect(monthDynamics.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
   await expectDashboardCompanyHealthLayout(page, companyHealth);
+  const monthDynamicsText = await monthDynamics.innerText();
+  if (/План\s*Не задан/i.test(monthDynamicsText)) {
+    await expect(companyHealth, 'company health must not compare revenue to an unavailable plan')
+      .not.toContainText(/Выручка аренды (?:ниже|близка) к плану/);
+  }
   await expectNoHorizontalOverflow(page, 'dashboard executive cockpit');
 
   const fleetUtilizationCard = page.getByTestId('dashboard-kpi-fleet-utilization');
@@ -473,6 +478,11 @@ async function countVisibleHeadingsInViewport(page: Page, text: string) {
 async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: string, testInfo?: TestInfo) {
   if (!testInfo) return;
 
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => window.localStorage.setItem('theme', 'dark'));
+  await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
+  await expectExecutiveCockpitVisible(page);
+  await expect(page.locator('html')).toHaveClass(/dark/);
   await page.screenshot({
     path: testInfo.outputPath('production-dashboard-cockpit-desktop.png'),
     fullPage: false,
@@ -495,7 +505,18 @@ async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: strin
   });
 
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.evaluate(() => window.localStorage.setItem('theme', 'light'));
   await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
+  await expectExecutiveCockpitVisible(page);
+  await expect(page.locator('html')).not.toHaveClass(/dark/);
+  await page.screenshot({
+    path: testInfo.outputPath('production-dashboard-cockpit-light-desktop.png'),
+    fullPage: false,
+  });
+
+  await page.evaluate(() => window.localStorage.setItem('theme', 'dark'));
+  await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
+  await expectExecutiveCockpitVisible(page);
 }
 
 async function directLoginSmoke(config: ReleaseSmokeConfig) {

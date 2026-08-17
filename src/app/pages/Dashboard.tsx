@@ -4120,6 +4120,17 @@ export default function Dashboard() {
   const largestProblemDebtAmount = clientDebtAgingRows.reduce((max, row) => Math.max(max, row.debt || 0), 0);
   const fleetMonthlyRevenuePlan = activeRentalFleetLookup.activeFleet.reduce((sum, item) => sum + (Number(item.plannedMonthlyRevenue) || 0), 0);
   const equipmentWithPlannedRevenueCount = activeRentalFleetLookup.activeFleet.filter(item => Number(item.plannedMonthlyRevenue) > 0).length;
+  const rentalRevenuePlanAvailable = activeEquipment > 0
+    && equipmentWithPlannedRevenueCount === activeEquipment
+    && fleetMonthlyRevenuePlan > 0;
+  const companyHealthRentalRevenueActual = ganttRentalsQuery.isSuccess
+    ? rentalsIntersectingThisMonth
+        .filter(shouldCountRental)
+        .reduce((sum, rental) => sum + calculateRentalBilling(rental, {
+          periodStart: toDateKey(monthStart),
+          periodEnd: todayKey,
+        }).finalRentalAmount, 0)
+    : null;
   const agedEquipmentCount = equipmentList.filter(item => {
     const year = Number(item.year);
     return Number.isFinite(year) && today.getFullYear() - year >= 8;
@@ -4218,7 +4229,7 @@ export default function Dashboard() {
     utilization,
     monthlyRevenue,
     monthlyPaidAmount,
-    accruedRentalRevenueAmount: monthlyRevenue,
+    accruedRentalRevenueAmount: companyHealthRentalRevenueActual,
     actualReceiptsAmount,
     actualReceiptsAvailable,
     actualOperatingInflowsAmount,
@@ -4227,9 +4238,11 @@ export default function Dashboard() {
     actualOperatingOutflowsAvailable,
     actualExpenseAmount: factualOperatingOutflows,
     actualExpensesAvailable: actualOperatingOutflowsAvailable,
-    rentalRevenueActual: monthlyRevenue,
+    rentalRevenueActual: companyHealthRentalRevenueActual,
+    rentalRevenueActualAvailable: ganttRentalsQuery.isSuccess,
     rentalRevenuePlan: fleetMonthlyRevenuePlan,
     fleetMonthlyRevenuePlan,
+    rentalRevenuePlanAvailable,
     totalDebt,
     overdueReceivablesAmount,
     overdueReceivablesAvailable,
@@ -4621,9 +4634,7 @@ export default function Dashboard() {
   const executiveRevenueDelta = executiveRevenueActual !== null && previousComparableRevenue > 0
     ? ((executiveRevenueActual - previousComparableRevenue) / previousComparableRevenue) * 100
     : null;
-  const executiveRevenuePlanAvailable = activeEquipment > 0
-    && equipmentWithPlannedRevenueCount === activeEquipment
-    && fleetMonthlyRevenuePlan > 0;
+  const executiveRevenuePlanAvailable = rentalRevenuePlanAvailable;
 
   const utilizationComparisonDate = new Date(today);
   utilizationComparisonDate.setDate(utilizationComparisonDate.getDate() - 30);

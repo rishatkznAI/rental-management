@@ -347,6 +347,7 @@ test('company health directions expose weighted sub-metric methodology', () => {
     hasDebtSourceData: true,
     rentalRevenueActual: 900_000,
     rentalRevenuePlan: 1_000_000,
+    rentalRevenuePlanAvailable: true,
     rentalStartsThisMonth: 4,
     rentalReturnsThisMonth: 2,
     reservedRentalsCount: 2,
@@ -418,6 +419,27 @@ test('company health missing sub-metrics have null score and zero contribution',
   assert.equal(costPressure?.isScorable, false);
   assert.equal(costPressure?.contribution, 0);
   assert.doesNotMatch(costPressure?.reason || '', /нейтральная оценка 50/);
+});
+
+test('Rental revenue never compares against an incomplete fleet plan', () => {
+  const model = buildCompanyHealthModel({
+    equipmentCount: 2,
+    activeEquipment: 2,
+    rentalsCount: 1,
+    utilization: 50,
+    rentalRevenueActual: 0,
+    rentalRevenuePlan: 100_000,
+    fleetMonthlyRevenuePlan: 100_000,
+    rentalRevenuePlanAvailable: false,
+  });
+  const revenue = model.scoreDetails.directions
+    .find(item => item.key === 'rental')
+    ?.subMetrics.find(metric => metric.key === 'rental_revenue_to_plan');
+
+  assert.equal(revenue?.score, null);
+  assert.equal(revenue?.sourceStatus, 'missing');
+  assert.equal(revenue?.reason, 'Недостаточно данных по плану выручки аренды');
+  assert.doesNotMatch(JSON.stringify(model), /Выручка аренды ниже плана/);
 });
 
 test('Finance never treats accrued revenue, forecast, or invoiced amount as an approved receipts plan', () => {
@@ -595,6 +617,7 @@ test('company health risk score is strict for one large confirmed overdue debtor
     hasDebtSourceData: true,
     rentalRevenueActual: 800_000,
     rentalRevenuePlan: 1_000_000,
+    rentalRevenuePlanAvailable: true,
     rentalStartsThisMonth: 1,
     rentalReturnsThisMonth: 1,
     reservedRentalsCount: 1,

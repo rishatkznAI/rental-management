@@ -50,6 +50,19 @@ test('revenue and receipts keep distinct date and accounting semantics', () => {
   assert.match(dashboardSource, /Прогноз — детерминированная сумма уже известных договоров/);
 });
 
+test('Company Health uses canonical month revenue and only an authoritative fleet plan', () => {
+  assert.match(dashboardSource, /const rentalRevenuePlanAvailable = activeEquipment > 0[\s\S]*equipmentWithPlannedRevenueCount === activeEquipment[\s\S]*fleetMonthlyRevenuePlan > 0/);
+  assert.match(dashboardSource, /const companyHealthRentalRevenueActual = ganttRentalsQuery\.isSuccess[\s\S]*rentalsIntersectingThisMonth[\s\S]*calculateRentalBilling\(rental, \{[\s\S]*periodStart: toDateKey\(monthStart\),[\s\S]*periodEnd: todayKey/);
+  const modelInputStart = dashboardSource.indexOf('const companyHealthModel = buildCompanyHealthModel({');
+  const modelInputEnd = dashboardSource.indexOf('});', modelInputStart);
+  const modelInput = dashboardSource.slice(modelInputStart, modelInputEnd);
+  assert.match(modelInput, /rentalRevenueActual: companyHealthRentalRevenueActual/);
+  assert.match(modelInput, /rentalRevenueActualAvailable: ganttRentalsQuery\.isSuccess/);
+  assert.match(modelInput, /rentalRevenuePlanAvailable/);
+  assert.doesNotMatch(modelInput, /rentalRevenueActual: monthlyRevenue/);
+  assert.match(dashboardSource, /const executiveRevenuePlanAvailable = rentalRevenuePlanAvailable/);
+});
+
 test('receivable drill-downs use canonical identity rather than debtor names', () => {
   assert.match(dashboardSource, /companyHealthDebtAging\.overdueReceivablesAvailable === true/);
   assert.match(dashboardSource, /executiveEligibleOverdueReceivables/);

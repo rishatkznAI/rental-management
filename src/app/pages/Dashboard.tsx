@@ -52,6 +52,7 @@ import { financeService } from '../services/finance.service';
 import { managerMyPlanService, type ManagerActivityInput, type ManagerActivityItem, type ManagerMyPlanResponse } from '../services/manager-my-plan.service';
 import { reportsService, type MechanicsWorkloadReport } from '../services/reports.service';
 import { deliveriesService } from '../services/deliveries.service';
+import { crmDealsService } from '../services/crm-deals.service';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { isRegularServiceTicket } from '../lib/serviceTicketKind.js';
 import { useClientsList } from '../hooks/useClients';
@@ -76,6 +77,7 @@ import type {
   ManagerBreakdownResponse,
   Delivery,
   ManagementActionAttentionItem,
+  CrmDeal,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows, shouldCountRental } from '../lib/finance';
@@ -96,6 +98,13 @@ import {
 import { APP_BRAND_NAME } from '../lib/appBrand';
 import { buildRentalNewRoute } from '../lib/rental-new-route.js';
 import { usePrefersReducedMotion } from '../lib/animations';
+import {
+  ExecutiveCockpitV2,
+  type ExecutiveAttentionSignal,
+  type ExecutiveCockpitV2Props,
+  type ExecutiveDataState,
+  type ExecutiveKpi,
+} from '../components/dashboard/ExecutiveCockpitV2';
 
 // ─── helpers ───────────────────────────────────────────────────────────────────
 
@@ -1943,6 +1952,11 @@ export default function Dashboard() {
   const { can, canReadCollection } = usePermissions();
   const qc = useQueryClient();
   const prefersReducedMotion = usePrefersReducedMotion();
+  const [executiveFreshnessNow, setExecutiveFreshnessNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setExecutiveFreshnessNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const canViewReports = can('view', 'reports');
   const canViewFinance = can('view', 'finance');
   const canViewPayments = can('view', 'payments');
@@ -1955,6 +1969,7 @@ export default function Dashboard() {
   const canViewPlanner = can('view', 'planner');
   const canViewDeliveries = can('view', 'deliveries');
   const canViewTasksCenter = can('view', 'tasks_center');
+  const canViewCrm = isCrmEnabled && can('view', 'crm') && canReadCollection('crm_deals');
   const canReadFinanceOperations = canReadCollection('finance_operations');
   const canViewManagerMyPlan = Boolean(
     canViewRentals && (
@@ -1966,16 +1981,21 @@ export default function Dashboard() {
   );
 
   // All data via react-query (auto-refetches on window focus by default)
-  const { data: equipment = [] }  = useEquipmentList({ enabled: canViewEquipment });
-  const { data: rentals = [] }    = useRentalsList({ enabled: canViewRentals });
-  const { data: rawTickets = [] } = useServiceTicketsList({ enabled: canViewService });
+  const equipmentQuery = useEquipmentList({ enabled: canViewEquipment });
+  const equipment = equipmentQuery.data ?? [];
+  const rentalsQuery = useRentalsList({ enabled: canViewRentals });
+  const rentals = rentalsQuery.data ?? [];
+  const serviceTicketsQuery = useServiceTicketsList({ enabled: canViewService });
+  const rawTickets = serviceTicketsQuery.data ?? [];
   const tickets = useMemo(() => rawTickets.filter(isRegularServiceTicket), [rawTickets]);
-  const { data: clients = [] }    = useClientsList({ enabled: canViewClients });
+  const clientsQuery = useClientsList({ enabled: canViewClients });
+  const clients = clientsQuery.data ?? [];
   const paymentsQuery = usePaymentsList({ enabled: canViewMoney });
   const payments = paymentsQuery.data ?? [];
   const paymentAllocationsQuery = usePaymentAllocationsList({ enabled: canViewMoney });
   const paymentAllocations = paymentAllocationsQuery.data ?? [];
-  const { data: documents = [] }  = useDocumentsList({ enabled: canViewDocuments });
+  const documentsQuery = useDocumentsList({ enabled: canViewDocuments });
+  const documents = documentsQuery.data ?? [];
   const { data: debtCollectionPlansResponse } = useDebtCollectionPlans({ enabled: canViewMoney });
   const debtCollectionPlans = debtCollectionPlansResponse?.plans ?? [];
   const { data: tasksCenterData } = useQuery({
@@ -2016,10 +2036,17 @@ export default function Dashboard() {
     enabled: canViewFinance && canReadFinanceOperations,
     staleTime: 1000 * 60 * 2,
   });
-  const { data: deliveries = [] } = useQuery<Delivery[]>({
+  const deliveriesQuery = useQuery<Delivery[]>({
     queryKey: ['deliveries', 'dashboard'],
     queryFn: deliveriesService.getAll,
     enabled: canViewDeliveries && canReadCollection('deliveries'),
+    staleTime: 1000 * 60 * 2,
+  });
+  const deliveries = deliveriesQuery.data ?? [];
+  const crmDealsQuery = useQuery<CrmDeal[]>({
+    queryKey: ['crm-deals', 'dashboard-executive'],
+    queryFn: crmDealsService.getAll,
+    enabled: canViewCrm,
     staleTime: 1000 * 60 * 2,
   });
   const managerMyPlanQuery = useQuery<ManagerMyPlanResponse>({
@@ -3035,9 +3062,7 @@ export default function Dashboard() {
   const actualReceiptsAmount = actualReceiptPayments.reduce((sum, payment) => sum + getDashboardPaidAmount(payment), 0);
   const hasUndatedActualReceipts = payments.some(payment => getDashboardPaidAmount(payment) > 0 && !payment.paidDate);
   const actualReceiptsAvailable = paymentsQuery.isSuccess && !hasUndatedActualReceipts;
-  const overdueReceivablesAvailable = paymentsQuery.isSuccess
-    && paymentAllocationsQuery.isSuccess
-    && ganttRentalsQuery.isSuccess;
+  const overdueReceivablesAvailable = companyHealthDebtAging.overdueReceivablesAvailable === true;
   const factualCashFlowItems = companyHealthCashFlowQuery.data?.items ?? [];
   const factualManualInflows = factualCashFlowItems
     .filter(item => item.direction === 'incoming' && item.source === 'finance_operations')
@@ -4129,7 +4154,13 @@ export default function Dashboard() {
       : utilization < 60 || utilization > UTILIZATION_TARGET
         ? 'warning'
         : 'success';
-  const serviceBlockersCount = criticalTickets.length + unassignedServiceTickets.length + ticketsWaitingParts.length + overdueServiceTickets.length;
+  const serviceBlockerTicketIds = new Set([
+    ...criticalTickets,
+    ...unassignedServiceTickets,
+    ...ticketsWaitingParts,
+    ...overdueServiceTickets,
+  ].map(ticket => String(ticket.id || '')).filter(Boolean));
+  const serviceBlockersCount = serviceBlockerTicketIds.size;
   const serviceTone: DashboardTone = !hasServiceSourceData
     ? 'default'
     : serviceBlockersCount > 0
@@ -4551,6 +4582,534 @@ export default function Dashboard() {
     .filter((item): item is (typeof commandCenterDirections)[number] => Boolean(item));
   const commandCenterTasks = todayWorkRows.slice(0, 5);
 
+  // Dashboard V2 executive model. The model reuses canonical billing, debtor identity,
+  // fleet denominator and service lifecycle data; it does not persist or reclassify records.
+  const monthStartKey = toDateKey(monthStart);
+  const monthEndKey = toDateKey(monthEnd);
+  const executiveRevenueRentals = rentalsIntersectingThisMonth.filter(shouldCountRental);
+  const executiveRevenueSourceReady = ganttRentalsQuery.isSuccess;
+  const executiveRevenueActual = executiveRevenueSourceReady
+    ? executiveRevenueRentals.reduce((sum, rental) => sum + calculateRentalBilling(rental, {
+        periodStart: monthStartKey,
+        periodEnd: todayKey,
+      }).finalRentalAmount, 0)
+    : null;
+  const executiveRevenueForecast = executiveRevenueSourceReady
+    ? executiveRevenueRentals.reduce((sum, rental) => sum + calculateRentalBilling(rental, {
+        periodStart: monthStartKey,
+        periodEnd: monthEndKey,
+      }).finalRentalAmount, 0)
+    : null;
+  const previousMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const previousMonthEnd = endOfMonth(previousMonthStart);
+  const previousComparableEnd = new Date(
+    previousMonthStart.getFullYear(),
+    previousMonthStart.getMonth(),
+    Math.min(today.getDate(), previousMonthEnd.getDate()),
+    23,
+    59,
+    59,
+    999,
+  );
+  const previousComparableRevenue = viewPlannerRentals
+    .filter(shouldCountRental)
+    .filter(rental => overlapsRange(rental.startDate, rental.endDate, previousMonthStart, previousComparableEnd))
+    .reduce((sum, rental) => sum + calculateRentalBilling(rental, {
+      periodStart: toDateKey(previousMonthStart),
+      periodEnd: toDateKey(previousComparableEnd),
+    }).finalRentalAmount, 0);
+  const executiveRevenueDelta = executiveRevenueActual !== null && previousComparableRevenue > 0
+    ? ((executiveRevenueActual - previousComparableRevenue) / previousComparableRevenue) * 100
+    : null;
+  const executiveRevenuePlanAvailable = activeEquipment > 0
+    && equipmentWithPlannedRevenueCount === activeEquipment
+    && fleetMonthlyRevenuePlan > 0;
+
+  const utilizationComparisonDate = new Date(today);
+  utilizationComparisonDate.setDate(utilizationComparisonDate.getDate() - 30);
+  const utilizationComparisonEnd = new Date(utilizationComparisonDate);
+  utilizationComparisonEnd.setHours(23, 59, 59, 999);
+  const utilizationComparisonKeys = new Set(
+    viewPlannerRentals
+      .filter(shouldCountRental)
+      .filter(rental => overlapsRange(rental.startDate, rental.endDate, utilizationComparisonDate, utilizationComparisonEnd))
+      .map(rental => getRentalEquipmentKey(rental, activeRentalFleetLookup))
+      .filter(Boolean),
+  );
+  const utilizationThirtyDaysAgo = activeEquipment > 0
+    ? Math.round((utilizationComparisonKeys.size / activeEquipment) * 100)
+    : null;
+  const utilizationDeltaPoints = utilizationThirtyDaysAgo === null ? null : utilization - utilizationThirtyDaysAgo;
+
+  let cumulativeRevenue = 0;
+  let cumulativeReceipts = 0;
+  const executiveMonthPoints = monthDayBuckets.map(bucket => {
+    const dailyRevenue = executiveRevenueRentals.reduce((sum, rental) => sum + calculateRentalBilling(rental, {
+      periodStart: bucket.key,
+      periodEnd: bucket.key,
+    }).finalRentalAmount, 0);
+    const dailyReceipts = actualReceiptPayments
+      .filter(payment => toDateKey(payment.paidDate) === bucket.key)
+      .reduce((sum, payment) => sum + getDashboardPaidAmount(payment), 0);
+    cumulativeRevenue += dailyRevenue;
+    cumulativeReceipts += dailyReceipts;
+    const isFuture = bucket.key > todayKey;
+    return {
+      label: bucket.label,
+      revenue: executiveRevenueSourceReady && !isFuture ? Math.round(cumulativeRevenue) : null,
+      payments: paymentsQuery.isSuccess && !isFuture ? Math.round(cumulativeReceipts) : null,
+      forecast: executiveRevenueSourceReady && bucket.key >= todayKey ? Math.round(cumulativeRevenue) : null,
+    };
+  });
+
+  const executiveOverdueReceivablesAmount = overdueReceivablesAvailable
+    ? companyHealthDebtAging.overdueOutstandingAmount
+    : null;
+  const executiveDebt30PlusAmount = overdueReceivablesAvailable
+    ? companyHealthDebtAging.bucket31to60Amount
+      + companyHealthDebtAging.bucket61to90Amount
+      + companyHealthDebtAging.bucketOver90Amount
+    : null;
+  const executiveDebt60PlusAmount = overdueReceivablesAvailable
+    ? companyHealthDebtAging.bucket61to90Amount + companyHealthDebtAging.bucketOver90Amount
+    : null;
+  const executiveEligibleOverdueReceivables = overdueReceivablesAvailable
+    ? companyHealthDebtAging.eligibleReceivables.filter(row => row.overdueDays > 0)
+    : [];
+  const executiveClientById = new Map(clients.map(client => [client.id, client]));
+  const executiveOverdueReceivablesClients = overdueReceivablesAvailable
+    ? new Set(executiveEligibleOverdueReceivables.map(row => {
+        if (!row.clientId) return '';
+        return executiveClientById.get(row.clientId)?.counterpartyId || row.clientId;
+      }).filter(Boolean)).size
+    : null;
+  const oldestOverdueDebtDays = overdueReceivablesAvailable
+    ? executiveEligibleOverdueReceivables.reduce((max, row) => Math.max(max, row.overdueDays), 0)
+    : null;
+  const executiveReceivablesHref = canViewFinance ? '/finance?tab=receivables' : '/payments';
+  const topDebtorsByCounterparty = new Map<string, {
+    id: string;
+    name: string;
+    amount: number;
+    maxOverdueDays: number;
+    clientId?: string;
+  }>();
+  executiveEligibleOverdueReceivables.forEach(row => {
+    if (!row.clientId) return;
+    const client = executiveClientById.get(row.clientId);
+    const stableGroupId = client?.counterpartyId || row.clientId;
+    const existing = topDebtorsByCounterparty.get(stableGroupId) ?? {
+      id: stableGroupId,
+      name: client?.company || `Клиент ${row.clientId}`,
+      amount: 0,
+      maxOverdueDays: 0,
+      clientId: row.clientId,
+    };
+    existing.amount += row.outstandingBalance;
+    existing.maxOverdueDays = Math.max(existing.maxOverdueDays, row.overdueDays);
+    topDebtorsByCounterparty.set(stableGroupId, existing);
+  });
+  const executiveTopDebtors = Array.from(topDebtorsByCounterparty.values())
+    .sort((left, right) => right.amount - left.amount)
+    .slice(0, 3)
+    .map(row => ({
+      id: row.id,
+      name: row.name,
+      amount: formatCurrency(row.amount),
+      age: row.maxOverdueDays > 0 ? `${row.maxOverdueDays} дн.` : 'срок не наступил',
+      href: canViewClients && row.clientId
+        ? `/clients/${encodeURIComponent(row.clientId)}`
+        : canViewFinance
+          ? `/finance?tab=receivables&counterpartyId=${encodeURIComponent(row.id)}`
+          : '/payments',
+    }));
+  const executiveAvailableFleet = activeRentalFleetLookup.activeFleet.filter(item =>
+    item.status !== 'in_service'
+    && !rentedEquipmentKeys.has(String(item.id || ''))
+    && !reservedEquipmentKeys.has(String(item.id || '')),
+  );
+  const availableFleetRevenueCoverage = executiveAvailableFleet.length > 0
+    && executiveAvailableFleet.every(item => Number(item.plannedMonthlyRevenue) > 0);
+  const availableFleetPotentialRevenue = availableFleetRevenueCoverage
+    ? executiveAvailableFleet.reduce((sum, item) => sum + Number(item.plannedMonthlyRevenue || 0), 0)
+    : null;
+  const transitEquipmentCount = new Set(
+    activeDeliveries.map(delivery => String(delivery.equipmentId || '')).filter(id => id && activeRentalFleetLookup.byId.has(id)),
+  ).size;
+  const activeFleetServiceCount = activeRentalFleetLookup.activeFleet.filter(item => item.status === 'in_service').length;
+  const executiveUnavailableFleetCount = equipmentList.filter(item => !isActiveRentalFleetEquipment(item)).length;
+  const readyToRentPercent = activeEquipment > 0
+    ? Math.round(((activeEquipment - activeFleetServiceCount) / activeEquipment) * 100)
+    : null;
+
+  const executiveServiceRisks = serviceInDaysRows
+    .filter(ticket => ticket.priority === 'critical' || ticket.priority === 'high' || (ticket.plannedDate && toDateKey(ticket.plannedDate) < todayKey))
+    .slice(0, 3)
+    .map(ticket => {
+      return {
+        id: ticket.id,
+        name: ticket.equipmentLabel || ticket.equipment || `Заявка ${ticket.id}`,
+        context: `В сервисе ${ticket.daysInService} дн.${ticket.plannedDate && toDateKey(ticket.plannedDate) < todayKey ? ' · SLA нарушен' : ''}`,
+        href: `/service/${encodeURIComponent(ticket.id)}`,
+      };
+    });
+
+  const executiveAttentionSignals: ExecutiveAttentionSignal[] = [];
+  if (overdueReceivablesAvailable && executiveOverdueReceivablesAmount && executiveOverdueReceivablesAmount > 0) {
+    executiveAttentionSignals.push({
+      id: 'attention-overdue-receivables',
+      severity: executiveDebt60PlusAmount && executiveDebt60PlusAmount > 0 ? 'critical' : 'high',
+      title: 'Просроченная дебиторка',
+      scale: `${formatCurrency(executiveOverdueReceivablesAmount)} · ${executiveOverdueReceivablesClients} ${formatCountLabel(executiveOverdueReceivablesClients || 0, 'клиент', 'клиента', 'клиентов')}`,
+      moneyImpact: `Деньги под риском: ${formatCurrency(executiveOverdueReceivablesAmount)}`,
+      context: oldestOverdueDebtDays && oldestOverdueDebtDays > 0 ? `Старейший подтверждённый долг: ${oldestOverdueDebtDays} дн.` : 'Требуется контроль оплаты',
+      href: executiveReceivablesHref,
+      action: 'К дебиторке',
+    });
+  }
+  if (overdueRentalsList.length > 0) {
+    executiveAttentionSignals.push({
+      id: 'attention-overdue-returns',
+      severity: 'critical',
+      title: 'Просроченные возвраты',
+      scale: `${overdueRentalsList.length} ${formatCountLabel(overdueRentalsList.length, 'аренда', 'аренды', 'аренд')}`,
+      context: `Максимальная задержка: ${maxOverdueDays} дн.`,
+      href: '/rentals',
+      action: 'К арендам',
+    });
+  }
+  if (serviceBlockersCount > 0) {
+    executiveAttentionSignals.push({
+      id: 'attention-service-blockers',
+      severity: criticalTickets.length + overdueServiceTickets.length > 0 ? 'critical' : 'high',
+      title: 'Сервисные блокеры',
+      scale: `${serviceBlockersCount} ${formatCountLabel(serviceBlockersCount, 'ситуация', 'ситуации', 'ситуаций')}`,
+      context: `${overdueServiceTickets.length} SLA нарушено · ${unassignedServiceTickets.length} без механика · ${ticketsWaitingParts.length} ждут запчасти`,
+      href: '/service',
+      action: 'В сервис',
+    });
+  }
+  if (upcomingReturns.length > 0) {
+    executiveAttentionSignals.push({
+      id: 'attention-ending-rentals',
+      severity: 'medium',
+      title: 'Аренды завершаются в ближайшие 3 дня',
+      scale: `${upcomingReturns.length} ${formatCountLabel(upcomingReturns.length, 'аренда', 'аренды', 'аренд')}`,
+      context: 'Нужно подтвердить возврат, продление или следующую загрузку техники',
+      href: '/rentals',
+      action: 'Проверить',
+    });
+  }
+  if (overdueDeliveries.length > 0) {
+    executiveAttentionSignals.push({
+      id: 'attention-overdue-deliveries',
+      severity: 'high',
+      title: 'Просроченные доставки',
+      scale: `${overdueDeliveries.length} ${formatCountLabel(overdueDeliveries.length, 'задача', 'задачи', 'задач')}`,
+      context: 'Терминальные доставки исключены; показаны только активные задачи',
+      href: '/deliveries',
+      action: 'К доставкам',
+    });
+  }
+  if (topAttentionActions.some(item => Number(item.estimatedLoss) > 0)) {
+    const lossAction = topAttentionActions.find(item => Number(item.estimatedLoss) > 0)!;
+    executiveAttentionSignals.push({
+      id: `attention-action-${lossAction.actionId}`,
+      severity: lossAction.priority === 'critical' ? 'critical' : 'high',
+      title: lossAction.title || 'Управленческое действие',
+      scale: lossAction.accountabilityLabel || attentionDueLabel(lossAction),
+      moneyImpact: `Оценённый риск: ${formatCurrency(Number(lossAction.estimatedLoss))}`,
+      context: `${attentionAssigneeLabel(lossAction)} · ${attentionDueLabel(lossAction)}`,
+      href: lossAction.links.serviceTicket
+        || lossAction.links.delivery
+        || lossAction.links.document
+        || lossAction.links.equipment
+        || `/equipment?actionQueueFilter=${lossAction.isOverdue ? 'overdue' : 'all'}`,
+      action: 'В очередь',
+    });
+  }
+  const attentionSeverityRank = { critical: 0, high: 1, medium: 2 };
+  executiveAttentionSignals.sort((left, right) => attentionSeverityRank[left.severity] - attentionSeverityRank[right.severity]);
+
+  const healthDirectionHref: Record<string, string> = {
+    finance: executiveReceivablesHref,
+    rental: '/rentals',
+    risks: executiveReceivablesHref,
+    service: '/service',
+    clients: '/clients',
+    fleet: '/equipment',
+  };
+  const executiveHealthDirectionVisibility: Record<string, boolean> = {
+    finance: canViewMoney,
+    rental: canViewRentals,
+    risks: canViewMoney,
+    service: canViewService,
+    clients: canViewClients,
+    fleet: canViewEquipment,
+  };
+  const executiveHealthDirections = companyHealthScoreBreakdown.directions
+    .filter(direction => executiveHealthDirectionVisibility[direction.key] === true)
+    .map(direction => ({
+      id: direction.key,
+      label: direction.title,
+      score: direction.isEligible === false ? null : direction.score,
+      stateLabel: direction.shortReason,
+      href: healthDirectionHref[direction.key],
+    }));
+  const executiveHealthFocus = [
+    ...(companyHealthScoreBreakdown.focusDirections ?? []),
+    ...(companyHealthScoreBreakdown.weakestDirections ?? []),
+  ].find(direction => executiveHealthDirectionVisibility[direction.key] === true);
+  const executiveHealthExplanation = companyHealthScoreBreakdown.directions
+    .map(direction => `${direction.title} ${Math.round(direction.weight * 100)}%`)
+    .join(' · ');
+
+  const crmDeals = crmDealsQuery.data ?? [];
+  const openCrmDeals = crmDeals.filter(deal => deal.status === 'open');
+  const pipelineAmount = openCrmDeals.reduce((sum, deal) => sum + Math.max(0, Number(deal.budget) || 0), 0);
+  const forecastableCrmDeals = openCrmDeals.filter(deal => Number.isFinite(Number(deal.budget)) && Number.isFinite(Number(deal.probability)));
+  const weightedPipelineForecast = forecastableCrmDeals.reduce((sum, deal) => (
+    sum + Math.max(0, Number(deal.budget) || 0) * Math.max(0, Math.min(100, Number(deal.probability) || 0)) / 100
+  ), 0);
+  const wonCrmDeals = crmDeals.filter(deal => deal.status === 'won').length;
+  const lostCrmDeals = crmDeals.filter(deal => deal.status === 'lost').length;
+  const closedCrmDeals = wonCrmDeals + lostCrmDeals;
+  const crmConversion = closedCrmDeals > 0 ? Math.round((wonCrmDeals / closedCrmDeals) * 100) : null;
+
+  const executiveUpdatedAtCandidates = [
+    canViewEquipment ? equipmentQuery.dataUpdatedAt : 0,
+    canViewRentals ? ganttRentalsQuery.dataUpdatedAt : 0,
+    canViewMoney ? paymentsQuery.dataUpdatedAt : 0,
+    canViewMoney ? paymentAllocationsQuery.dataUpdatedAt : 0,
+    canViewService ? serviceTicketsQuery.dataUpdatedAt : 0,
+  ].filter(value => Number(value) > 0);
+  const executiveOldestUpdatedAt = executiveUpdatedAtCandidates.length > 0
+    ? Math.min(...executiveUpdatedAtCandidates)
+    : null;
+  const executiveDataStale = executiveOldestUpdatedAt !== null
+    && executiveFreshnessNow - executiveOldestUpdatedAt > 5 * 60 * 1000;
+  const executiveUpdatedLabel = executiveOldestUpdatedAt === null
+    ? '—'
+    : new Date(executiveOldestUpdatedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+  const executiveKpis: ExecutiveKpi[] = [
+    canViewRentals && {
+      id: 'dashboard-kpi-month-revenue',
+      label: 'Выручка месяца',
+      value: executiveRevenueActual === null || executiveRevenueActual <= 0 ? '—' : formatCurrency(executiveRevenueActual),
+      context: executiveRevenueActual === null
+        ? 'Недостаточно данных по начислениям'
+        : executiveRevenueActual > 0
+          ? `Начислено с ${monthStart.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })} по ${today.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}`
+          : 'За выбранный период начислений нет',
+      trend: executiveRevenueDelta === null ? undefined : `${executiveRevenueDelta >= 0 ? '+' : ''}${executiveRevenueDelta.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`,
+      trendLabel: executiveRevenueDelta === null ? 'Нет сопоставимого прошлого периода' : 'к тому же периоду прошлого месяца',
+      forecast: executiveRevenueForecast === null ? undefined : `Прогноз ${formatCurrency(executiveRevenueForecast)}`,
+      tone: executiveRevenueActual && executiveRevenueActual > 0 ? 'success' : 'default',
+      href: '/rentals',
+      state: ganttRentalsQuery.isError ? 'error' : ganttRentalsQuery.isLoading ? 'loading' : executiveDataStale ? 'stale' : executiveRevenueActual ? 'ready' : 'empty',
+    },
+    canViewEquipment && {
+      id: 'dashboard-kpi-fleet-utilization',
+      label: 'Загрузка парка',
+      value: activeEquipment > 0 ? `${utilization}%` : '—',
+      context: activeEquipment > 0 ? `${rentedEquipment} из ${activeEquipment} ед. на аренде` : 'Активный арендный парк не сформирован',
+      trend: utilizationDeltaPoints === null ? undefined : `${utilizationDeltaPoints >= 0 ? '+' : ''}${utilizationDeltaPoints} п.п.`,
+      trendLabel: utilizationDeltaPoints === null ? 'Нет базы сравнения' : 'к срезу 30 дней назад',
+      tone: utilizationTone === 'violet' ? 'info' : utilizationTone,
+      href: '/equipment?status=rented',
+      state: equipmentQuery.isError ? 'error' : equipmentQuery.isLoading ? 'loading' : executiveDataStale ? 'stale' : activeEquipment > 0 ? 'ready' : 'empty',
+    },
+    canViewMoney && {
+      id: 'dashboard-kpi-overdue-debt',
+      label: 'Просроченная дебиторка',
+      value: overdueReceivablesAvailable && executiveOverdueReceivablesAmount !== null ? formatCurrency(executiveOverdueReceivablesAmount) : '—',
+      context: overdueReceivablesAvailable
+        ? executiveOverdueReceivablesAmount && executiveOverdueReceivablesAmount > 0
+          ? `${executiveOverdueReceivablesClients} ${formatCountLabel(executiveOverdueReceivablesClients || 0, 'должник', 'должника', 'должников')}`
+          : 'Подтверждённой просрочки нет'
+        : companyHealthDebtAging.sourceStatus === 'ambiguous'
+          ? 'Не подтверждены договорные сроки или календарь компании'
+          : 'Недостаточно данных для расчёта',
+      trendLabel: executiveOverdueReceivablesAmount && executiveOverdueReceivablesAmount > 0 && oldestOverdueDebtDays && oldestOverdueDebtDays > 0 ? `Старейший долг ${oldestOverdueDebtDays} дн.` : overdueReceivablesAvailable ? 'На текущую дату' : 'Просрочка не рассчитана',
+      tone: !overdueReceivablesAvailable ? 'default' : executiveOverdueReceivablesAmount && executiveOverdueReceivablesAmount > 0 ? 'danger' : 'success',
+      href: executiveReceivablesHref,
+      state: paymentsQuery.isError || paymentAllocationsQuery.isError || ganttRentalsQuery.isError
+        ? 'error'
+        : paymentsQuery.isLoading || paymentAllocationsQuery.isLoading || ganttRentalsQuery.isLoading
+          ? 'loading'
+          : !overdueReceivablesAvailable
+            ? 'partial'
+            : executiveDataStale
+              ? 'stale'
+              : executiveOverdueReceivablesAmount && executiveOverdueReceivablesAmount > 0 ? 'ready' : 'empty',
+    },
+    canViewMoney && {
+      id: 'dashboard-kpi-month-payments',
+      label: 'Поступления месяца',
+      value: !paymentsQuery.isSuccess
+        ? '—'
+        : actualReceiptsAmount > 0
+          ? `${actualReceiptsAvailable ? '' : '≥ '}${formatCurrency(actualReceiptsAmount)}`
+          : '—',
+      context: !paymentsQuery.isSuccess
+        ? 'Недостаточно данных по поступлениям'
+        : actualReceiptsAmount > 0
+          ? `${actualReceiptPayments.length} ${formatCountLabel(actualReceiptPayments.length, 'платёж', 'платежа', 'платежей')} с датой оплаты`
+          : 'За выбранный период поступлений нет',
+      trend: actualReceiptsAvailable && executiveRevenueActual && executiveRevenueActual > 0
+        ? `${Math.round((actualReceiptsAmount / executiveRevenueActual) * 100)}%`
+        : undefined,
+      trendLabel: actualReceiptsAvailable && executiveRevenueActual && executiveRevenueActual > 0 ? 'от начисленной выручки' : 'План поступлений не задан',
+      tone: actualReceiptsAmount > 0 ? 'info' : 'default',
+      href: '/payments',
+      state: paymentsQuery.isError
+        ? 'error'
+        : paymentsQuery.isLoading
+          ? 'loading'
+          : !actualReceiptsAvailable
+            ? 'partial'
+            : executiveDataStale
+              ? 'stale'
+              : actualReceiptsAmount > 0 ? 'ready' : 'empty',
+    },
+  ].filter(Boolean) as ExecutiveKpi[];
+
+  const attentionState: ExecutiveDataState = actionAttentionQuery.isError
+    || paymentsQuery.isError
+    || ganttRentalsQuery.isError
+    || serviceTicketsQuery.isError
+      ? 'partial'
+      : actionAttentionQuery.isLoading || paymentsQuery.isLoading || ganttRentalsQuery.isLoading || serviceTicketsQuery.isLoading
+        ? 'loading'
+        : executiveDataStale
+          ? 'stale'
+          : executiveAttentionSignals.length > 0 ? 'ready' : 'empty';
+  const moneyState: ExecutiveDataState = paymentsQuery.isError || paymentAllocationsQuery.isError || ganttRentalsQuery.isError
+    ? 'error'
+    : paymentsQuery.isLoading || paymentAllocationsQuery.isLoading || ganttRentalsQuery.isLoading
+      ? 'loading'
+      : companyHealthDebtAging.sourceStatus !== 'derived'
+        ? 'partial'
+        : executiveDataStale
+          ? 'stale'
+          : companyHealthDebtAging.totalOutstandingAmount > 0 ? 'ready' : 'empty';
+  const serviceState: ExecutiveDataState = serviceTicketsQuery.isError
+    ? 'error'
+    : serviceTicketsQuery.isLoading
+      ? 'loading'
+      : executiveDataStale
+        ? 'stale'
+        : tickets.length > 0 ? 'ready' : 'empty';
+  const fleetState: ExecutiveDataState = equipmentQuery.isError
+    ? 'error'
+    : equipmentQuery.isLoading
+      ? 'loading'
+      : activeEquipment > 0
+        ? executiveDataStale
+          ? 'stale'
+          : availableFleetRevenueCoverage || executiveAvailableFleet.length === 0 ? 'ready' : 'partial'
+        : 'empty';
+  const anyCoreDashboardError = equipmentQuery.isError
+    || ganttRentalsQuery.isError
+    || paymentsQuery.isError
+    || paymentAllocationsQuery.isError
+    || serviceTicketsQuery.isError;
+  const executiveCockpitProps: ExecutiveCockpitV2Props = {
+    contextLabel: user?.role || 'Операционный центр',
+    periodLabel: monthPeriodLabel,
+    periodRange: monthRangeLabel,
+    updatedLabel: executiveUpdatedLabel,
+    healthBadge: companyHealthDisplayScore === null ? companyHealthLabel : `Health ${companyHealthDisplayScore}/100`,
+    healthTone: companyHealthTone === 'violet' ? 'info' : companyHealthTone,
+    dataStatus: anyCoreDashboardError ? 'Часть данных недоступна' : executiveDataStale ? 'Данные могли устареть' : undefined,
+    kpis: executiveKpis,
+    attention: executiveAttentionSignals.slice(0, 5),
+    attentionState,
+    month: {
+      points: executiveMonthPoints,
+      state: ganttRentalsQuery.isError || paymentsQuery.isError
+        ? 'partial'
+        : ganttRentalsQuery.isLoading || paymentsQuery.isLoading
+          ? 'loading'
+          : executiveDataStale
+            ? 'stale'
+            : executiveRevenueActual || actualReceiptsAmount ? 'ready' : 'empty',
+      plan: executiveRevenuePlanAvailable ? formatCurrency(fleetMonthlyRevenuePlan) : 'Не задан',
+      fact: executiveRevenueActual === null ? '—' : formatCurrency(executiveRevenueActual),
+      forecast: executiveRevenueForecast === null ? '—' : formatCurrency(executiveRevenueForecast),
+      explanation: 'Факт — начисления по дням с учётом downtime. Прогноз — детерминированная сумма уже известных договоров до конца месяца; новые сделки не предполагаются.',
+    },
+    health: {
+      score: companyHealthDisplayScore,
+      label: companyHealthLabel,
+      coverage: `Покрытие ${companyHealthScoreBreakdown.totalCoveragePercent ?? 0}% · доверие ${formatHealthConfidence(companyHealthScoreBreakdown.confidence)}`,
+      primaryRisk: executiveHealthFocus?.shortReason || companyHealthWarning || 'Критических отклонений по доступным данным нет',
+      directions: executiveHealthDirections,
+      explanation: `${executiveHealthExplanation}. Недоступные направления исключаются из оценки; итог корректируется на покрытие данных.`,
+    },
+    fleet: canViewEquipment ? {
+      state: fleetState,
+      utilization: activeEquipment > 0 ? `${utilization}%` : '—',
+      context: activeEquipment > 0 ? `${rentedEquipment} из ${activeEquipment} на аренде` : 'Нет расчётной базы',
+      delta: utilizationDeltaPoints === null ? 'Нет среза для сравнения' : `${utilizationDeltaPoints >= 0 ? '+' : ''}${utilizationDeltaPoints} п.п. за 30 дней`,
+      rows: [
+        { label: 'В аренде', value: rentedEquipment, color: 'var(--primary)' },
+        { label: 'Свободно', value: executiveAvailableFleet.length, color: 'var(--info)' },
+        { label: 'В сервисе', value: activeFleetServiceCount, color: 'var(--warning)' },
+        { label: 'В доставке', value: transitEquipmentCount, color: 'var(--chart-3)' },
+        { label: 'Недоступно', value: executiveUnavailableFleetCount, color: 'var(--danger)' },
+      ],
+      total: Math.max(activeEquipment, totalEquipment, 1),
+      potentialLoss: availableFleetPotentialRevenue === null ? undefined : `${formatCurrency(availableFleetPotentialRevenue)} / мес`,
+      potentialLossNote: availableFleetPotentialRevenue === null
+        ? executiveAvailableFleet.length > 0 ? 'Плановая выручка настроена не для всех свободных единиц' : 'Свободных единиц нет'
+        : 'Сумма плановой месячной выручки свободных единиц',
+    } : undefined,
+    money: canViewMoney ? {
+      state: moneyState,
+      totalDebt: overdueReceivablesAvailable ? formatCurrency(companyHealthDebtAging.totalOutstandingAmount) : '—',
+      overdue: overdueReceivablesAvailable && executiveOverdueReceivablesAmount !== null ? formatCurrency(executiveOverdueReceivablesAmount) : '—',
+      over30: overdueReceivablesAvailable && executiveDebt30PlusAmount !== null ? formatCurrency(executiveDebt30PlusAmount) : '—',
+      aging: [
+        { label: '1–30', amount: overdueReceivablesAvailable ? companyHealthDebtAging.bucket1to30Amount : 0 },
+        { label: '31–60', amount: overdueReceivablesAvailable ? companyHealthDebtAging.bucket31to60Amount : 0 },
+        { label: '61–90', amount: overdueReceivablesAvailable ? companyHealthDebtAging.bucket61to90Amount : 0 },
+        { label: '90+', amount: overdueReceivablesAvailable ? companyHealthDebtAging.bucketOver90Amount : 0 },
+      ],
+      topDebtors: executiveTopDebtors,
+      href: executiveReceivablesHref,
+    } : undefined,
+    service: canViewService ? {
+      state: serviceState,
+      inRepair: serviceState === 'error' || serviceState === 'loading' ? '—' : String(activeFleetServiceCount),
+      readyToRent: readyToRentPercent === null ? '—' : `${readyToRentPercent}%`,
+      slaBreaches: serviceState === 'error' || serviceState === 'loading' ? '—' : String(overdueServiceTickets.length),
+      averageDays: serviceState === 'error' || serviceState === 'loading' ? '—' : `${averageServiceDays} дн.`,
+      risks: executiveServiceRisks,
+      href: '/service',
+    } : undefined,
+    sales: canViewCrm ? {
+      state: crmDealsQuery.isError ? 'error' : crmDealsQuery.isLoading ? 'loading' : crmDeals.length > 0 ? (forecastableCrmDeals.length < openCrmDeals.length ? 'partial' : 'ready') : 'empty',
+      pipeline: crmDealsQuery.isSuccess ? formatCurrency(pipelineAmount) : '—',
+      forecast: crmDealsQuery.isSuccess && forecastableCrmDeals.length > 0 ? formatCurrency(weightedPipelineForecast) : '—',
+      activeDeals: crmDealsQuery.isSuccess ? String(openCrmDeals.length) : '—',
+      conversion: crmConversion === null ? '—' : `${crmConversion}%`,
+      forecastNote: forecastableCrmDeals.length === openCrmDeals.length
+        ? 'Forecast = бюджет × заданная вероятность по открытым сделкам.'
+        : `Forecast рассчитан по ${forecastableCrmDeals.length} из ${openCrmDeals.length} открытых сделок с заданной вероятностью.`,
+      stages: [
+        { label: 'Новые', value: openCrmDeals.filter(deal => deal.stage === 'lead' || deal.stage === 'qualified').length },
+        { label: 'КП', value: openCrmDeals.filter(deal => deal.stage === 'proposal' || deal.stage === 'demo').length },
+        { label: 'Переговоры', value: openCrmDeals.filter(deal => deal.stage === 'negotiation').length },
+        { label: 'Решение', value: openCrmDeals.filter(deal => deal.stage === 'reserved' || deal.stage === 'invoice').length },
+      ],
+      href: '/crm',
+    } : undefined,
+    // Deferred intentionally: there is no reliable per-user last-seen business snapshot yet.
+    recentChanges: undefined,
+  };
+
   // ── KPI data objects for modal ──────────────────────────────────────────────
   const kpiData = {
     utilization: {
@@ -4763,6 +5322,8 @@ export default function Dashboard() {
   };
 
   // ── render ──────────────────────────────────────────────────────────────────
+
+  return <ExecutiveCockpitV2 {...executiveCockpitProps} />;
 
   return (
     <div className="rentcore-command-screen" data-reduced-motion={prefersReducedMotion ? 'true' : 'false'}>

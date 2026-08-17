@@ -2697,6 +2697,17 @@ body.rentcore-dashboard-reference-mode .rentcore-dashboard-kpi-grid .rentcore-co
   grid-column: span 12 / span 12;
 }
 
+@media (max-width: 639px) {
+  body.rentcore-dashboard-reference-mode [data-testid="dashboard-executive-header"] {
+    min-height: 0 !important;
+    padding: 10px 12px !important;
+  }
+
+  body.rentcore-dashboard-reference-mode [data-testid="dashboard-executive-header"] > div:last-child {
+    margin-top: 2px;
+  }
+}
+
 .rentcore-dashboard-reveal {
   animation: rentcore-dashboard-enter var(--motion-duration-emphasis) var(--motion-ease-emphasized) both;
   will-change: opacity, transform;

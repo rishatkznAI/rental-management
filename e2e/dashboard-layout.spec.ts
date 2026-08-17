@@ -175,14 +175,14 @@ test.describe('Dashboard V2 data states', () => {
   }
 });
 
-test('incomplete fleet plan never produces a below-plan Company Health claim', async ({ page }) => {
+test('incomplete fleet plan never produces a Company Health plan comparison', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await loginAsAdmin(page);
   await installScenario(page, 'partial-plan');
   await navigateInApp(page, '/');
 
   await expect(page.getByTestId('dashboard-month-dynamics')).toContainText('Не задан');
-  await expect(page.getByTestId('dashboard-company-health')).not.toContainText('Выручка аренды ниже плана');
+  await expect(page.getByTestId('dashboard-company-health')).not.toContainText(/Выручка аренды (?:ниже|близка) к плану/);
 });
 
 test('payments-only dashboard never exposes forbidden Finance or Service drill-downs', async ({ page }) => {

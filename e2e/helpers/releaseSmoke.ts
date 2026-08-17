@@ -325,7 +325,7 @@ async function expectExecutiveCockpitVisible(page: Page) {
   const monthDynamicsText = await monthDynamics.innerText();
   if (/План\s*Не задан/i.test(monthDynamicsText)) {
     await expect(companyHealth, 'company health must not compare revenue to an unavailable plan')
-      .not.toContainText('Выручка аренды ниже плана');
+      .not.toContainText(/Выручка аренды (?:ниже|близка) к плану/);
   }
   await expectNoHorizontalOverflow(page, 'dashboard executive cockpit');
 

@@ -98,6 +98,7 @@ import {
 import { APP_BRAND_NAME } from '../lib/appBrand';
 import { buildRentalNewRoute } from '../lib/rental-new-route.js';
 import { usePrefersReducedMotion } from '../lib/animations';
+import { localDateKey } from '../lib/serviceDayPlan.js';
 import {
   ExecutiveCockpitV2,
   type ExecutiveAttentionSignal,
@@ -184,11 +185,13 @@ function serviceOverdueMultiplier(ticket: ServiceTicket, todayKey: string) {
   return 1.8;
 }
 
-function toDateKey(value?: string | null) {
+function toDateKey(value?: string | Date | null) {
   if (!value) return '';
-  const parsed = new Date(value);
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const parsed = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toISOString().slice(0, 10);
+  return localDateKey(parsed);
 }
 
 type RoleFocusCard = {
@@ -240,7 +243,7 @@ function buildDayBuckets(start: Date, end: Date) {
   const last = startOfDay(end);
   while (cursor <= last) {
     buckets.push({
-      key: cursor.toISOString().slice(0, 10),
+      key: localDateKey(cursor),
       label: cursor.toLocaleDateString('ru-RU', { day: '2-digit' }),
     });
     cursor.setDate(cursor.getDate() + 1);
@@ -2140,14 +2143,14 @@ export default function Dashboard() {
   const companyHealthDebtAging = useMemo(
     () => buildCanonicalDebtAging(mapRentalDebtRowsForCompanyHealth(rentalDebtRows), {
       sourceAvailable: paymentsQuery.isSuccess && paymentAllocationsQuery.isSuccess && ganttRentalsQuery.isSuccess,
-      asOfDate: today.toISOString().slice(0, 10),
+      asOfDate: toDateKey(today),
       // app_settings has no proven company timezone contract; the aging model keeps this ambiguous.
       companyTimeZone: undefined,
     }),
     [ganttRentalsQuery.isSuccess, paymentAllocationsQuery.isSuccess, paymentsQuery.isSuccess, rentalDebtRows, today],
   );
   const clientDebtAgingRows = useMemo(
-    () => buildClientDebtAgingRows(clients, rentalDebtRows, today.toISOString().slice(0, 10)),
+    () => buildClientDebtAgingRows(clients, rentalDebtRows, toDateKey(today)),
     [clients, rentalDebtRows, today],
   );
   const shouldShowAttentionSummary =
@@ -2184,7 +2187,7 @@ export default function Dashboard() {
       documents,
       tickets,
       equipment: equipmentList,
-      today: today.toISOString().slice(0, 10),
+      today: toDateKey(today),
     }),
     [clientDebtAgingRows, documents, equipmentList, rentalDebtRows, tickets, today, viewPlannerRentals],
   );
@@ -2217,7 +2220,7 @@ export default function Dashboard() {
       documents,
       clients,
       equipment: equipmentList,
-      today: today.toISOString().slice(0, 10),
+      today: toDateKey(today),
       limit: 10,
     }),
     [clients, documents, equipmentList, today, viewRentals],
@@ -2226,7 +2229,7 @@ export default function Dashboard() {
     () => buildDebtCollectionDashboardSummary({
       clientDebtRows: clientDebtAgingRows,
       plans: debtCollectionPlans,
-      today: today.toISOString().slice(0, 10),
+      today: toDateKey(today),
     }),
     [clientDebtAgingRows, debtCollectionPlans, today],
   );
@@ -2287,7 +2290,7 @@ export default function Dashboard() {
 
   // Equipment in service
   const equipmentInServiceList = equipment.filter(e => e.status === 'in_service');
-  const todayKey = today.toISOString().slice(0, 10);
+  const todayKey = toDateKey(today);
 
   // Week revenue: sum of prices of rentals that started in the last 7 days, OR active rentals
   const weekStartedRentals = viewRentals.filter(r => {
@@ -3422,7 +3425,7 @@ export default function Dashboard() {
   const nextReturnBuckets = useMemo(() => Array.from({ length: 10 }, (_, index) => {
     const date = new Date(today);
     date.setDate(today.getDate() + index);
-    const key = date.toISOString().slice(0, 10);
+    const key = localDateKey(date);
     return {
       key,
       label: index === 0 ? 'Сегодня' : date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
@@ -3432,7 +3435,7 @@ export default function Dashboard() {
   const deliveryDayBuckets = useMemo(() => Array.from({ length: 10 }, (_, index) => {
     const date = new Date(today);
     date.setDate(today.getDate() + index);
-    const key = date.toISOString().slice(0, 10);
+    const key = localDateKey(date);
     return {
       key,
       label: index === 0 ? 'Сегодня' : date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
@@ -3450,7 +3453,7 @@ export default function Dashboard() {
       const date = new Date(monthEnd);
       date.setDate(date.getDate() + index + 1);
       return {
-        key: date.toISOString().slice(0, 10),
+        key: localDateKey(date),
         label: date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
       };
     });
@@ -3685,7 +3688,7 @@ export default function Dashboard() {
   ].filter(Boolean) as DashboardRisk[];
   const deliveryStatusChartData = useMemo(() => groupCountChart(deliveriesThisMonth, item => item.status, deliveryStatusLabels), [deliveriesThisMonth]);
   const carrierWorkloadChartData = useMemo(() => groupCountChart(deliveriesThisMonth, item => item.carrierName || 'Без перевозчика').slice(0, 8), [deliveriesThisMonth]);
-  const tomorrowDeliveries = activeDeliveries.filter(delivery => toDateKey(delivery.transportDate || delivery.neededBy) === tomorrowStart.toISOString().slice(0, 10));
+  const tomorrowDeliveries = activeDeliveries.filter(delivery => toDateKey(delivery.transportDate || delivery.neededBy) === toDateKey(tomorrowStart));
   const deliveryMonthDaysData = useMemo(() => monthDayBuckets.map(bucket => ({
     ...bucket,
     value: deliveriesThisMonth.filter(delivery => toDateKey(delivery.transportDate || delivery.neededBy || delivery.createdAt) === bucket.key).length,

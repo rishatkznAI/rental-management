@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { localDateKey } from '../src/app/lib/serviceDayPlan.js';
 
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
 const cockpitSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/dashboard/ExecutiveCockpitV2.tsx'), 'utf8');
@@ -51,6 +52,9 @@ test('revenue and receipts keep distinct date and accounting semantics', () => {
 });
 
 test('Company Health uses canonical month revenue and only an authoritative fleet plan', () => {
+  assert.match(dashboardSource, /import \{ localDateKey \} from '\.\.\/lib\/serviceDayPlan\.js'/);
+  assert.match(dashboardSource, /const todayKey = toDateKey\(today\)/);
+  assert.match(dashboardSource, /key: localDateKey\(cursor\)/);
   assert.match(dashboardSource, /const rentalRevenuePlanAvailable = activeEquipment > 0[\s\S]*equipmentWithPlannedRevenueCount === activeEquipment[\s\S]*fleetMonthlyRevenuePlan > 0/);
   assert.match(dashboardSource, /const companyHealthRentalRevenueActual = ganttRentalsQuery\.isSuccess[\s\S]*rentalsIntersectingThisMonth[\s\S]*calculateRentalBilling\(rental, \{[\s\S]*periodStart: toDateKey\(monthStart\),[\s\S]*periodEnd: todayKey/);
   const modelInputStart = dashboardSource.indexOf('const companyHealthModel = buildCompanyHealthModel({');
@@ -61,6 +65,23 @@ test('Company Health uses canonical month revenue and only an authoritative flee
   assert.match(modelInput, /rentalRevenuePlanAvailable/);
   assert.doesNotMatch(modelInput, /rentalRevenueActual: monthlyRevenue/);
   assert.match(dashboardSource, /const executiveRevenuePlanAvailable = rentalRevenuePlanAvailable/);
+});
+
+test('Dashboard business date keeps local Moscow month boundaries', () => {
+  const previousTimeZone = process.env.TZ;
+  try {
+    process.env.TZ = 'Europe/Moscow';
+    const localMonthStart = new Date(2026, 7, 1, 0, 0, 0, 0);
+    const localToday = new Date(2026, 7, 17, 0, 0, 0, 0);
+
+    assert.equal(localMonthStart.toISOString().slice(0, 10), '2026-07-31');
+    assert.equal(localToday.toISOString().slice(0, 10), '2026-08-16');
+    assert.equal(localDateKey(localMonthStart), '2026-08-01');
+    assert.equal(localDateKey(localToday), '2026-08-17');
+  } finally {
+    if (previousTimeZone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimeZone;
+  }
 });
 
 test('receivable drill-downs use canonical identity rather than debtor names', () => {

@@ -6,40 +6,21 @@ import path from 'node:path';
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
 const serviceSource = fs.readFileSync(path.join(process.cwd(), 'src/app/services/manager-my-plan.service.ts'), 'utf8');
 
-function managerPlanBlockSource() {
-  const blockStart = dashboardSource.indexOf('function ManagerMyPlanBlock');
-  const blockEnd = dashboardSource.indexOf('const DASHBOARD_CHART_COLORS');
-  assert.ok(blockStart >= 0 && blockEnd > blockStart);
-  return dashboardSource.slice(blockStart, blockEnd);
-}
-
-test('Dashboard contains read-only manager my plan block', () => {
-  assert.match(dashboardSource, /Мой план/);
+test('Dashboard keeps the manager my plan query read-only while V2 owns the rendered UI', () => {
   assert.match(dashboardSource, /managerMyPlanService\.get/);
-  assert.match(dashboardSource, /data-testid="manager-my-plan"/);
-  assert.match(dashboardSource, /Загрузка парка/);
-  assert.match(dashboardSource, /Активные аренды/);
-  assert.match(dashboardSource, /Возвраты сегодня\/завтра/);
-  assert.match(dashboardSource, /Просроченные возвраты/);
-  assert.match(dashboardSource, /Документы/);
+  assert.match(dashboardSource, /enabled: canViewManagerMyPlan/);
+  assert.doesNotMatch(dashboardSource, /data-testid="manager-my-plan"|function ManagerMyPlanBlock/);
+  assert.match(dashboardSource, /return <ExecutiveCockpitV2 \{\.\.\.executiveCockpitProps\} \/>/);
 });
 
-test('Dashboard shows low-utilization activity targets and safe empty state', () => {
-  const block = managerPlanBlockSource();
-  assert.match(block, /Звонки сегодня/);
-  assert.match(block, /Выезды за неделю/);
-  assert.match(block, /План активности/);
-  assert.match(block, /Прогресс активности/);
-  assert.match(block, /Нет данных для рабочего плана/);
-  assert.match(block, /На сегодня нет критичных задач/);
-  assert.doesNotMatch(block, /\{[^}]*undefined[^}]*\}/);
-  assert.doesNotMatch(block, /\[object Object\]/);
+test('Dashboard does not render stale manager-plan placeholders', () => {
+  assert.doesNotMatch(dashboardSource, /Нет данных для рабочего плана|На сегодня нет критичных задач/);
+  assert.doesNotMatch(dashboardSource, /\[object Object\]/);
 });
 
-test('Manager my plan UI does not add destructive controls or secret-like labels', () => {
-  const block = managerPlanBlockSource();
-  assert.doesNotMatch(block, />\\s*(Создать|Изменить|Удалить|Сохранить|Архивировать|Списать)\\s*</);
-  assert.doesNotMatch(block, /api\.(patch|put|del)\(/);
-  assert.doesNotMatch(block, /password|token|cookie|secret|privateKey|authorization|hash/i);
+test('Manager my plan integration does not add destructive controls or secret-like labels', () => {
+  assert.doesNotMatch(dashboardSource, /managerMyPlanService\.(?:createActivity|patch|put|del)/);
+  assert.doesNotMatch(dashboardSource, /api\.(patch|put|del)\(/);
+  assert.doesNotMatch(dashboardSource, /password|token|cookie|secret|privateKey|authorization|hash/i);
   assert.doesNotMatch(serviceSource, /api\.(patch|put|del)\(/);
 });

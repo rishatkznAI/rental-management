@@ -166,5 +166,7 @@ test('finance page keeps permission guard for roles without finance access', () 
   assert.doesNotMatch(roleBlock('Менеджер по аренде'), /finance:/);
   assert.doesNotMatch(roleBlock('Менеджер по продажам'), /finance:/);
   assert.doesNotMatch(roleBlock('Инвестор'), /finance:/);
-  assert.match(dashboardSource, /enabled: canViewFinance && !!managerBreakdownName/);
+  assert.match(dashboardSource, /const canViewMoney = canViewFinance \|\| canViewPayments/);
+  assert.match(dashboardSource, /enabled: canViewFinance && canReadFinanceOperations/);
+  assert.match(dashboardSource, /money: canViewMoney \? \{/);
 });

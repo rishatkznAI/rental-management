@@ -15,6 +15,7 @@ import {
 } from '../src/app/lib/dashboardCompanyHealth.js';
 
 const dashboardSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Dashboard.tsx'), 'utf8');
+const cockpitSource = fs.readFileSync(path.join(process.cwd(), 'src/app/components/dashboard/ExecutiveCockpitV2.tsx'), 'utf8');
 
 function testMetric(key, score, weight = 1, sourceStatus = 'derived') {
   return { key, title: key, score, weight, sourceStatus, reason: `${key} source` };
@@ -860,7 +861,8 @@ test('valid empty operational load can show low only when calculation base exist
   assert.equal(model.hint, 'Индекс 0/100 · критично 0');
 });
 
-test('dashboard source renders N/A for uncalculated operational load index', () => {
-  assert.match(dashboardSource, /operationalLoadScore === null \? 'Индекс N\/A'/);
-  assert.doesNotMatch(dashboardSource, /hint: `Индекс \$\{operationalLoadScore\}\/100/);
+test('Dashboard V2 renders unavailable scores as unknown rather than zero', () => {
+  assert.match(cockpitSource, /health\.score === null \? '—' : health\.score/);
+  assert.match(dashboardSource, /score: companyHealthDisplayScore/);
+  assert.doesNotMatch(cockpitSource, /health\.score \|\| 0/);
 });

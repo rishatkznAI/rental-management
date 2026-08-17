@@ -19,7 +19,7 @@ test('shared motion system exposes restrained tokens and reduced-motion support'
   assert.match(themeSource, /\.app-page-transition/);
   assert.match(themeSource, /\.app-demo-highlight/);
   assert.match(themeSource, /app-demo-highlight-pulse/);
-  assert.match(themeSource, /rentcore-dashboard-enter/);
+  assert.doesNotMatch(themeSource, /rentcore-dashboard-(?:enter|reveal)/);
   assert.match(themeSource, /\.app-skeleton::after/);
   assert.match(animationsSource, /usePrefersReducedMotion/);
 });

@@ -27,7 +27,7 @@ test('all rental creation entry points use the canonical standalone form', () =>
   assert.match(rentalsCreateNavigation, /navigate\(buildRentalNewRoute\(\{ equipmentId \}\)\)/);
   assert.doesNotMatch(rentalsPageSource, /<NewRentalModal/);
   assert.doesNotMatch(dashboardSource, /<NewRentalModal/);
-  assert.match(dashboardSource, /id: 'new-rental', label: 'Новая аренда', href: buildRentalNewRoute\(\)/);
+  assert.doesNotMatch(dashboardSource, /buildRentalNewRoute|rentalsService\.create\(/);
 });
 
 test('rental detail does not directly update linked planner rows', () => {

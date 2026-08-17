@@ -129,3 +129,39 @@ test('Dashboard V2 uses compact operational empty and partial states', () => {
   assert.match(cockpitSource, /hasChart \? 'h-\[210px\] sm:h-\[225px\]' : 'h-\[68px\] sm:h-\[60px\]'/);
   assert.doesNotMatch(cockpitSource, /text-(?:5xl|6xl|7xl)[\s\S]{0,120}Нет данных/);
 });
+
+test('Dashboard has one unconditional V2 return and no legacy renderer after it', () => {
+  const marker = 'return <ExecutiveCockpitV2 {...executiveCockpitProps} />;';
+  const activeReturn = dashboardSource.indexOf(marker);
+  assert.notEqual(activeReturn, -1);
+  const suffix = dashboardSource.slice(activeReturn + marker.length);
+
+  assert.doesNotMatch(suffix, /return\s*\(/);
+  assert.match(suffix, /^\s*\}\s*$/);
+  for (const legacySymbol of ['DashboardKpiGrid', 'RiskSignalStrip', 'CompanyHealthCommandCenter', 'DashboardEmptyState', 'RENTAL_STATUS', 'kpiData']) {
+    assert.doesNotMatch(dashboardSource, new RegExp(legacySymbol));
+  }
+});
+
+test('Dynamics chart has a screen-reader table with distinct actual and forecast series', () => {
+  assert.match(cockpitSource, /data-testid="dashboard-month-dynamics-data"/);
+  assert.match(cockpitSource, /<caption>Данные графика «Динамика месяца»<\/caption>/);
+  assert.match(cockpitSource, /<th scope="col">Дата<\/th>/);
+  assert.match(cockpitSource, /<th scope="col">Начисления \(факт\)<\/th>/);
+  assert.match(cockpitSource, /<th scope="col">Поступления \(факт\)<\/th>/);
+  assert.match(cockpitSource, /<th scope="col">Прогноз начислений<\/th>/);
+  assert.match(cockpitSource, /formatAccessibleMoney\(point\.revenue\)/);
+  assert.match(cockpitSource, /formatAccessibleMoney\(point\.payments\)/);
+  assert.match(cockpitSource, /formatAccessibleMoney\(point\.forecast\)/);
+  assert.match(cockpitSource, /value === null \? 'Нет данных' : `\$\{value\.toLocaleString\('ru-RU'\)\} рублей`/);
+  assert.match(cockpitSource, /className="h-full w-full" aria-hidden="true"/);
+  assert.match(dashboardSource, /dateLabel: new Date\(`/);
+});
+
+test('Dashboard action links expose a mobile 44px contract and visible focus state', () => {
+  assert.match(cockpitSource, /dashboard-card-action[\s\S]{0,220}min-h-\[46px\] min-w-11/);
+  assert.match(cockpitSource, /sm:min-h-0 sm:min-w-0 sm:p-0/);
+  assert.match(cockpitSource, /dashboard-attention-action[\s\S]{0,180}min-h-\[46px\]/);
+  assert.match(cockpitSource, /dashboard-card-action[\s\S]{0,320}focus-visible:ring-2/);
+  assert.match(cockpitSource, /dashboard-attention-action[\s\S]{0,320}focus-visible:ring-2/);
+});

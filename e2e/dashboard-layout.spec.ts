@@ -87,7 +87,7 @@ async function layoutSnapshot(page: Page) {
     const viewportWidth = document.documentElement.clientWidth;
     const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*')).filter(element => {
       const style = getComputedStyle(element);
-      if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
+      if (element.closest('.sr-only') || style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
       const box = element.getBoundingClientRect();
       return box.width > 0 && box.right > viewportWidth + 1;
     }).slice(0, 8).map(element => ({ tag: element.tagName, testId: element.dataset.testid || '', width: element.getBoundingClientRect().width }));
@@ -122,6 +122,12 @@ test.describe('Dashboard V2 responsive executive hierarchy', () => {
         expect(snapshot.money?.top || 0).toBeLessThan(snapshot.fleet?.top || 0);
         expect(snapshot.fleet?.top || 0).toBeLessThan(snapshot.service?.top || 0);
         expect(snapshot.service?.top || 0).toBeLessThan(snapshot.health?.top || 0);
+        const actionTargets = await page.locator('.dashboard-card-action, .dashboard-attention-action').evaluateAll(elements => elements.map(element => {
+          const box = element.getBoundingClientRect();
+          return { text: (element.textContent || '').trim(), width: box.width, height: box.height };
+        }));
+        expect(actionTargets.length).toBeGreaterThan(0);
+        expect(actionTargets.filter(target => target.height < 44), JSON.stringify(actionTargets)).toEqual([]);
       } else if (viewport.width >= 1280) {
         expect(snapshot.kpis?.top || 0).toBeLessThan(snapshot.attention?.top || 0);
         expect(snapshot.health?.height || 0).toBeLessThanOrEqual(300);
@@ -145,6 +151,13 @@ test.describe('Dashboard V2 data states', () => {
       if (scenario === 'healthy') {
         await expect(page.getByTestId('dashboard-kpi-month-payments')).toContainText('₽');
         await expect(page.getByTestId('dashboard-key-signals')).not.toContainText('Просроченная дебиторка');
+        const dynamicsData = page.getByTestId('dashboard-month-dynamics-data');
+        await expect(dynamicsData).toBeAttached();
+        await expect(dynamicsData).toContainText('Начисления (факт)');
+        await expect(dynamicsData).toContainText('Поступления (факт)');
+        await expect(dynamicsData).toContainText('Прогноз начислений');
+        expect(await dynamicsData.locator('tbody tr').count()).toBeGreaterThan(0);
+        await expect(dynamicsData.locator('tbody')).toContainText('рублей');
       }
       if (scenario === 'troubled') {
         await expect(page.getByTestId('dashboard-kpi-overdue-debt')).toContainText('Не подтверждены договорные сроки');
@@ -173,6 +186,20 @@ test.describe('Dashboard V2 data states', () => {
       expect(pageErrors, pageErrors.join('\n')).toEqual([]);
     });
   }
+});
+
+test('Dashboard V2 remains readable in dark theme without horizontal overflow', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await loginAsAdmin(page);
+  await page.evaluate(() => {
+    window.localStorage.setItem('theme', 'dark');
+    document.documentElement.classList.add('dark');
+  });
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await expect(page.getByTestId('dashboard-executive-v2')).toBeVisible();
+  const snapshot = await layoutSnapshot(page);
+  expect(snapshot.overflowX, JSON.stringify(snapshot)).toBeLessThanOrEqual(0);
+  expect(snapshot.offenders, JSON.stringify(snapshot)).toEqual([]);
 });
 
 test('incomplete fleet plan never produces a Company Health plan comparison', async ({ page }) => {

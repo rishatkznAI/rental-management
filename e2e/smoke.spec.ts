@@ -333,7 +333,7 @@ test.describe('production smoke', () => {
 
     await navigateInApp(page, '/');
     await expect(page.getByRole('heading', { name: 'Операционный центр' })).toBeVisible();
-    await expect(page.getByText('Пульт управления арендным бизнесом')).toBeVisible();
+    await expect(page.getByTestId('dashboard-executive-v2')).toBeVisible();
     await expect(page.getByText(/NaN|undefined|null/)).toHaveCount(0);
   });
 });

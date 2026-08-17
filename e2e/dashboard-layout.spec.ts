@@ -164,6 +164,10 @@ test.describe('Dashboard V2 data states', () => {
       const snapshot = await layoutSnapshot(page);
       expect(snapshot.overflowX, JSON.stringify(snapshot)).toBeLessThanOrEqual(0);
       expect(snapshot.offenders, JSON.stringify(snapshot)).toEqual([]);
+      if (scenario === 'empty' || scenario === 'partial') {
+        expect(snapshot.attention?.height || 0, JSON.stringify(snapshot)).toBeLessThanOrEqual(220);
+        expect(snapshot.month?.height || 0, JSON.stringify(snapshot)).toBeLessThanOrEqual(300);
+      }
       expect(pageErrors, pageErrors.join('\n')).toEqual([]);
     });
   }

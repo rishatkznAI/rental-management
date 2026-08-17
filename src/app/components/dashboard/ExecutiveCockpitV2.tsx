@@ -248,7 +248,10 @@ function ExecutiveKpiStrip({ kpis }: { kpis: ExecutiveKpi[] }) {
 
 function AttentionPanel({ signals, state }: { signals: ExecutiveAttentionSignal[]; state: ExecutiveDataState }) {
   return (
-    <Card className="executive-v2-attention order-1 col-span-12 gap-0 overflow-hidden border-danger/25 lg:col-span-6 xl:order-2 xl:col-span-5" data-testid="dashboard-key-signals">
+    <Card className={cn(
+      'executive-v2-attention order-1 col-span-12 gap-0 overflow-hidden border-danger/25 lg:col-span-6 xl:order-2 xl:col-span-5',
+      signals.length === 0 && 'self-start',
+    )} data-testid="dashboard-key-signals">
       <CardHeader className="border-b border-border bg-danger-soft/35 px-4 pb-3 pt-3.5">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -304,7 +307,7 @@ function MonthDynamics({ month }: Pick<ExecutiveCockpitV2Props, 'month'>) {
         </div>
       </CardHeader>
       <CardContent className="px-3 pb-3">
-        <div className="h-[210px] min-w-0 sm:h-[225px]">
+        <div className={cn('min-w-0', hasChart ? 'h-[210px] sm:h-[225px]' : 'h-[68px] sm:h-[60px]')}>
           {hasChart ? (
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={month.points} margin={{ top: 8, right: 6, bottom: 0, left: -8 }}>

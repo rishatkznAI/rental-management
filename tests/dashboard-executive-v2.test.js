@@ -80,5 +80,7 @@ test('Dashboard V2 uses compact operational empty and partial states', () => {
   assert.match(cockpitSource, /Не удалось загрузить данные блока/);
   assert.match(cockpitSource, /Данные могли устареть; ожидается обновление/);
   assert.match(dashboardSource, /dataUpdatedAt/);
+  assert.match(cockpitSource, /signals\.length === 0 && 'self-start'/);
+  assert.match(cockpitSource, /hasChart \? 'h-\[210px\] sm:h-\[225px\]' : 'h-\[68px\] sm:h-\[60px\]'/);
   assert.doesNotMatch(cockpitSource, /text-(?:5xl|6xl|7xl)[\s\S]{0,120}Нет данных/);
 });

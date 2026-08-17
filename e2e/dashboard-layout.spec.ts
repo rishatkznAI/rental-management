@@ -1,406 +1,170 @@
 import { expect, test, type Page } from '@playwright/test';
-import { writeFile } from 'node:fs/promises';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
 
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
-  { name: 'tablet', width: 768, height: 1024 },
+  { name: 'laptop', width: 1280, height: 800 },
+  { name: 'tablet', width: 1024, height: 768 },
   { name: 'mobile', width: 390, height: 844 },
 ] as const;
 
-async function dashboardLayoutSnapshot(page: Page) {
-  return page.evaluate(() => {
-    const rectFor = (selector: string) => {
-      const element = document.querySelector(selector);
-      if (!element) return null;
-      const rect = element.getBoundingClientRect();
-      const style = window.getComputedStyle(element);
-      return {
-        top: Math.round(rect.top),
-        bottom: Math.round(rect.bottom),
-        left: Math.round(rect.left),
-        right: Math.round(rect.right),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-        visible: style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0,
-      };
-    };
+type Scenario = 'healthy' | 'troubled' | 'empty' | 'partial';
 
-    const viewportWidth = document.documentElement.clientWidth;
-    const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
-    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
-      .filter((element) => {
-        const style = window.getComputedStyle(element);
-        if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
-        const rect = element.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0 && rect.right > viewportWidth + 1;
-      })
-      .slice(0, 8)
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          tag: element.tagName.toLowerCase(),
-          testId: element.getAttribute('data-testid') || '',
-          className: String(element.className || '').slice(0, 120),
-          right: Math.round(rect.right),
-          width: Math.round(rect.width),
-        };
-      });
+function dateOffset(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
 
-    const board = rectFor('[data-testid="dashboard-command-board"]');
-    const health = rectFor('[data-testid="dashboard-company-health"]');
-    const healthScore = rectFor('[data-testid="dashboard-company-health-score"]');
-    const healthSegments = rectFor('[data-testid="dashboard-company-health-segments"]');
-    const healthVisual = rectFor('[data-testid="dashboard-company-health-visual"]');
-    const healthDirections = rectFor('[data-testid="dashboard-company-health-directions"]');
-    const healthCompleteness = rectFor('[data-testid="dashboard-company-health-completeness"]');
-    const healthExplanation = rectFor('[data-testid="dashboard-company-health-explanation"]');
-    const radial = rectFor('[data-testid="dashboard-radial-overview"]');
-    const fleet = rectFor('[data-testid="dashboard-fleet-utilization"]');
-    const receivables = rectFor('[data-testid="dashboard-receivables-aging"]');
-    const operationalSummary = rectFor('[data-testid="dashboard-operational-summary"]');
-    const radialCore = document.querySelector('[data-testid="dashboard-radial-core"]');
-    const healthElement = document.querySelector('[data-testid="dashboard-company-health"]');
-    const healthVisualElement = document.querySelector('[data-testid="dashboard-company-health-visual"]');
-    const healthVisualRect = healthVisualElement?.getBoundingClientRect();
-    const healthRect = healthElement?.getBoundingClientRect();
-    const overlapArea = (a: DOMRect, b: DOMRect) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
-      * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
-    const hasFixedAncestor = (element: HTMLElement) => {
-      for (let current: HTMLElement | null = element; current; current = current.parentElement) {
-        if (window.getComputedStyle(current).position === 'fixed') return true;
-      }
-      return false;
-    };
-    const companyHealthOverlaps = healthElement && healthRect
-      ? Array.from(document.body.querySelectorAll<HTMLElement>('*'))
-        .filter((element) => {
-          if (element === healthElement || healthElement.contains(element) || element.contains(healthElement)) return false;
-          const style = window.getComputedStyle(element);
-          if (style.display === 'none' || style.visibility === 'hidden' || hasFixedAncestor(element)) return false;
-          const rect = element.getBoundingClientRect();
-          if (rect.width < 6 || rect.height < 6) return false;
-          return overlapArea(healthRect, rect) > 1;
-        })
-        .slice(0, 8)
-        .map((element) => {
-          const rect = element.getBoundingClientRect();
-          return {
-            tag: element.tagName.toLowerCase(),
-            testId: element.getAttribute('data-testid') || '',
-            text: element.textContent?.trim().slice(0, 80) || '',
-            className: String(element.className || '').slice(0, 120),
-            left: Math.round(rect.left),
-            top: Math.round(rect.top),
-            right: Math.round(rect.right),
-            bottom: Math.round(rect.bottom),
-          };
-        })
-      : [];
-    const companyHealthOffenders = Array.from(healthElement?.querySelectorAll<HTMLElement>('*') ?? [])
-      .filter((element) => {
-        const style = window.getComputedStyle(element);
-        if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
-        const rect = element.getBoundingClientRect();
-        return rect.width > 0
-          && rect.height > 0
-          && (
-            rect.right > viewportWidth + 1
-            || (healthRect ? rect.right > healthRect.right + 1 : false)
-            || (healthRect ? rect.bottom > healthRect.bottom + 1 : false)
-          );
-      })
-      .slice(0, 8)
-      .map((element) => {
-        const rect = element.getBoundingClientRect();
-        return {
-          tag: element.tagName.toLowerCase(),
-          testId: element.getAttribute('data-testid') || '',
-          className: String(element.className || '').slice(0, 120),
-          left: Math.round(rect.left),
-          right: Math.round(rect.right),
-          bottom: Math.round(rect.bottom),
-          width: Math.round(rect.width),
-        };
-      });
-    const header = rectFor('body > div header');
-    const commandHeader = rectFor('.rentcore-command-header');
-    const cockpit = rectFor('[data-testid="dashboard-top-cockpit"]');
-    const screen = rectFor('.rentcore-command-screen');
-    const radialNodes = Array.from(document.querySelectorAll('[data-testid="dashboard-radial-node"]'));
-    const radialElement = document.querySelector('[data-testid="dashboard-radial-overview"]');
-    const radialRect = radialElement?.getBoundingClientRect();
-    const radialNodesInside = Boolean(radialRect) && radialNodes.every((node) => {
-      const rect = node.getBoundingClientRect();
-      return rect.left >= radialRect.left - 1
-        && rect.right <= radialRect.right + 1
-        && rect.top >= radialRect.top - 1
-        && rect.bottom <= radialRect.bottom + 1;
-    });
-    const kpiCards = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="dashboard-executive-cockpit"] .rentcore-command-kpi'));
-    const kpiReadability = kpiCards.map((card) => {
-      const value = card.querySelector<HTMLElement>('.dashboard-kpi-value');
-      const cardRect = card.getBoundingClientRect();
-      const valueRect = value?.getBoundingClientRect();
-      const style = value ? window.getComputedStyle(value) : null;
-      return {
-        text: value?.textContent?.trim() || '',
-        cardWidth: Math.round(cardRect.width),
-        valueWidth: Math.round(valueRect?.width || 0),
-        clipped: Boolean(valueRect && (valueRect.left < cardRect.left - 1 || valueRect.right > cardRect.right + 1)),
-        wordBreak: style?.wordBreak || '',
-        overflowWrap: style?.overflowWrap || '',
-      };
-    });
-
+function dashboardFixture(scenario: Scenario) {
+  if (scenario === 'empty' || scenario === 'partial') {
     return {
-      setupBannerCount: Array.from(document.body.querySelectorAll('*')).filter(element => element.textContent?.includes('Дашборд ещё собирает управленческую картину')).length,
-      overflowX: scrollWidth - viewportWidth,
+      equipment: [], rentals: [], gantt_rentals: [], payments: [], payment_allocations: [], service: [], clients: [], documents: [], deliveries: [], debt_collection_plans: [], crm_deals: [],
+    };
+  }
+
+  const equipment = [
+    { id: 'eq-1', category: 'own', status: 'rented', activeInFleet: true, inventoryNumber: 'INV-001', manufacturer: 'Mantall', model: 'HZ260', plannedMonthlyRevenue: 300000 },
+    { id: 'eq-2', category: 'own', status: scenario === 'troubled' ? 'in_service' : 'rented', activeInFleet: true, inventoryNumber: 'INV-002', manufacturer: 'Mantall', model: 'XE80', plannedMonthlyRevenue: 240000 },
+    { id: 'eq-3', category: 'own', status: 'rented', activeInFleet: true, inventoryNumber: 'INV-003', manufacturer: 'Dingli', model: 'JCPT', plannedMonthlyRevenue: 180000 },
+    { id: 'eq-4', category: 'own', status: 'available', activeInFleet: true, inventoryNumber: 'INV-004', manufacturer: 'LGMG', model: 'AS1212', plannedMonthlyRevenue: 150000 },
+  ];
+  const clients = [
+    { id: 'client-1', counterpartyId: 'cp-1', company: 'ООО Строй', status: 'active', manager: 'Администратор', creditLimit: 1000000 },
+    { id: 'client-2', counterpartyId: 'cp-2', company: 'ООО Альфа', status: 'active', manager: 'Администратор', creditLimit: 1000000 },
+  ];
+  const gantt_rentals = [
+    { id: 'rent-1', counterpartyId: 'cp-1', clientId: 'client-1', client: 'ООО Строй', equipmentId: 'eq-1', equipmentInv: 'INV-001', startDate: dateOffset(-12), endDate: scenario === 'troubled' ? dateOffset(-4) : dateOffset(12), status: 'active', amount: 280000, manager: 'Администратор', expectedPaymentDate: scenario === 'troubled' ? dateOffset(-9) : dateOffset(7) },
+    { id: 'rent-2', counterpartyId: 'cp-2', clientId: 'client-2', client: 'ООО Альфа', equipmentId: 'eq-2', equipmentInv: 'INV-002', startDate: dateOffset(-7), endDate: dateOffset(15), status: 'active', amount: 210000, manager: 'Администратор', expectedPaymentDate: dateOffset(8) },
+    { id: 'rent-3', counterpartyId: 'cp-1', clientId: 'client-1', client: 'ООО Строй', equipmentId: 'eq-3', equipmentInv: 'INV-003', startDate: dateOffset(-3), endDate: dateOffset(18), status: 'active', amount: 160000, manager: 'Администратор', expectedPaymentDate: dateOffset(10) },
+  ];
+  const rentals = gantt_rentals.map(rental => ({ ...rental, plannedReturnDate: rental.endDate, equipment: [rental.equipmentInv], price: rental.amount, rate: '', discount: 0, deliveryAddress: '', contact: '' }));
+  const payments = scenario === 'healthy' ? [
+    { id: 'pay-1', invoiceNumber: 'INV-PAY-1', counterpartyId: 'cp-1', clientId: 'client-1', rentalId: 'rent-1', amount: 280000, paidAmount: 280000, dueDate: dateOffset(-2), paidDate: dateOffset(-1), status: 'paid' },
+    { id: 'pay-2', invoiceNumber: 'INV-PAY-2', counterpartyId: 'cp-2', clientId: 'client-2', rentalId: 'rent-2', amount: 210000, paidAmount: 210000, dueDate: dateOffset(-1), paidDate: dateOffset(0), status: 'paid' },
+  ] : [];
+  const payment_allocations = payments.map((payment, index) => ({ id: `alloc-${index + 1}`, paymentId: payment.id, rentalId: payment.rentalId, clientId: payment.clientId, amount: payment.paidAmount, status: 'active' }));
+  const service = scenario === 'troubled' ? [
+    { id: 'service-1', equipmentId: 'eq-2', equipment: 'Mantall XE80', inventoryNumber: 'INV-002', reason: 'Аварийный ремонт', priority: 'critical', status: 'in_progress', createdAt: `${dateOffset(-5)}T08:00:00.000Z`, plannedDate: dateOffset(-2) },
+  ] : [];
+  const deliveries = scenario === 'troubled' ? [
+    { id: 'delivery-1', type: 'shipping', status: 'in_transit', transportDate: dateOffset(-2), origin: 'Склад', destination: 'Объект', cargo: 'Mantall', contactName: 'Иван', contactPhone: '+70000000000', cost: 10000, client: 'ООО Строй', counterpartyId: 'cp-1', clientId: 'client-1', equipmentId: 'eq-1', rentalId: 'rent-1', manager: 'Администратор', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), createdBy: 'admin' },
+  ] : [];
+  return { equipment, rentals, gantt_rentals, payments, payment_allocations, service, clients, documents: [], deliveries, debt_collection_plans: [], crm_deals: [] };
+}
+
+async function installScenario(page: Page, scenario: Scenario) {
+  const fixture = dashboardFixture(scenario);
+  await page.route('**/api/**', async route => {
+    const request = route.request();
+    if (request.method() !== 'GET') return route.continue();
+    const url = new URL(request.url());
+    const key = url.pathname.replace(/^\/api\//, '') as keyof typeof fixture;
+    if (scenario === 'partial' && (key === 'payments' || key === 'service')) {
+      return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'fixture unavailable' }) });
+    }
+    if (key in fixture) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(fixture[key]) });
+    if (url.pathname === '/api/management/action-queue' && url.searchParams.get('view') === 'attention') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        ok: true,
+        summary: { critical: 0, overdue: 0, dueToday: 0, unassigned: 0, stale: 0, totalEstimatedLoss: 0, totalDailyLoss: 0 },
+        groups: { critical: [], today: [], unassigned: [], topLoss: [], byResponsibleArea: [] },
+      }) });
+    }
+    return route.continue();
+  });
+}
+
+async function layoutSnapshot(page: Page) {
+  return page.evaluate(() => {
+    const rect = (testId: string) => {
+      const element = document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+      if (!element) return null;
+      const box = element.getBoundingClientRect();
+      return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, width: box.width, height: box.height };
+    };
+    const viewportWidth = document.documentElement.clientWidth;
+    const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*')).filter(element => {
+      const style = getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
+      const box = element.getBoundingClientRect();
+      return box.width > 0 && box.right > viewportWidth + 1;
+    }).slice(0, 8).map(element => ({ tag: element.tagName, testId: element.dataset.testid || '', width: element.getBoundingClientRect().width }));
+    const kpiValues = Array.from(document.querySelectorAll<HTMLElement>('.dashboard-kpi-value')).map(element => ({ text: element.textContent || '', clipped: element.scrollWidth > element.clientWidth + 1 }));
+    return {
+      overflowX: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - viewportWidth,
       offenders,
-      header,
-      commandHeader,
-      cockpit,
-      screen,
-      board,
-      health,
-      healthScore,
-      healthSegments,
-      healthVisual,
-      healthDirections,
-      healthCompleteness,
-      healthExplanation,
-      fleet,
-      receivables,
-      operationalSummary,
-      radial,
-      radialCoreExists: Boolean(document.querySelector('[data-testid="dashboard-radial-core"]')),
-      radialNodeCount: radialNodes.length,
-      radialNodesInside,
-      radialEmptyExists: Boolean(document.querySelector('[data-testid="dashboard-radial-empty"]')),
-      healthSvgCount: document.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length,
-      healthWidthShare: board && health ? health.width / Math.max(board.width, 1) : 1,
-      lowerGridAlignment: health && fleet && receivables ? {
-        leftDelta: Math.abs(health.left - receivables.left),
-        rightDelta: Math.abs(health.right - fleet.right),
-        widthDelta: Math.abs(health.width - (fleet.right - receivables.left)),
-      } : null,
-      lowerGridWhitespace: board && health ? {
-        left: Math.max(0, health.left - board.left),
-        right: Math.max(0, board.right - health.right),
-      } : null,
-      companyHealthOverlaps,
-      companyHealthOffenders,
-      healthScoreWidthShare: health && healthScore ? healthScore.width / Math.max(health.width, 1) : 1,
-      healthVisualWidthShare: health && healthVisual ? healthVisual.width / Math.max(health.width, 1) : 1,
-      healthDirectionsWidthShare: health && healthDirections ? healthDirections.width / Math.max(health.width, 1) : 1,
-      radialWidthShare: health && radial ? radial.width / Math.max(health.width, 1) : 1,
-      radialInsideVisual: Boolean(radialRect && healthVisualRect
-        && radialRect.left >= healthVisualRect.left - 1
-        && radialRect.right <= healthVisualRect.right + 1
-        && radialRect.top >= healthVisualRect.top - 1
-        && radialRect.bottom <= healthVisualRect.bottom + 1),
-      radialCoreText: radialCore?.textContent?.trim() || '',
-      compactHealthCards: document.querySelectorAll('[data-testid="dashboard-company-health-compact"] a.rentcore-command-card').length,
-      kpiReadability,
+      attention: rect('dashboard-key-signals'), kpis: rect('dashboard-top-cockpit'), month: rect('dashboard-month-dynamics'), money: rect('dashboard-receivables-aging'), fleet: rect('dashboard-fleet-utilization'), service: rect('dashboard-service-executive'), health: rect('dashboard-company-health'), header: rect('dashboard-executive-header'), kpiValues,
     };
   });
 }
 
-test.describe('Dashboard enterprise layout', () => {
+test.describe('Dashboard V2 responsive executive hierarchy', () => {
   for (const viewport of VIEWPORTS) {
-    test(`${viewport.name} keeps dashboard aligned and readable`, async ({ page }, testInfo) => {
+    test(`${viewport.name} has no overflow and preserves priority`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await loginAsAdmin(page);
-      await navigateInApp(page, '/');
-
-      await expect(page.getByRole('heading', { name: 'Операционный центр', exact: true })).toBeVisible();
-      for (const label of ['Требует внимания', 'Задачи', 'Динамика месяца', 'Загрузка техники', 'Возраст дебиторки']) {
-        await expect(page.getByText(label, { exact: true }).first(), `${label} should be visible`).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+      await expect(page.getByTestId('dashboard-executive-cockpit').locator('a')).toHaveCount(4);
+      for (const heading of ['Требует внимания', 'Динамика месяца', 'Здоровье компании', 'Парк', 'Деньги', 'Сервис']) {
+        await expect(page.getByRole('heading', { name: heading, exact: true })).toBeAttached();
       }
-
-      const topSnapshot = await dashboardLayoutSnapshot(page);
-
-      expect(topSnapshot.setupBannerCount, `${viewport.name}: removed setup banner should not be visible`).toBe(0);
-      expect(topSnapshot.overflowX, `${viewport.name}: document should not scroll horizontally (${JSON.stringify(topSnapshot)})`).toBe(0);
-      expect(topSnapshot.offenders, `${viewport.name}: visible elements should stay inside viewport`).toEqual([]);
-      expect(topSnapshot.companyHealthOverlaps, `${viewport.name}: company health should not cover other dashboard content`).toEqual([]);
-      expect(topSnapshot.screen?.top ?? 0, `${viewport.name}: dashboard content should start below header`).toBeGreaterThanOrEqual((topSnapshot.header?.bottom ?? 0) - 1);
-      expect(topSnapshot.cockpit?.top ?? 0, `${viewport.name}: KPI row should start below the dashboard command header`).toBeGreaterThanOrEqual((topSnapshot.commandHeader?.bottom ?? 0) - 1);
-
-      await page.getByTestId('dashboard-company-health').scrollIntoViewIfNeeded();
-      await page.waitForTimeout(100);
-      const snapshot = await dashboardLayoutSnapshot(page);
-
-      expect(snapshot.overflowX, `${viewport.name}: document should not scroll horizontally after scrolling to company health (${JSON.stringify(snapshot)})`).toBe(0);
-      expect(snapshot.offenders, `${viewport.name}: visible elements should stay inside viewport after scrolling to company health`).toEqual([]);
-      expect(snapshot.companyHealthOverlaps, `${viewport.name}: company health should not cover other dashboard content after scrolling`).toEqual([]);
-      expect(snapshot.companyHealthOffenders, `${viewport.name}: company health children should stay inside card and viewport`).toEqual([]);
-      expect(snapshot.healthSvgCount, `${viewport.name}: company health should not render a dominant central SVG circle`).toBe(0);
-      expect(snapshot.healthScore?.visible, `${viewport.name}: company health score summary should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.healthSegments?.visible, `${viewport.name}: company health segmented bar should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.healthVisual?.visible, `${viewport.name}: company health executive visual should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.healthDirections?.visible, `${viewport.name}: company health direction summary should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.healthCompleteness?.visible, `${viewport.name}: company health completeness strip should be visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.radial?.visible, `${viewport.name}: executive health visual should remain visible (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.radial?.height ?? 0, `${viewport.name}: executive health visual should not collapse (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(viewport.name === 'mobile' ? 145 : 150);
-      expect(snapshot.radialCoreText, `${viewport.name}: empty radial core must not show a huge Нет placeholder`).not.toContain('Нет');
-      expect(snapshot.radialCoreExists, `${viewport.name}: legacy radial core selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.radialEmptyExists, `${viewport.name}: legacy radial empty selector should be preserved (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.radialNodeCount, `${viewport.name}: radial overview should keep business contour node selectors (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(6);
-      expect(snapshot.radialNodesInside, `${viewport.name}: radial nodes should stay inside radial overview (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.radialInsideVisual, `${viewport.name}: radial overview should stay inside the health visual panel (${JSON.stringify(snapshot)})`).toBe(true);
-      expect(snapshot.compactHealthCards, `${viewport.name}: company health should keep exactly six business contours`).toBe(6);
-      await expect(page.getByTestId('dashboard-company-health-status'), `${viewport.name}: honest preliminary or insufficient state should be visible`)
-        .toHaveText(/Предварительная оценка|Недостаточно данных для оценки/);
-      await expect(page.getByTestId('dashboard-company-health-coverage'), `${viewport.name}: data coverage and confidence should be visible`)
-        .toHaveText(/Покрытие \d+% · доверие (?:высокое|среднее|низкое|недостаточно данных)/);
-      const insufficientSignals = page.getByTestId('dashboard-company-health-compact').locator('a').filter({ hasText: 'Недостаточно данных' });
-      expect(await insufficientSignals.count(), `${viewport.name}: low-coverage directions should remain visibly insufficient`).toBeGreaterThan(0);
-      await expect(insufficientSignals.first(), `${viewport.name}: an insufficient direction must not show a fake numeric score`).toContainText('—');
-      expect(snapshot.kpiReadability, `${viewport.name}: KPI values should render`).not.toEqual([]);
-      expect(snapshot.kpiReadability.filter(item => item.clipped), `${viewport.name}: KPI values should not clip`).toEqual([]);
-      expect(snapshot.kpiReadability.filter(item => item.wordBreak === 'break-all' || item.overflowWrap === 'anywhere'), `${viewport.name}: KPI values should not force letter wrapping`).toEqual([]);
-
-      if (viewport.name === 'desktop') {
-        expect(snapshot.health?.width ?? 0, `${viewport.name}: company health should use the full 12-column row (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(1000);
-        expect(snapshot.healthWidthShare, `${viewport.name}: company health should fill the available board width (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.95);
-        expect(snapshot.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should align with receivables left edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-        expect(snapshot.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should align with fleet right edge (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-        expect(snapshot.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should span the receivables plus fleet grid width (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(1);
-        expect(snapshot.lowerGridWhitespace?.left ?? Number.POSITIVE_INFINITY, `${viewport.name}: company health should not float in a centered empty row (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(16);
-        expect(snapshot.health?.height ?? 0, `${viewport.name}: company health should stay within premium card height target (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(360);
-        expect(snapshot.health?.height ?? 0, `${viewport.name}: company health should stay compact inside the lower grid (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual(470);
-        expect(snapshot.healthScoreWidthShare, `${viewport.name}: status row should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
-        expect(snapshot.healthVisualWidthShare, `${viewport.name}: chart should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
-        expect(snapshot.healthDirectionsWidthShare, `${viewport.name}: signal row should span the premium card (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.92);
-        expect(snapshot.radialWidthShare, `${viewport.name}: compatibility chart shell should span the visual area (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual(0.9);
-        expect(Math.min(...snapshot.kpiReadability.map(item => item.cardWidth)), `${viewport.name}: KPI cards should keep readable width (${JSON.stringify(snapshot.kpiReadability)})`).toBeGreaterThanOrEqual(220);
-      } else if (viewport.name === 'tablet') {
-        expect(snapshot.healthScore?.bottom ?? 0, `${viewport.name}: status row should sit before segmented bar (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthSegments?.top ?? 0) + 1);
-        expect(snapshot.healthSegments?.bottom ?? 0, `${viewport.name}: segmented bar should sit before chart (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthVisual?.top ?? 0) + 1);
-        expect(snapshot.healthDirections?.top ?? 0, `${viewport.name}: signals should sit below chart (${JSON.stringify(snapshot)})`).toBeGreaterThanOrEqual((snapshot.healthVisual?.bottom ?? 0) - 1);
-      } else {
-        expect(snapshot.healthScore?.bottom ?? 0, `${viewport.name}: status should stack before segmented bar (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthSegments?.top ?? 0) + 1);
-        expect(snapshot.healthSegments?.bottom ?? 0, `${viewport.name}: segmented bar should stack before visual (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthVisual?.top ?? 0) + 1);
-        expect(snapshot.healthVisual?.bottom ?? 0, `${viewport.name}: visual should stack before directions (${JSON.stringify(snapshot)})`).toBeLessThanOrEqual((snapshot.healthDirections?.top ?? 0) + 1);
+      const snapshot = await layoutSnapshot(page);
+      expect(snapshot.overflowX, JSON.stringify(snapshot)).toBeLessThanOrEqual(0);
+      expect(snapshot.offenders, JSON.stringify(snapshot)).toEqual([]);
+      expect(snapshot.kpiValues.length).toBe(4);
+      expect(snapshot.kpiValues.filter(item => item.clipped), JSON.stringify(snapshot.kpiValues)).toEqual([]);
+      expect(snapshot.header?.height || 0).toBeLessThanOrEqual(120);
+      if (viewport.name === 'mobile') {
+        expect(snapshot.attention?.top || 0).toBeLessThan(snapshot.kpis?.top || 0);
+        expect(snapshot.kpis?.top || 0).toBeLessThan(snapshot.month?.top || 0);
+        expect(snapshot.money?.top || 0).toBeLessThan(snapshot.fleet?.top || 0);
+        expect(snapshot.fleet?.top || 0).toBeLessThan(snapshot.service?.top || 0);
+        expect(snapshot.service?.top || 0).toBeLessThan(snapshot.health?.top || 0);
+      } else if (viewport.width >= 1280) {
+        expect(snapshot.kpis?.top || 0).toBeLessThan(snapshot.attention?.top || 0);
+        expect(snapshot.health?.height || 0).toBeLessThanOrEqual(300);
       }
-
-      await page.getByTestId('dashboard-company-health').screenshot({
-        path: testInfo.outputPath(`company-health-${viewport.name}-closed.png`),
-      });
-
-      await page.getByTestId('dashboard-company-health-explanation-toggle').click();
-      const explanation = page.getByTestId('dashboard-company-health-explanation');
-      await expect(explanation, `${viewport.name}: company health explanation should open`).toBeVisible();
-      const explanationText = await explanation.innerText();
-      for (const part of ['Финансы 30%', 'Аренда 25%', 'Риски 20%', 'Сервис 15%', 'Клиенты 7%', 'Парк 3%']) {
-        expect(explanationText, `${viewport.name}: explanation should show ${part}`).toContain(part);
-      }
-      expect(explanationText, `${viewport.name}: explanation should show eligible Finance contribution or an explicit insufficient-data state`).toMatch(
-        /Финансы[\s\S]*(?:\/100 × 30% = \d|— · покрытие \d+%)/,
-      );
-      expect(explanationText, `${viewport.name}: explanation should show final score`).toMatch(/Итого: (?:\d+\/100|недостаточно данных)/);
-      expect(explanationText, `${viewport.name}: explanation should show focus directions`).toMatch(/Сначала исправить: \S/);
-      expect(explanationText, `${viewport.name}: explanation should show raw score, coverage and confidence`).toMatch(/Оценка по доступным данным: (?:\d+|—)\/100 · Покрытие данных: \d+% · Доверие к оценке:/);
-      expect(explanationText, `${viewport.name}: explanation should show the coverage-adjusted score`).toMatch(/Итоговая оценка с учётом покрытия: (?:\d+|—)\/100/);
-      for (const agingLabel of [
-        'Общая дебиторка',
-        'Просроченная дебиторка',
-        'Не наступил срок',
-        '1–30 дней',
-        '31–60 дней',
-        '61–90 дней',
-        'Более 90 дней',
-        'Исключено из расчёта из-за неоднозначной даты',
-      ]) {
-        expect(explanationText, `${viewport.name}: Risks explanation should show ${agingLabel}`).toContain(agingLabel);
-      }
-      expect(explanationText, `${viewport.name}: aging explanation should not show cumulative 60+ debt`).not.toMatch(/\b60\+/);
-      expect(explanationText, `${viewport.name}: aging explanation should not show a cumulative 90+ label`).not.toMatch(/\b90\+/);
-      const risksSignal = page.getByTestId('dashboard-company-health-compact').locator('a').filter({ hasText: 'Риски' });
-      await expect(risksSignal, `${viewport.name}: Risks tile should remain visible`).toHaveCount(1);
-      const risksSignalText = await risksSignal.innerText();
-      if (risksSignalText.includes('—')) {
-        expect(explanationText, `${viewport.name}: ineligible Risks should explain the insufficient aging state`).toContain('Недостаточно надёжных данных по срокам задолженности');
-      } else {
-        expect(risksSignalText, `${viewport.name}: eligible Risks should expose a score`).toMatch(/\d+\/100/);
-        expect(explanationText, `${viewport.name}: eligible Risks should explain the clean aging state`).toContain('Подтверждённая просрочка не выявлена');
-      }
-      await expect(page.getByTestId('dashboard-company-health-missing-critical'), `${viewport.name}: missing critical metrics should be explicit`).toBeVisible();
-      await expect(page.getByTestId('dashboard-company-health-excluded-directions'), `${viewport.name}: excluded directions should be explicit`).toBeVisible();
-      await expect(explanation.locator('[data-source-status="missing"]').first(), `${viewport.name}: missing source provenance should be visible`).toContainText('Нет данных');
-      await expect(explanation.locator('[data-source-status="ambiguous"]').first(), `${viewport.name}: ambiguous source provenance should be visible`).toContainText('Неоднозначный источник');
-
-      const openSnapshot = await dashboardLayoutSnapshot(page);
-      expect(openSnapshot.overflowX, `${viewport.name}: open explanation should not create horizontal overflow (${JSON.stringify(openSnapshot)})`).toBe(0);
-      expect(openSnapshot.offenders, `${viewport.name}: open explanation should stay inside viewport`).toEqual([]);
-      expect(openSnapshot.healthExplanation?.visible, `${viewport.name}: open explanation shell should be visible (${JSON.stringify(openSnapshot)})`).toBe(true);
-      expect(openSnapshot.healthExplanation?.left ?? 0, `${viewport.name}: open explanation should stay inside company health left edge (${JSON.stringify(openSnapshot)})`).toBeGreaterThanOrEqual((openSnapshot.health?.left ?? 0) - 1);
-      expect(openSnapshot.healthExplanation?.right ?? 0, `${viewport.name}: open explanation should stay inside company health right edge (${JSON.stringify(openSnapshot)})`).toBeLessThanOrEqual((openSnapshot.health?.right ?? 0) + 1);
-      expect(openSnapshot.healthExplanation?.bottom ?? 0, `${viewport.name}: open explanation should stay inside company health bottom edge (${JSON.stringify(openSnapshot)})`).toBeLessThanOrEqual((openSnapshot.health?.bottom ?? 0) + 1);
-      expect(openSnapshot.compactHealthCards, `${viewport.name}: open explanation should keep six business signals`).toBe(6);
-      expect(openSnapshot.radialCoreExists, `${viewport.name}: open explanation should preserve radial core selector`).toBe(true);
-      await testInfo.attach(`company-health-${viewport.name}-geometry`, {
-        body: JSON.stringify({ viewport, closed: snapshot, explanationOpen: openSnapshot }, null, 2),
-        contentType: 'application/json',
-      });
-      await writeFile(
-        testInfo.outputPath(`company-health-${viewport.name}-geometry.json`),
-        `${JSON.stringify({ viewport, closed: snapshot, explanationOpen: openSnapshot }, null, 2)}\n`,
-        'utf8',
-      );
-      await explanation.screenshot({
-        path: testInfo.outputPath(`company-health-${viewport.name}-open.png`),
-      });
-      const risksExplanation = page.getByTestId('dashboard-company-health-explanation-risks');
-      await risksExplanation.scrollIntoViewIfNeeded();
-      await expect(risksExplanation, `${viewport.name}: Risks explanation should be visible for evidence`).toBeVisible();
-      await explanation.screenshot({
-        path: testInfo.outputPath(`company-health-${viewport.name}-risks-open.png`),
-      });
-      await page.getByTestId('dashboard-company-health-explanation-close').click();
     });
   }
+});
 
-  test('dashboard keeps the same app shell and RentCore logo as equipment', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.addInitScript(() => {
-      window.localStorage.setItem('rental-management:desktop-sidebar-state', 'expanded');
+test.describe('Dashboard V2 data states', () => {
+  for (const scenario of ['healthy', 'troubled', 'empty', 'partial'] as const) {
+    test(`${scenario} fixture remains honest and actionable`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await loginAsAdmin(page);
+      const pageErrors: string[] = [];
+      page.on('pageerror', error => pageErrors.push(error.stack || error.message));
+      await installScenario(page, scenario);
+      await navigateInApp(page, '/');
+      await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+      await page.waitForTimeout(250);
+      expect(pageErrors, pageErrors.join('\n')).toEqual([]);
+      if (scenario === 'healthy') {
+        await expect(page.getByTestId('dashboard-kpi-month-payments')).toContainText('₽');
+        await expect(page.getByTestId('dashboard-key-signals')).not.toContainText('Просроченная дебиторка');
+      }
+      if (scenario === 'troubled') {
+        await expect(page.getByTestId('dashboard-kpi-overdue-debt')).toContainText('Не подтверждены договорные сроки');
+        await expect(page.getByTestId('dashboard-key-signals')).not.toContainText('Просроченная дебиторка');
+        await expect(page.getByTestId('dashboard-key-signals')).toContainText('Сервисные блокеры');
+        await expect(page.getByTestId('dashboard-key-signals').getByRole('link').first()).toHaveAttribute('href', /finance|rentals|service|deliveries/);
+      }
+      if (scenario === 'empty') {
+        await expect(page.getByTestId('dashboard-kpi-month-payments')).toContainText('За выбранный период поступлений нет');
+        await expect(page.getByTestId('dashboard-kpi-month-payments')).not.toContainText('Нет данных');
+      }
+      if (scenario === 'partial') {
+        await expect(page.getByText('Часть данных недоступна', { exact: true })).toBeVisible();
+        await expect(page.getByTestId('dashboard-kpi-month-payments')).toContainText('—');
+        await expect(page.getByTestId('dashboard-service-executive')).toContainText('—');
+        await expect(page.getByTestId('dashboard-service-executive')).toContainText('Не удалось загрузить данные блока');
+      }
+      const snapshot = await layoutSnapshot(page);
+      expect(snapshot.overflowX, JSON.stringify(snapshot)).toBeLessThanOrEqual(0);
+      expect(snapshot.offenders, JSON.stringify(snapshot)).toEqual([]);
+      expect(pageErrors, pageErrors.join('\n')).toEqual([]);
     });
-    await loginAsAdmin(page);
-
-    const shellSnapshot = async () => page.evaluate(() => {
-      const aside = document.querySelector('aside');
-      const logoTitle = aside?.querySelector('.app-shell-title');
-      const themeToggle = aside?.querySelector('[data-testid="sidebar-theme-toggle"]');
-      const search = aside?.querySelector('[data-sidebar-search]');
-      const logoIcon = aside?.querySelector('img[alt="rentCore"]');
-      const asideRect = aside?.getBoundingClientRect();
-      return {
-        asideWidth: Math.round(asideRect?.width || 0),
-        logoText: logoTitle?.textContent?.trim() || '',
-        logoVisible: Boolean(logoTitle && window.getComputedStyle(logoTitle).display !== 'none'),
-        logoIconVisible: Boolean(logoIcon && window.getComputedStyle(logoIcon).display !== 'none'),
-        themeToggleVisible: Boolean(themeToggle && window.getComputedStyle(themeToggle).display !== 'none'),
-        searchVisible: Boolean(search && window.getComputedStyle(search).display !== 'none'),
-        navButtonCount: aside?.querySelectorAll('nav button').length || 0,
-      };
-    });
-
-    await navigateInApp(page, '/');
-    await expect(page.getByRole('heading', { name: 'Операционный центр', exact: true })).toBeVisible();
-    const dashboardShell = await shellSnapshot();
-
-    await navigateInApp(page, '/equipment');
-    await expect(page.getByRole('heading', { name: 'Техника', exact: true })).toBeVisible();
-    const equipmentShell = await shellSnapshot();
-
-    expect(dashboardShell.logoText, 'Dashboard should keep the global rentCore logo text').toMatch(/^rentcore$/i);
-    expect(dashboardShell.logoText, 'Dashboard and Equipment should show the same brand text').toBe(equipmentShell.logoText);
-    expect(dashboardShell.logoVisible, 'Dashboard logo text should be visible').toBe(true);
-    expect(dashboardShell.logoIconVisible, 'Dashboard logo icon should be visible').toBe(true);
-    expect(dashboardShell.themeToggleVisible, 'Dashboard sidebar theme toggle should stay visible').toBe(true);
-    expect(dashboardShell.searchVisible, 'Dashboard sidebar search should stay visible').toBe(true);
-    expect(dashboardShell, 'Dashboard and Equipment should use the same app shell primitives').toEqual(equipmentShell);
-  });
+  }
 });

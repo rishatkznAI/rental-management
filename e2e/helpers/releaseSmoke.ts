@@ -419,6 +419,7 @@ async function expectNoHorizontalOverflow(page: Page, label: string) {
     const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
     const offenders = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
       .filter(element => {
+        if (element.closest('.sr-only')) return false;
         const style = window.getComputedStyle(element);
         if (style.display === 'none' || style.visibility === 'hidden' || style.position === 'fixed') return false;
         const rect = element.getBoundingClientRect();

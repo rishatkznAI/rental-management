@@ -148,6 +148,7 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
   ]) {
     assert.match(releaseSmokeSource, new RegExp(marker));
   }
+  assert.match(releaseSmokeSource, /element\.closest\('\.sr-only'\)/);
   assert.ok(releaseSmokeSource.includes(".toHaveAttribute('href', /#\\/equipment\\?status=rented$/);"));
   assert.match(releaseSmokeSource, /company health must not compare revenue to an unavailable plan/);
   assert.match(releaseSmokeSource, /not\.toContainText\(\/Выручка аренды \(\?:ниже\|близка\) к плану\//);

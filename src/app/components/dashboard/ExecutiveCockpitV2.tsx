@@ -121,7 +121,7 @@ export type ExecutiveCockpitV2Props = {
     directions: ExecutiveHealthDirection[];
     explanation: string;
   };
-  fleet: {
+  fleet?: {
     state: ExecutiveDataState;
     utilization: string;
     context: string;
@@ -131,7 +131,7 @@ export type ExecutiveCockpitV2Props = {
     potentialLoss?: string;
     potentialLossNote?: string;
   };
-  money: {
+  money?: {
     state: ExecutiveDataState;
     totalDebt: string;
     overdue: string;
@@ -140,7 +140,7 @@ export type ExecutiveCockpitV2Props = {
     topDebtors: ExecutiveDebtor[];
     href: string;
   };
-  service: {
+  service?: {
     state: ExecutiveDataState;
     inRepair: string;
     readyToRent: string;
@@ -385,7 +385,7 @@ function CompactHealth({ health }: Pick<ExecutiveCockpitV2Props, 'health'>) {
   );
 }
 
-function FleetEconomics({ fleet }: Pick<ExecutiveCockpitV2Props, 'fleet'>) {
+function FleetEconomics({ fleet }: { fleet: NonNullable<ExecutiveCockpitV2Props['fleet']> }) {
   return (
     <Card className="executive-v2-fleet order-5 col-span-12 gap-0 lg:col-span-6 xl:order-5 xl:col-span-4" data-testid="dashboard-fleet-utilization">
       <CardHeader className="px-4 pb-2 pt-3.5"><SectionHeader eyebrow="Экономика актива" title="Парк" href="/equipment" /></CardHeader>
@@ -421,7 +421,7 @@ function FleetEconomics({ fleet }: Pick<ExecutiveCockpitV2Props, 'fleet'>) {
   );
 }
 
-function MoneyPanel({ money }: Pick<ExecutiveCockpitV2Props, 'money'>) {
+function MoneyPanel({ money }: { money: NonNullable<ExecutiveCockpitV2Props['money']> }) {
   const agingTotal = money.aging.reduce((sum, row) => sum + row.amount, 0);
   return (
     <Card className="executive-v2-money order-4 col-span-12 gap-0 lg:col-span-6 xl:order-6 xl:col-span-4" data-testid="dashboard-receivables-aging">
@@ -461,7 +461,7 @@ function MoneyPanel({ money }: Pick<ExecutiveCockpitV2Props, 'money'>) {
   );
 }
 
-function ServicePanel({ service }: Pick<ExecutiveCockpitV2Props, 'service'>) {
+function ServicePanel({ service }: { service: NonNullable<ExecutiveCockpitV2Props['service']> }) {
   return (
     <Card className="executive-v2-service order-6 col-span-12 gap-0 lg:col-span-6 xl:order-7 xl:col-span-4" data-testid="dashboard-service-executive">
       <CardHeader className="px-4 pb-2 pt-3.5"><SectionHeader eyebrow="Надёжность парка" title="Сервис" href={service.href} /></CardHeader>
@@ -559,9 +559,9 @@ export function ExecutiveCockpitV2(props: ExecutiveCockpitV2Props) {
           <ExecutiveKpiStrip kpis={props.kpis} />
           <MonthDynamics month={props.month} />
           <CompactHealth health={props.health} />
-          <FleetEconomics fleet={props.fleet} />
-          <MoneyPanel money={props.money} />
-          <ServicePanel service={props.service} />
+          {props.fleet ? <FleetEconomics fleet={props.fleet} /> : null}
+          {props.money ? <MoneyPanel money={props.money} /> : null}
+          {props.service ? <ServicePanel service={props.service} /> : null}
           {props.sales ? <SalesPanel sales={props.sales} /> : null}
           {props.recentChanges ? <RecentChanges recentChanges={props.recentChanges} /> : null}
         </main>

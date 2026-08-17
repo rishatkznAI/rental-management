@@ -59,6 +59,17 @@ test('receivable drill-downs use canonical identity rather than debtor names', (
   assert.doesNotMatch(dashboardSource, /`\/clients\/\$\{encodeURIComponent\(row\.name\)\}`/);
 });
 
+test('Dashboard V2 deduplicates service blockers and gates panels and health links by permission', () => {
+  assert.match(dashboardSource, /const serviceBlockerTicketIds = new Set\(\[[\s\S]*criticalTickets[\s\S]*unassignedServiceTickets[\s\S]*ticketsWaitingParts[\s\S]*overdueServiceTickets[\s\S]*ticket\.id[\s\S]*const serviceBlockersCount = serviceBlockerTicketIds\.size/);
+  assert.match(dashboardSource, /fleet: canViewEquipment \?/);
+  assert.match(dashboardSource, /money: canViewMoney \?/);
+  assert.match(dashboardSource, /service: canViewService \?/);
+  assert.match(dashboardSource, /executiveHealthDirectionVisibility\[direction\.key\] === true/);
+  assert.match(cockpitSource, /props\.fleet \? <FleetEconomics/);
+  assert.match(cockpitSource, /props\.money \? <MoneyPanel/);
+  assert.match(cockpitSource, /props\.service \? <ServicePanel/);
+});
+
 test('monetary risk is only displayed when a proven amount source exists', () => {
   assert.match(dashboardSource, /executiveOverdueReceivablesAmount[\s\S]*moneyImpact: `Деньги под риском:/);
   assert.match(dashboardSource, /Number\(item\.estimatedLoss\) > 0/);

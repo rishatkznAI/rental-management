@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { loginAsAdmin, navigateInApp } from './helpers/auth';
+import { login, loginAsAdmin, navigateInApp } from './helpers/auth';
+import { ensureUser, withAdminApi } from './helpers/api';
 
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
@@ -149,6 +150,7 @@ test.describe('Dashboard V2 data states', () => {
         await expect(page.getByTestId('dashboard-kpi-overdue-debt')).toContainText('Не подтверждены договорные сроки');
         await expect(page.getByTestId('dashboard-key-signals')).not.toContainText('Просроченная дебиторка');
         await expect(page.getByTestId('dashboard-key-signals')).toContainText('Сервисные блокеры');
+        await expect(page.getByTestId('dashboard-key-signals')).toContainText('1 ситуация');
         await expect(page.getByTestId('dashboard-key-signals').getByRole('link').first()).toHaveAttribute('href', /finance|rentals|service|deliveries/);
       }
       if (scenario === 'empty') {
@@ -171,4 +173,31 @@ test.describe('Dashboard V2 data states', () => {
       expect(pageErrors, pageErrors.join('\n')).toEqual([]);
     });
   }
+});
+
+test('payments-only dashboard never exposes forbidden Finance or Service drill-downs', async ({ page }) => {
+  const credentials = await withAdminApi(api => ensureUser(api, {
+    name: 'E2E Sales Dashboard',
+    email: 'e2e-sales-dashboard@example.local',
+    role: 'Менеджер по продажам',
+    password: '1234',
+  }));
+
+  await login(page, credentials);
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();
+  await expect(page.getByTestId('dashboard-receivables-aging')).toBeVisible();
+  await expect(page.getByTestId('dashboard-fleet-utilization')).toBeVisible();
+  await expect(page.getByTestId('dashboard-service-executive')).toHaveCount(0);
+  await expect(page.locator('a[href*="/finance"]')).toHaveCount(0);
+
+  const healthHrefs = await page.getByTestId('dashboard-company-health-directions').locator('a').evaluateAll(links => (
+    links.map(link => link.getAttribute('href') || '')
+  ));
+  expect(healthHrefs.every(href => /payments|clients|equipment/.test(href)), healthHrefs.join('\n')).toBeTruthy();
+
+  await page.getByTestId('dashboard-kpi-overdue-debt').click();
+  await expect(page).toHaveURL(/#\/payments/);
+  await navigateInApp(page, '/');
+  await page.getByTestId('dashboard-receivables-aging').getByRole('link', { name: 'Открыть', exact: true }).click();
+  await expect(page).toHaveURL(/#\/payments/);
 });

@@ -4154,7 +4154,13 @@ export default function Dashboard() {
       : utilization < 60 || utilization > UTILIZATION_TARGET
         ? 'warning'
         : 'success';
-  const serviceBlockersCount = criticalTickets.length + unassignedServiceTickets.length + ticketsWaitingParts.length + overdueServiceTickets.length;
+  const serviceBlockerTicketIds = new Set([
+    ...criticalTickets,
+    ...unassignedServiceTickets,
+    ...ticketsWaitingParts,
+    ...overdueServiceTickets,
+  ].map(ticket => String(ticket.id || '')).filter(Boolean));
+  const serviceBlockersCount = serviceBlockerTicketIds.size;
   const serviceTone: DashboardTone = !hasServiceSourceData
     ? 'default'
     : serviceBlockersCount > 0
@@ -4833,15 +4839,27 @@ export default function Dashboard() {
     clients: '/clients',
     fleet: '/equipment',
   };
-  const executiveHealthDirections = companyHealthScoreBreakdown.directions.map(direction => ({
-    id: direction.key,
-    label: direction.title,
-    score: direction.isEligible === false ? null : direction.score,
-    stateLabel: direction.shortReason,
-    href: healthDirectionHref[direction.key] || '/',
-  }));
-  const executiveHealthFocus = companyHealthScoreBreakdown.focusDirections?.[0]
-    || companyHealthScoreBreakdown.weakestDirections?.[0];
+  const executiveHealthDirectionVisibility: Record<string, boolean> = {
+    finance: canViewMoney,
+    rental: canViewRentals,
+    risks: canViewMoney,
+    service: canViewService,
+    clients: canViewClients,
+    fleet: canViewEquipment,
+  };
+  const executiveHealthDirections = companyHealthScoreBreakdown.directions
+    .filter(direction => executiveHealthDirectionVisibility[direction.key] === true)
+    .map(direction => ({
+      id: direction.key,
+      label: direction.title,
+      score: direction.isEligible === false ? null : direction.score,
+      stateLabel: direction.shortReason,
+      href: healthDirectionHref[direction.key],
+    }));
+  const executiveHealthFocus = [
+    ...(companyHealthScoreBreakdown.focusDirections ?? []),
+    ...(companyHealthScoreBreakdown.weakestDirections ?? []),
+  ].find(direction => executiveHealthDirectionVisibility[direction.key] === true);
   const executiveHealthExplanation = companyHealthScoreBreakdown.directions
     .map(direction => `${direction.title} ${Math.round(direction.weight * 100)}%`)
     .join(' · ');
@@ -5030,7 +5048,7 @@ export default function Dashboard() {
       directions: executiveHealthDirections,
       explanation: `${executiveHealthExplanation}. Недоступные направления исключаются из оценки; итог корректируется на покрытие данных.`,
     },
-    fleet: {
+    fleet: canViewEquipment ? {
       state: fleetState,
       utilization: activeEquipment > 0 ? `${utilization}%` : '—',
       context: activeEquipment > 0 ? `${rentedEquipment} из ${activeEquipment} на аренде` : 'Нет расчётной базы',
@@ -5047,8 +5065,8 @@ export default function Dashboard() {
       potentialLossNote: availableFleetPotentialRevenue === null
         ? executiveAvailableFleet.length > 0 ? 'Плановая выручка настроена не для всех свободных единиц' : 'Свободных единиц нет'
         : 'Сумма плановой месячной выручки свободных единиц',
-    },
-    money: {
+    } : undefined,
+    money: canViewMoney ? {
       state: moneyState,
       totalDebt: overdueReceivablesAvailable ? formatCurrency(companyHealthDebtAging.totalOutstandingAmount) : '—',
       overdue: overdueReceivablesAvailable && executiveOverdueReceivablesAmount !== null ? formatCurrency(executiveOverdueReceivablesAmount) : '—',
@@ -5061,8 +5079,8 @@ export default function Dashboard() {
       ],
       topDebtors: executiveTopDebtors,
       href: executiveReceivablesHref,
-    },
-    service: {
+    } : undefined,
+    service: canViewService ? {
       state: serviceState,
       inRepair: serviceState === 'error' || serviceState === 'loading' ? '—' : String(activeFleetServiceCount),
       readyToRent: readyToRentPercent === null ? '—' : `${readyToRentPercent}%`,
@@ -5070,7 +5088,7 @@ export default function Dashboard() {
       averageDays: serviceState === 'error' || serviceState === 'loading' ? '—' : `${averageServiceDays} дн.`,
       risks: executiveServiceRisks,
       href: '/service',
-    },
+    } : undefined,
     sales: canViewCrm ? {
       state: crmDealsQuery.isError ? 'error' : crmDealsQuery.isLoading ? 'loading' : crmDeals.length > 0 ? (forecastableCrmDeals.length < openCrmDeals.length ? 'partial' : 'ready') : 'empty',
       pipeline: crmDealsQuery.isSuccess ? formatCurrency(pipelineAmount) : '—',

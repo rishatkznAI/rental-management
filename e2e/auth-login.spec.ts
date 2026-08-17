@@ -28,13 +28,13 @@ test('admin can sign in and see dashboard shell', async ({ page }) => {
 
   await expect(page).toHaveURL(/#\/$/);
   await expect(page.getByRole('heading', { name: 'Операционный центр' })).toBeVisible();
-  await expect(page.getByText('Пульт управления арендным бизнесом')).toBeVisible();
+  await expect(page.getByTestId('dashboard-executive-v2')).toBeVisible();
   await page.locator('aside').getByRole('button', { name: /^Центр задач/ }).click();
   await expect(page).toHaveURL(/#\/tasks$/);
   await expect(page.getByRole('heading', { name: 'Центр задач' })).toBeVisible();
   await expect(page.getByText(/Всего задач/)).toBeVisible();
   await page.evaluate(() => { window.location.hash = '/'; });
   await expect(page.getByRole('heading', { name: 'Операционный центр' })).toBeVisible();
-  await expect(page.getByText('Пульт управления арендным бизнесом')).toBeVisible();
+  await expect(page.getByTestId('dashboard-executive-v2')).toBeVisible();
   await expect(page.locator('aside').getByRole('button', { name: /^Аренды/ })).toBeVisible();
 });

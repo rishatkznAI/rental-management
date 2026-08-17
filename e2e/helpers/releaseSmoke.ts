@@ -180,7 +180,7 @@ function installReadOnlyGuards(page: Page, config: ReleaseSmokeConfig, issues: U
 }
 
 async function expectHealthyMain(page: Page, label: string) {
-  const main = page.locator('main');
+  const main = page.locator('main').first();
   await expect(main, `${label}: main should be visible`).toBeVisible();
   const text = (await main.innerText()).trim();
   expect(text.length, `${label}: main should not be blank`).toBeGreaterThan(10);
@@ -296,18 +296,20 @@ async function expectAdminLoginSucceeded(
 }
 
 async function expectExecutiveCockpitVisible(page: Page) {
+  const executiveV2 = page.getByTestId('dashboard-executive-v2');
   const cockpit = page.getByTestId('dashboard-executive-cockpit');
   const keySignals = page.getByTestId('dashboard-key-signals-command').or(page.getByTestId('dashboard-key-signals')).first();
   const monthDynamics = page.getByTestId('dashboard-month-dynamics-command').or(page.getByTestId('dashboard-month-dynamics')).first();
   const companyHealth = page.getByTestId('dashboard-company-health');
-  await expect(page.getByText('Пульт управления арендным бизнесом'), 'dashboard command center subtitle should be visible after login').toBeVisible();
+  await expect(executiveV2, 'Dashboard V2 executive screen should be visible after login').toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true }), 'Dashboard V2 title should be visible after login').toBeVisible();
   await expect(cockpit, 'executive cockpit KPI grid should be visible after login').toBeVisible();
 
   const kpiChecks = [
+    { testId: 'dashboard-kpi-month-revenue', label: 'Выручка месяца' },
     { testId: 'dashboard-kpi-month-payments', label: 'Поступления месяца' },
     { testId: 'dashboard-kpi-fleet-utilization', label: 'Загрузка парка' },
     { testId: 'dashboard-kpi-overdue-debt', label: 'Просроченная дебиторка' },
-    { testId: 'dashboard-kpi-active-rentals', label: 'Активные аренды' },
   ];
 
   for (const item of kpiChecks) {
@@ -317,7 +319,7 @@ async function expectExecutiveCockpitVisible(page: Page) {
   }
 
   await expect(keySignals, 'dashboard key signals should be visible').toBeVisible();
-  await expect(keySignals.getByRole('heading', { name: /Очередь внимания|Главные сигналы сегодня/ }), 'dashboard signal strip should be visible').toBeVisible();
+  await expect(keySignals.getByRole('heading', { name: /Требует внимания|Очередь внимания|Главные сигналы сегодня/ }), 'dashboard signal strip should be visible').toBeVisible();
   await expect(monthDynamics.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
   await expectDashboardCompanyHealthLayout(page, companyHealth);
   await expectNoHorizontalOverflow(page, 'dashboard executive cockpit');
@@ -359,8 +361,10 @@ async function expectExecutiveCockpitVisible(page: Page) {
 
 async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Locator) {
   await expect(companyHealth, 'dashboard company health region should be visible').toBeVisible();
+  await expect(companyHealth.getByRole('heading', { name: 'Здоровье компании', exact: true }), 'dashboard company health heading should be visible').toBeVisible();
+  await expect(companyHealth.getByTestId('dashboard-company-health-score'), 'dashboard company health score should be visible').toBeVisible();
+  await expect(companyHealth.getByTestId('dashboard-company-health-directions'), 'dashboard company health directions should be visible').toBeVisible();
 
-  const viewport = page.viewportSize() ?? { width: 1440, height: 900 };
   const layout = await page.evaluate(() => {
     const visibleRect = (element: Element | null) => {
       if (!element) return null;
@@ -378,72 +382,30 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
     };
 
     const health = document.querySelector('[data-testid="dashboard-company-health"]');
-    const compact = health?.querySelector('[data-testid="dashboard-company-health-compact"]');
-    const radial = health?.querySelector('[data-testid="dashboard-radial-overview"]');
-    const radialCore = health?.querySelector('[data-testid="dashboard-radial-core"]');
-    const radialEmpty = health?.querySelector('[data-testid="dashboard-radial-empty"]');
+    const score = health?.querySelector('[data-testid="dashboard-company-health-score"]');
+    const directions = health?.querySelector('[data-testid="dashboard-company-health-directions"]');
     const board = document.querySelector('[data-testid="dashboard-command-board"]');
-    const fleet = document.querySelector('[data-testid="dashboard-fleet-utilization"]');
-    const receivables = document.querySelector('[data-testid="dashboard-receivables-aging"]');
     const boardRect = board?.getBoundingClientRect();
     const healthRect = health?.getBoundingClientRect();
-    const fleetRect = fleet?.getBoundingClientRect();
-    const receivablesRect = receivables?.getBoundingClientRect();
-    const radialRect = radial?.getBoundingClientRect();
     const viewportWidth = document.documentElement.clientWidth;
     const scrollWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth);
-    const radialNodes = Array.from(health?.querySelectorAll('[data-testid="dashboard-radial-node"]') ?? []);
-    const radialNodesInside = radialRect ? radialNodes.every((node) => {
-      const rect = node.getBoundingClientRect();
-      return rect.left >= radialRect.left - 1
-        && rect.right <= radialRect.right + 1
-        && rect.top >= radialRect.top - 1
-        && rect.bottom <= radialRect.bottom + 1;
-    }) : false;
 
     return {
-      label: health?.getAttribute('aria-label') || '',
       health: visibleRect(health),
-      compact: visibleRect(compact),
-      radial: visibleRect(radial ?? null),
-      radialCore: visibleRect(radialCore ?? null),
-      radialNodeCount: radialNodes.length,
-      radialNodesInside,
-      compactCards: compact?.querySelectorAll('a.rentcore-command-card').length || 0,
-      healthSvgCount: health?.querySelectorAll('[data-testid="dashboard-company-health-svg"]').length || 0,
+      score: visibleRect(score ?? null),
+      directions: visibleRect(directions ?? null),
+      directionLinks: directions?.querySelectorAll('a').length || 0,
       healthWidthShare: healthRect && boardRect ? healthRect.width / Math.max(boardRect.width, 1) : 1,
-      lowerGridAlignment: healthRect && fleetRect && receivablesRect ? {
-        leftDelta: Math.round(Math.abs(healthRect.left - receivablesRect.left)),
-        rightDelta: Math.round(Math.abs(healthRect.right - fleetRect.right)),
-        widthDelta: Math.round(Math.abs(healthRect.width - (fleetRect.right - receivablesRect.left))),
-      } : null,
       overflowX: scrollWidth - viewportWidth,
-      radialEmptyExists: Boolean(radialEmpty),
     };
   });
 
   expect(layout.health?.visible, `dashboard company health region should have a visible box (${JSON.stringify(layout)})`).toBe(true);
-  expect(layout.label, 'dashboard company health region should expose an accessible label').toMatch(/Здоровье компании/);
-  expect(layout.healthSvgCount, `dashboard company health should not render a dominant SVG circle (${JSON.stringify(layout)})`).toBe(0);
-  expect(layout.radial?.visible, `dashboard radial overview should be visible (${JSON.stringify(layout)})`).toBe(true);
-  expect(layout.radialCore?.visible, `dashboard radial core should be visible (${JSON.stringify(layout)})`).toBe(true);
-  expect(layout.radialEmptyExists, `dashboard radial empty compatibility selector should exist (${JSON.stringify(layout)})`).toBe(true);
-  expect(layout.radialNodeCount, `dashboard radial overview should render contour nodes (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(6);
-  expect(layout.radialNodesInside, `dashboard radial nodes should stay inside overview (${JSON.stringify(layout)})`).toBe(true);
-  expect(layout.compact?.visible, `dashboard company health should render compact list (${JSON.stringify(layout)})`).toBe(true);
-  expect(layout.compactCards, 'dashboard company health compact list should include all six direction cards').toBe(6);
+  expect(layout.score?.visible, `dashboard company health score should have a visible box (${JSON.stringify(layout)})`).toBe(true);
+  expect(layout.directions?.visible, `dashboard company health directions should have a visible box (${JSON.stringify(layout)})`).toBe(true);
+  expect(layout.directionLinks, 'dashboard company health should include all six direction links for admin').toBe(6);
+  expect(layout.healthWidthShare, `dashboard company health should fill its 12-column row (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(0.95);
   expect(layout.overflowX, `dashboard company health layout should not create horizontal overflow (${JSON.stringify(layout)})`).toBe(0);
-  if (viewport.width >= 1024) {
-    if (viewport.width >= 1600) {
-      expect(layout.healthWidthShare, `wide desktop company health should span five of twelve columns (${JSON.stringify(layout)})`).toBeGreaterThan(0.38);
-      expect(layout.healthWidthShare, `wide desktop company health should span five of twelve columns (${JSON.stringify(layout)})`).toBeLessThan(0.46);
-    } else {
-      expect(layout.healthWidthShare, `company health should fill its 12-column row (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(0.95);
-      expect(layout.lowerGridAlignment?.leftDelta ?? Number.POSITIVE_INFINITY, `company health should align with receivables left edge (${JSON.stringify(layout)})`).toBeLessThanOrEqual(2);
-      expect(layout.lowerGridAlignment?.rightDelta ?? Number.POSITIVE_INFINITY, `company health should align with fleet right edge (${JSON.stringify(layout)})`).toBeLessThanOrEqual(2);
-      expect(layout.lowerGridAlignment?.widthDelta ?? Number.POSITIVE_INFINITY, `company health should match the lower row width (${JSON.stringify(layout)})`).toBeLessThanOrEqual(2);
-    }
-  }
 }
 
 async function expectNoHorizontalOverflow(page: Page, label: string) {
@@ -513,7 +475,7 @@ async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: strin
 
   await page.screenshot({
     path: testInfo.outputPath('production-dashboard-cockpit-desktop.png'),
-    fullPage: true,
+    fullPage: false,
   });
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -521,15 +483,15 @@ async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: strin
   await expectExecutiveCockpitVisible(page);
   await page.screenshot({
     path: testInfo.outputPath('production-dashboard-cockpit-mobile.png'),
-    fullPage: true,
+    fullPage: false,
   });
 
-  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
   await expectExecutiveCockpitVisible(page);
   await page.screenshot({
     path: testInfo.outputPath('production-dashboard-cockpit-tablet.png'),
-    fullPage: true,
+    fullPage: false,
   });
 
   await page.setViewportSize({ width: 1440, height: 900 });

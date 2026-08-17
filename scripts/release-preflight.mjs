@@ -49,6 +49,7 @@ const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
 ];
 const FRONTEND_DEPLOY_TOOLING_COVERAGE_FILE_PATTERNS = [
   /^e2e\/dashboard-layout\.spec\.ts$/,
+  /^e2e\/stage-ui-a\.spec\.ts$/,
 ];
 const FRONTEND_DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
   /^src\//,

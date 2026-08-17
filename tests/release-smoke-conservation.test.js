@@ -54,6 +54,23 @@ test('workflow classifier and preflight conserve deploy-tooling scope for root N
   assert.doesNotThrow(() => assertDeployToolingReleaseScope({ releaseType: classified.releaseType, changedFiles }));
 });
 
+test('workflow classifier and preflight allow dashboard UI coverage in frontend deploys', () => {
+  const changedFiles = [
+    'src/app/pages/Dashboard.tsx',
+    'e2e/dashboard-layout.spec.ts',
+    'e2e/stage-ui-a.spec.ts',
+  ];
+  const workflowDeployToolingAllowed = workflowRegex('deploy_tooling_allowed');
+
+  for (const file of changedFiles.slice(1)) {
+    assert.equal(workflowDeployToolingAllowed.test(file), true, `${file} must stay allowed by workflow deploy-tooling scope`);
+  }
+
+  const classified = classifyReleaseChangedFiles(changedFiles);
+  assert.equal(classified.releaseType, 'frontend-deploy-tooling');
+  assert.deepEqual(classified.blockedFiles, []);
+});
+
 test('production release smoke checks app.disabled before authenticated smoke', () => {
   assert.match(releaseSmokeSource, /type VersionInfo = \{/);
   assert.match(releaseSmokeSource, /normalizedConfig\.environmentName === 'production' && versionJson\?\.app\?\.disabled === true/);

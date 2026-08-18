@@ -613,7 +613,7 @@ export default function ManagerReport() {
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Отчёт по менеджерам</h2>
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Отчёт по менеджерам</h1>
           <p className="mt-0.5 text-xs text-gray-400 dark:text-gray-500">
             Обновлено: {fmtTs(loadedAt)} ·{' '}
             {filteredRentalsCount} аренд · {Number(totals.accrualsCount ?? 0)} начислений · {summary.length} менеджеров ·{' '}

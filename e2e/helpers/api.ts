@@ -60,11 +60,13 @@ type DocumentRecord = {
   type: string;
   number: string;
   client: string;
+  clientName?: string;
   clientId?: string;
   rentalId?: string;
   rental?: string;
   equipmentId?: string;
   equipmentInv?: string;
+  date?: string;
   status: string;
   manager?: string;
 };

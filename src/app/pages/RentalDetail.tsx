@@ -1046,7 +1046,12 @@ export default function RentalDetail() {
     <div className="min-w-0 max-w-full space-y-4 overflow-x-clip p-4 sm:space-y-6 sm:p-6 md:p-8" data-rental-detail-responsive="true">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="secondary" onClick={() => navigate(-1)}>
+          <Button
+            variant="secondary"
+            onClick={() => navigate(-1)}
+            aria-label="Вернуться назад"
+            title="Вернуться назад"
+          >
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>

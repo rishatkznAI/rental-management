@@ -1422,10 +1422,20 @@ export function buildCompanyHealthModel(input = {}) {
   const hasEquipment = contours.equipment.count > 0;
   const hasOperationalData = OPERATIONAL_CONTOURS.some(id => contours[id].count > 0);
   const isEmpty = contourStates.every(item => item.count <= 0);
+  const exactEmptyBusinessState = input.businessStateExactEmpty === true
+    && isEmpty
+    && safeCount(input.clientsCount) <= 0
+    && safeCount(input.financeOperationsCount) <= 0;
   const criticalSignals = safeCount(input.criticalSignals);
   const invalidCriticalSignals = safeCount(input.invalidCriticalSignals);
   const hasScoreBase = hasEquipment && hasOperationalData;
-  const scoreDetails = calculateCompanyHealthScore(buildCompanyHealthDirectionInputs(input, contours, hasScoreBase));
+  // A successful read of an empty debt/finance source proves only that there are
+  // no rows; it is not positive evidence of company health. Strip zero-valued
+  // source-availability hints when every business contour is exactly empty so
+  // the management score remains unknown instead of manufacturing a healthy
+  // Risks direction from an empty ledger.
+  const scoreInput = exactEmptyBusinessState ? {} : input;
+  const scoreDetails = calculateCompanyHealthScore(buildCompanyHealthDirectionInputs(scoreInput, contours, hasScoreBase));
 
   const score = scoreDetails.totalScore;
   const tone = score === null

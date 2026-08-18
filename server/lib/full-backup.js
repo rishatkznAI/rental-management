@@ -316,7 +316,14 @@ function collectLocalFiles(roots = defaultFileRoots(), seen = new Set()) {
         visit(root, fullPath);
         continue;
       }
-      if (!dirent.isFile() || shouldSkipFile(fullPath)) continue;
+      if (!dirent.isFile()) {
+        skip('unsupported-file-entry');
+        continue;
+      }
+      if (shouldSkipFile(fullPath)) {
+        skip('blocked-extension');
+        continue;
+      }
       let real = '';
       try {
         real = fs.realpathSync(fullPath);

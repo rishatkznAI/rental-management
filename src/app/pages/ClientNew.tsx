@@ -85,7 +85,6 @@ export default function ClientNew() {
   const [managers, setManagers] = React.useState<{ id: string; name: string; role: string; status: string }[]>([]);
   const [duplicateClient, setDuplicateClient] = useState<{ id?: string; company?: string } | null>(null);
   const [innError, setInnError] = useState('');
-  const isAdmin = user?.role === 'Администратор';
 
   useEffect(() => {
     if (!can('create', 'clients')) navigate('/clients', { replace: true });
@@ -107,7 +106,6 @@ export default function ClientNew() {
     address:      '',
     paymentTerms: 'Постоплата 14 дней',
     creditLimit:  '',
-    debt:         '',
     manager:      '',
     notes:        '',
   });
@@ -131,7 +129,7 @@ export default function ClientNew() {
       address:      formData.address   || undefined,
       paymentTerms: formData.paymentTerms || 'Постоплата 14 дней',
       creditLimit:  formData.creditLimit ? Number(formData.creditLimit) : 0,
-      debt:         isAdmin ? Math.max(0, Number(formData.debt) || 0) : 0,
+      debt:         0,
       totalRentals: 0,
       manager:      formData.manager   || undefined,
       notes:        formData.notes     || undefined,
@@ -323,27 +321,9 @@ export default function ClientNew() {
               )}
             </FieldWrapper>
 
-            {isAdmin && (
-              <FieldWrapper
-                label="Дебиторка, ₽"
-                hint="Ручная сумма задолженности клиента, которая добавляется к долгам по арендам"
-              >
-                <div className="relative">
-                  <input
-                    type="number"
-                    min={0}
-                    step={1000}
-                    placeholder="0"
-                    value={formData.debt}
-                    onChange={e => setFormData({ ...formData, debt: e.target.value })}
-                    className={fieldClass}
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">
-                    ₽
-                  </span>
-                </div>
-              </FieldWrapper>
-            )}
+            <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
+              Входящий остаток дебиторской задолженности вводится администратором в карточке уже созданного клиента. Обычное редактирование клиента его не меняет.
+            </p>
 
             {/* Ответственный менеджер */}
             <FieldWrapper

@@ -23,7 +23,7 @@ function objectBlockAfter(source, marker) {
 
 test('dashboard overdue receivables cards use overdue debt, not total client debt', () => {
   assert.match(dashboardSource, /const overdueReceivablesAmount = overduePayments\.reduce/);
-  assert.match(dashboardSource, /const totalDebt = clientFinancials\.reduce/);
+  assert.match(dashboardSource, /const totalDebt = clientReceivables\.reduce/);
   const block = objectBlockAfter(dashboardSource, "id: 'dashboard-kpi-overdue-debt'");
   assert.match(block, /label: 'Просроченная дебиторка'/);
   assert.match(block, /executiveOverdueReceivablesAmount/);
@@ -41,7 +41,7 @@ test('dashboard payment totals preserve explicit zero paidAmount and skip ignore
 });
 
 test('dashboard month revenue excludes cancelled archived rentals from money charts', () => {
-  assert.match(dashboardSource, /import \{ buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows, shouldCountRental \}/);
+  assert.match(dashboardSource, /import \{ buildClientDebtAgingRows, buildClientFinancialSnapshots, buildClientReceivables, buildRentalDebtRows, shouldCountRental \}/);
   assert.match(dashboardSource, /const revenueRentalsStartedThisMonth = rentalsStartedThisMonth\.filter\(shouldCountRental\)/);
   assert.match(dashboardSource, /const monthlyRevenue = revenueRentalsStartedThisMonth\.reduce/);
   assert.match(dashboardSource, /const executiveRevenueRentals = rentalsIntersectingThisMonth\.filter\(shouldCountRental\)/);

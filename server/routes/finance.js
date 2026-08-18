@@ -22,6 +22,13 @@ const {
 const {
   assertCanonicalArDebtorIdentity,
 } = require('../lib/ar-debtor-identity');
+const {
+  assertClientCounterpartyLink,
+} = require('../lib/counterparty-relations');
+const {
+  AUDIT_COLLECTION,
+  createAuditEntry,
+} = require('../lib/security-audit');
 
 function registerFinanceRoutes(router, deps) {
   const {
@@ -43,7 +50,13 @@ function registerFinanceRoutes(router, deps) {
     normalizePaymentPlan,
     validateStageTransition,
     writeData,
+    writeDataBatch,
     requireWrite,
+    requireAdmin = (req, res, next) => (
+      (req.user?.userRole || req.user?.role) === 'Администратор'
+        ? next()
+        : res.status(403).json({ ok: false, error: 'Forbidden' })
+    ),
     generateId,
     idPrefixes = {},
     nowIso = () => new Date().toISOString(),
@@ -484,6 +497,130 @@ function registerFinanceRoutes(router, deps) {
       relationData: { readData },
     }, today);
   }
+
+  function openingReceivableView(client) {
+    return {
+      clientId: client.id,
+      counterpartyId: text(client.counterpartyId),
+      amount: Math.max(0, Number(client.openingReceivableAmount ?? client.debt) || 0),
+      asOfDate: dateOnly(client.openingReceivableAsOfDate) || null,
+      revision: Math.max(0, Number(client.openingReceivableRevision) || 0),
+      createdAt: client.openingReceivableCreatedAt || null,
+      createdByUserId: client.openingReceivableCreatedByUserId || null,
+      updatedAt: client.openingReceivableUpdatedAt || null,
+      updatedByUserId: client.openingReceivableUpdatedByUserId || null,
+      status: Math.max(0, Number(client.openingReceivableAmount ?? client.debt) || 0) > 0 ? 'active' : 'cleared',
+    };
+  }
+
+  function parseOpeningReceivableAmount(value) {
+    if (!['number', 'string'].includes(typeof value)) return null;
+    const normalized = String(value).trim();
+    if (!normalized || !/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+    const [whole, fraction = ''] = normalized.split('.');
+    try {
+      const minorUnits = (BigInt(whole) * 100n) + BigInt(fraction.padEnd(2, '0'));
+      if (minorUnits > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+      return Number(minorUnits) / 100;
+    } catch {
+      return null;
+    }
+  }
+
+  router.get('/finance/opening-receivables/:clientId', requireAuth, requireRead('payments'), (req, res) => {
+    const client = collectionList('clients').find(item => text(item.id) === text(req.params.clientId));
+    if (!client) return res.status(404).json({ ok: false, error: 'Клиент не найден.' });
+    if (!accessControl.canAccessEntity('clients', client, req.user)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    return res.json(openingReceivableView(client));
+  });
+
+  // The client balance and its mandatory audit row are committed atomically below;
+  // the generic best-effort audit helper is intentionally not used for this flow.
+  router.put('/finance/opening-receivables/:clientId', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const clients = [...collectionList('clients')];
+      const index = clients.findIndex(item => text(item.id) === text(req.params.clientId));
+      if (index < 0) return res.status(404).json({ ok: false, error: 'Клиент не найден.' });
+      const previous = clients[index];
+      const relation = assertClientCounterpartyLink({
+        clientId: previous.id,
+        counterpartyId: req.body?.counterpartyId,
+      }, { readData }, {
+        allowArchived: false,
+        requireCustomerRole: true,
+      });
+      const counterpartyId = relation.counterpartyId;
+      const amount = parseOpeningReceivableAmount(req.body?.amount);
+      if (amount === null) {
+        return res.status(400).json({ ok: false, error: 'Входящий остаток должен быть явной неотрицательной суммой с точностью не более двух знаков.' });
+      }
+      const asOfDate = dateOnly(req.body?.asOfDate);
+      if (!asOfDate) return res.status(400).json({ ok: false, error: 'Укажите дату входящего остатка.' });
+      const reason = text(req.body?.reason);
+      if (reason.length < 3 || reason.length > 500) {
+        return res.status(400).json({ ok: false, error: 'Укажите причину корректировки (от 3 до 500 символов).' });
+      }
+      const currentRevision = Math.max(0, Number(previous.openingReceivableRevision) || 0);
+      if (Number(req.body?.expectedRevision) !== currentRevision) {
+        return res.status(409).json({
+          ok: false,
+          code: 'OPENING_AR_REVISION_CONFLICT',
+          error: 'Входящий остаток уже изменён. Обновите карточку перед повтором.',
+          current: openingReceivableView(previous),
+        });
+      }
+      const now = nowIso();
+      const actorId = req.user?.userId || req.user?.id || undefined;
+      const actorName = userName(req.user) || undefined;
+      const next = {
+        ...previous,
+        debt: amount,
+        openingReceivableAmount: amount,
+        openingReceivableAsOfDate: asOfDate,
+        openingReceivableRevision: currentRevision + 1,
+        openingReceivableCreatedAt: previous.openingReceivableCreatedAt || now,
+        openingReceivableCreatedByUserId: previous.openingReceivableCreatedByUserId || actorId,
+        openingReceivableCreatedBy: previous.openingReceivableCreatedBy || actorName,
+        openingReceivableUpdatedAt: now,
+        openingReceivableUpdatedByUserId: actorId,
+        openingReceivableUpdatedBy: actorName,
+      };
+      clients[index] = next;
+      if (typeof writeDataBatch !== 'function') {
+        throw new Error('Atomic opening receivable persistence is unavailable.');
+      }
+      const auditEntry = createAuditEntry(req, {
+        action: amount === 0 ? 'opening_receivable.clear' : (currentRevision === 0 ? 'opening_receivable.create' : 'opening_receivable.correct'),
+        entityType: 'clients',
+        entityId: next.id,
+        before: {
+          id: previous.id,
+          ...openingReceivableView(previous),
+        },
+        after: {
+          id: next.id,
+          ...openingReceivableView(next),
+          reason,
+        },
+      }, { generateId, nowIso });
+      const auditLogs = [...collectionList(AUDIT_COLLECTION), auditEntry].slice(-10000);
+      writeDataBatch([
+        { name: 'clients', value: clients },
+        { name: AUDIT_COLLECTION, value: auditLogs },
+      ]);
+      return res.json(openingReceivableView(next));
+    } catch (error) {
+      const status = Number(error?.status);
+      return res.status(Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500).json({
+        ok: false,
+        error: error?.message || 'Не удалось сохранить входящую дебиторскую задолженность.',
+        ...(error?.code ? { code: error.code } : {}),
+        ...(error?.details ? { details: error.details } : {}),
+      });
+    }
+  });
 
   router.get('/finance/accounts', requireAuth, requireRead('finance_accounts'), (req, res) => {
     const rows = accessControl

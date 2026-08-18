@@ -132,6 +132,39 @@ test('manager mass assignment cannot override manager/status/payment fields', ()
   }, user, { id: 'C-1', manager: 'Руслан', managerId: 'U-manager' }), /ownerId/);
 });
 
+test('generic client mutations cannot write opening receivables even for administrators', () => {
+  const access = createAccess({});
+  const admin = { userId: 'U-admin', userName: 'Администратор', userRole: 'Администратор' };
+
+  const created = access.sanitizeCreateInput('clients', {
+    company: 'ООО Новый клиент',
+    debt: 50000,
+    openingReceivableAmount: 50000,
+    openingReceivableRevision: 99,
+  }, admin);
+  assert.deepEqual(created, { company: 'ООО Новый клиент' });
+
+  const updated = access.sanitizeUpdateInput('clients', {
+    company: 'ООО Исправленный клиент',
+    debt: 75000,
+    openingReceivableAmount: 75000,
+    openingReceivableAsOfDate: '2026-08-18',
+    openingReceivableUpdatedByUserId: 'U-forged',
+  }, admin, { id: 'C-1', debt: 0 });
+  assert.deepEqual(updated, { company: 'ООО Исправленный клиент' });
+
+  assert.throws(() => access.assertSafeAdminBulkReplaceInput('clients', [{
+    id: 'C-1',
+    company: 'ООО Bulk обход',
+    debt: 99000,
+  }]), /debt/);
+  assert.throws(() => access.assertSafeAdminBulkReplaceInput('clients', [{
+    id: 'C-1',
+    company: 'ООО Bulk обход',
+    openingReceivableAmount: 99000,
+  }]), /openingReceivableAmount/);
+});
+
 test('investor sees only own equipment and linked rentals', () => {
   const state = {
     equipment: [

@@ -188,6 +188,7 @@ const { registerRentalRoutes } = require('./routes/rentals');
 const { registerServiceRoutes } = require('./routes/service');
 const { registerStaffRoutes } = require('./routes/staff');
 const { registerSystemRoutes } = require('./routes/system');
+const { registerSkytechCleanResetRoutes } = require('./routes/skytech-clean-reset');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
 const { registerCanonicalReceivablesReadRoutes } = require('./routes/canonical-receivables-read');
 const { registerForecastReceivablesReadRoutes } = require('./routes/forecast-receivables-read');
@@ -1389,6 +1390,20 @@ registerAuthRoutes(app, {
   nowIso,
 });
 
+// This narrowly scoped, secret-gated operations surface is registered before the
+// conservation middleware so a verified reset can run while APP_DISABLED=true.
+// It is indistinguishable from a missing route unless the explicit Railway flag is enabled.
+registerSkytechCleanResetRoutes(apiRouter, {
+  dbPath: DB_PATH,
+  ensureDb,
+  readData,
+  createSqliteBackup,
+  buildInfo: getBuildInfo,
+  getAppDisabledConfig: () => appDisabledConfig,
+  getBotDisabledConfig: () => botDisabledConfig,
+  getGsmDisabledConfig: () => gsmDisabledConfig,
+});
+
 apiRouter.use(createAppDisabledMiddleware({
   getConfig: () => appDisabledConfig,
 }));
@@ -1506,7 +1521,9 @@ registerFinanceRoutes(apiRouter, {
   normalizePaymentPlan,
   validateStageTransition,
   writeData,
+  writeDataBatch,
   requireWrite,
+  requireAdmin,
   generateId,
   idPrefixes: ID_PREFIXES,
   nowIso,

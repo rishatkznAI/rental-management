@@ -863,6 +863,32 @@ test('manual client debt contributes to receivables and manager totals', () => {
   assert.equal(report.totals.debt, 35000);
 });
 
+test('opening receivable is the dedicated AR source and never becomes a payment or revenue record', () => {
+  const report = buildFinanceReport(
+    {
+      clients: [{
+        id: 'c-opening-ar',
+        counterpartyId: 'CP-c-opening-ar',
+        company: 'ООО Входящий остаток',
+        debt: 999999,
+        openingReceivableAmount: 42000,
+        openingReceivableAsOfDate: '2026-08-18',
+        openingReceivableRevision: 1,
+        manager: 'Анна',
+      }],
+      rentals: [],
+      payments: [],
+    },
+    '2026-08-18',
+  );
+
+  assert.equal(report.clientReceivables[0].manualDebt, 42000);
+  assert.equal(report.clientReceivables[0].currentDebt, 42000);
+  assert.equal(report.totals.debt, 42000);
+  assert.equal(report.debtRows.length, 0);
+  assert.equal(report.unallocatedPayments.length, 0);
+});
+
 test('finance report separates total debt from overdue receivables without paid cancelled or future rows', () => {
   const report = buildFinanceReport(
     withCanonicalDebtors({

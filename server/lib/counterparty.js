@@ -8,6 +8,18 @@ const COUNTERPARTY_TYPES = Object.freeze([
 const COUNTERPARTY_ROLES = Object.freeze(['customer', 'supplier', 'contractor']);
 const COUNTERPARTY_STATUSES = Object.freeze(['active', 'inactive']);
 const COUNTERPARTY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/;
+const CLIENT_OPENING_AR_FIELDS = Object.freeze([
+  'debt',
+  'openingReceivableAmount',
+  'openingReceivableAsOfDate',
+  'openingReceivableRevision',
+  'openingReceivableCreatedAt',
+  'openingReceivableCreatedByUserId',
+  'openingReceivableCreatedBy',
+  'openingReceivableUpdatedAt',
+  'openingReceivableUpdatedByUserId',
+  'openingReceivableUpdatedBy',
+]);
 
 const CLIENT_IDENTITY_FIELDS = new Set([
   'name',
@@ -622,9 +634,20 @@ function prepareClientCompatibilityBulkReplace({
 
   for (const incoming of nextClients) {
     const previous = previousById.get(String(incoming?.id || ''));
-    const compatibilityInput = previous?.counterpartyId && !incoming?.counterpartyId
-      ? { ...incoming, counterpartyId: previous.counterpartyId }
-      : incoming;
+    const compatibilityInput = { ...incoming };
+    if (previous) {
+      // Opening receivables are owned exclusively by the dedicated finance route.
+      // Replacement/import callers cannot supply these fields, so preserve the
+      // exact persisted state by stable Client ID instead of treating omission as
+      // an instruction to erase the balance or its audit metadata.
+      for (const field of CLIENT_OPENING_AR_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(previous, field)) compatibilityInput[field] = previous[field];
+        else delete compatibilityInput[field];
+      }
+      if (previous.counterpartyId && !compatibilityInput.counterpartyId) {
+        compatibilityInput.counterpartyId = previous.counterpartyId;
+      }
+    }
     const prepared = previous
       ? prepareClientCompatibilityUpdate({
           previousClient: previous,
@@ -729,6 +752,7 @@ function ensureClientCounterpartyFoundation({
 }
 
 module.exports = {
+  CLIENT_OPENING_AR_FIELDS,
   COUNTERPARTY_ID_PATTERN,
   COUNTERPARTY_ROLES,
   COUNTERPARTY_STATUSES,

@@ -5,7 +5,14 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const nodeBin = JSON.stringify(process.env.PLAYWRIGHT_NODE_PATH || process.execPath);
 const viteBin = JSON.stringify(path.join(projectRoot, 'node_modules', '.bin', 'vite'));
-const e2eDbPath = path.join(projectRoot, 'test-results', 'e2e-app.sqlite');
+const e2eDbPath = process.env.PLAYWRIGHT_DB_PATH || path.join(projectRoot, 'test-results', 'e2e-app.sqlite');
+const usesExternalDb = Boolean(process.env.PLAYWRIGHT_DB_PATH);
+const adminResetEnv = !usesExternalDb || process.env.E2E_FORCE_ADMIN_RESET === 'true'
+  ? {
+      ADMIN_RESET_EMAIL: process.env.E2E_ADMIN_EMAIL || 'smoke-admin@yandex.ru',
+      ADMIN_RESET_PASSWORD: process.env.E2E_ADMIN_PASSWORD || '123123',
+    }
+  : {};
 
 const frontendCommand = `${nodeBin} ${viteBin} --host 127.0.0.1 --port 5173`;
 const backendCommand = `${nodeBin} server.js`;
@@ -43,8 +50,7 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         DB_PATH: e2eDbPath,
-        ADMIN_RESET_EMAIL: process.env.E2E_ADMIN_EMAIL || 'smoke-admin@yandex.ru',
-        ADMIN_RESET_PASSWORD: process.env.E2E_ADMIN_PASSWORD || '123123',
+        ...adminResetEnv,
         GPRS_ENABLED: 'true',
       },
     },

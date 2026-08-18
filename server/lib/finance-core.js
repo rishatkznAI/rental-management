@@ -192,7 +192,9 @@ function getClientName(record) {
 }
 
 function getManualClientDebt(client) {
-  return Math.max(0, toNumber(client?.debt));
+  // Explicit opening AR is a receivable balance, never an incoming payment or revenue.
+  // The legacy debt field remains a backward-compatible read fallback only.
+  return Math.max(0, toNumber(client?.openingReceivableAmount ?? client?.debt));
 }
 
 function buildClientsById(clients) {

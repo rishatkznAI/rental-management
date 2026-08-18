@@ -32,7 +32,7 @@ import type {
   CrmDeal,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
-import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildRentalDebtRows, shouldCountRental } from '../lib/finance';
+import { buildClientDebtAgingRows, buildClientFinancialSnapshots, buildClientReceivables, buildRentalDebtRows, shouldCountRental } from '../lib/finance';
 import { calculateRentalBilling, getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import { buildDocumentControl, isUnsignedDocument } from '../lib/documentControl.js';
 import { alertHasValidSource, buildCompanyHealthModel } from '../lib/dashboardCompanyHealth.js';
@@ -472,6 +472,10 @@ export default function Dashboard() {
     () => buildRentalDebtRows(ganttRentals, payments, paymentAllocations as PaymentAllocation[]),
     [ganttRentals, paymentAllocations, payments],
   );
+  const clientReceivables = useMemo(
+    () => buildClientReceivables(clients, rentalDebtRows),
+    [clients, rentalDebtRows],
+  );
   const companyHealthDebtAging = useMemo(
     () => buildCanonicalDebtAging(mapRentalDebtRowsForCompanyHealth(rentalDebtRows), {
       sourceAvailable: paymentsQuery.isSuccess && paymentAllocationsQuery.isSuccess && ganttRentalsQuery.isSuccess,
@@ -602,7 +606,14 @@ export default function Dashboard() {
       .map(row => row.clientId || row.client)
       .filter(Boolean),
   ).size;
-  const totalDebt = clientFinancials.reduce((sum, row) => sum + row.currentDebt, 0);
+  const totalDebt = clientReceivables.reduce((sum, row) => sum + row.currentDebt, 0);
+  const totalReceivablesAvailable = clientsQuery.isSuccess
+    && paymentsQuery.isSuccess
+    && paymentAllocationsQuery.isSuccess
+    && ganttRentalsQuery.isSuccess;
+  const hasUnagedOrUnresolvedReceivables = clientReceivables.some(row =>
+    row.currentDebt > 0 && (row.manualDebt > 0 || !row.counterpartyId),
+  );
   // Month debt: overdue rental debt this month
 
   // Upcoming returns (next 3 days, not overdue)
@@ -1056,6 +1067,16 @@ export default function Dashboard() {
     documentsCount: documents.length,
     deliveriesCount: deliveries.length,
     clientsCount: clients.length,
+    financeOperationsCount: factualCashFlowItems.length,
+    businessStateExactEmpty: totalEquipment === 0
+      && viewPlannerRentals.length === 0
+      && viewRentals.length === 0
+      && payments.length === 0
+      && tickets.length === 0
+      && documents.length === 0
+      && deliveries.length === 0
+      && clients.length === 0
+      && factualCashFlowItems.length === 0,
     activeEquipment,
     availableEquipment,
     equipmentInServiceCount: equipmentInServiceList.length,
@@ -1254,18 +1275,23 @@ export default function Dashboard() {
     existing.maxOverdueDays = Math.max(existing.maxOverdueDays, row.overdueDays);
     topDebtorsByCounterparty.set(stableGroupId, existing);
   });
-  const executiveTopDebtors = Array.from(topDebtorsByCounterparty.values())
-    .sort((left, right) => right.amount - left.amount)
+  const executiveTopDebtors = clientReceivables
+    .filter(row => row.currentDebt > 0 && Boolean(row.counterpartyId))
+    .sort((left, right) => right.currentDebt - left.currentDebt)
     .slice(0, 3)
     .map(row => ({
-      id: row.id,
-      name: row.name,
-      amount: formatCurrency(row.amount),
-      age: row.maxOverdueDays > 0 ? `${row.maxOverdueDays} дн.` : 'срок не наступил',
+      id: String(row.counterpartyId),
+      name: row.client,
+      amount: formatCurrency(row.currentDebt),
+      age: (topDebtorsByCounterparty.get(String(row.counterpartyId))?.maxOverdueDays || 0) > 0
+        ? `${topDebtorsByCounterparty.get(String(row.counterpartyId))?.maxOverdueDays} дн.`
+        : row.manualDebt > 0
+          ? 'срок не определён'
+          : 'срок не наступил',
       href: canViewClients && row.clientId
         ? `/clients/${encodeURIComponent(row.clientId)}`
         : canViewFinance
-          ? `/finance?tab=receivables&counterpartyId=${encodeURIComponent(row.id)}`
+          ? `/finance?tab=receivables&counterpartyId=${encodeURIComponent(String(row.counterpartyId))}`
           : '/payments',
     }));
   const executiveAvailableFleet = activeRentalFleetLookup.activeFleet.filter(item =>
@@ -1530,15 +1556,15 @@ export default function Dashboard() {
         : executiveDataStale
           ? 'stale'
           : executiveAttentionSignals.length > 0 ? 'ready' : 'empty';
-  const moneyState: ExecutiveDataState = paymentsQuery.isError || paymentAllocationsQuery.isError || ganttRentalsQuery.isError
+  const moneyState: ExecutiveDataState = clientsQuery.isError || paymentsQuery.isError || paymentAllocationsQuery.isError || ganttRentalsQuery.isError
     ? 'error'
-    : paymentsQuery.isLoading || paymentAllocationsQuery.isLoading || ganttRentalsQuery.isLoading
+    : clientsQuery.isLoading || paymentsQuery.isLoading || paymentAllocationsQuery.isLoading || ganttRentalsQuery.isLoading
       ? 'loading'
-      : companyHealthDebtAging.sourceStatus !== 'derived'
+      : companyHealthDebtAging.sourceStatus !== 'derived' || hasUnagedOrUnresolvedReceivables
         ? 'partial'
         : executiveDataStale
           ? 'stale'
-          : companyHealthDebtAging.totalOutstandingAmount > 0 ? 'ready' : 'empty';
+          : totalDebt > 0 ? 'ready' : 'empty';
   const serviceState: ExecutiveDataState = serviceTicketsQuery.isError
     ? 'error'
     : serviceTicketsQuery.isLoading
@@ -1613,7 +1639,7 @@ export default function Dashboard() {
     } : undefined,
     money: canViewMoney ? {
       state: moneyState,
-      totalDebt: overdueReceivablesAvailable ? formatCurrency(companyHealthDebtAging.totalOutstandingAmount) : '—',
+      totalDebt: totalReceivablesAvailable ? formatCurrency(totalDebt) : '—',
       overdue: overdueReceivablesAvailable && executiveOverdueReceivablesAmount !== null ? formatCurrency(executiveOverdueReceivablesAmount) : '—',
       over30: overdueReceivablesAvailable && executiveDebt30PlusAmount !== null ? formatCurrency(executiveDebt30PlusAmount) : '—',
       aging: [

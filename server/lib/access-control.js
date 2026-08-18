@@ -6,6 +6,7 @@ const {
   isWarrantyMechanicRole,
   normalizeRole,
 } = require('./role-groups');
+const { CLIENT_OPENING_AR_FIELDS } = require('./counterparty');
 
 const ROLES = {
   ADMIN: 'Администратор',
@@ -406,6 +407,12 @@ const CLIENT_DERIVED_SUMMARY_FIELDS = new Set([
   'lastActivityDate',
   'totalRentals',
 ]);
+
+const CLIENT_OPENING_AR_FIELD_SET = new Set(CLIENT_OPENING_AR_FIELDS);
+
+for (const field of CLIENT_OPENING_AR_FIELD_SET) {
+  STRICT_CLIENT_BULK_REPLACE_FIELDS.delete(field);
+}
 
 const USER_PATCH_CONTROL_FIELDS = new Set([
   'confirm',
@@ -1766,6 +1773,9 @@ function sanitizeStrictClientMutationInput(collection, input) {
   if (collection !== 'clients') return null;
   const safe = {};
   for (const [field, value] of Object.entries(input || {})) {
+    if (CLIENT_OPENING_AR_FIELD_SET.has(field)) {
+      continue;
+    }
     if (CLIENT_DERIVED_SUMMARY_FIELDS.has(field)) {
       continue;
     }

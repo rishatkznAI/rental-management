@@ -181,6 +181,44 @@ async function fileCrc32(filePath) {
   return crc32Finalize(seed);
 }
 
+function fileCrc32Sync(filePath) {
+  const fd = fs.openSync(filePath, 'r');
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let seed = crc32Seed();
+  try {
+    let bytesRead = 0;
+    do {
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) seed = crc32Update(seed, buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  return crc32Finalize(seed);
+}
+
+function fileRangeCrc32Sync(filePath, position, length) {
+  if (!Number.isSafeInteger(position) || position < 0 || !Number.isSafeInteger(length) || length < 0) {
+    throw new Error('CRC-32 file range must use non-negative safe integers.');
+  }
+  const fd = fs.openSync(filePath, 'r');
+  const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, Math.max(1, length)));
+  let seed = crc32Seed();
+  let consumed = 0;
+  try {
+    while (consumed < length) {
+      const requested = Math.min(buffer.length, length - consumed);
+      const bytesRead = fs.readSync(fd, buffer, 0, requested, position + consumed);
+      if (bytesRead === 0) throw new Error('CRC-32 file range ended unexpectedly.');
+      seed = crc32Update(seed, buffer.subarray(0, bytesRead));
+      consumed += bytesRead;
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return crc32Finalize(seed);
+}
+
 async function createFileEntry(filePath, zipPath) {
   const stat = fs.statSync(filePath);
   if (!stat.isFile()) {
@@ -273,7 +311,10 @@ function readFileEntry(filePath, zipPath) {
 module.exports = {
   buildZipArchiveFile,
   buildZipArchive,
+  crc32,
   createFileEntry,
+  fileCrc32Sync,
+  fileRangeCrc32Sync,
   normalizeZipPath,
   readFileEntry,
 };

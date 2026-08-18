@@ -560,11 +560,14 @@ test('finance production smoke opens a rental-mode equipment economics tab with 
   assert.match(financeProductionSmokeSource, /attachSmokeScreenshot\(page, testInfo, 'finance-smoke-equipment-economics-opened'\)/);
 });
 
-test('finance production smoke keeps equipment economics content assertions strong', () => {
+test('finance production smoke keeps economics assertions strong and limits zero-state to an exact empty fleet', () => {
   assert.match(financeProductionSmokeSource, /EQUIPMENT_ECONOMICS_UI_STATE_PATTERN/);
   assert.match(financeProductionSmokeSource, /assertEquipmentEconomicsUiStateSafe\(await economicsPanel\.innerText\(\)\)/);
-  assert.match(financeProductionSmokeSource, /throw new Error\(`Finance production smoke could not find rental-mode equipment with an economics tab candidate: \$\{JSON\.stringify\(equipmentDiscovery\.diagnostics\)\}`\)/);
-  assert.doesNotMatch(financeProductionSmokeSource, /equipmentEconomicsChecked: Boolean\(equipment\?\.id\)[\s\S]*return/);
+  assert.match(financeProductionSmokeSource, /cleanEmptyFleet = Number\(discovery\.diagnostics\.fetched\.totalEquipment \|\| 0\) === 0/);
+  assert.match(financeProductionSmokeSource, /fixtureWarning && !cleanEmptyFleet/);
+  assert.match(financeProductionSmokeSource, /missing smoke fixture is safe only for an exactly empty fleet/);
+  assert.match(financeProductionSmokeSource, /getByRole\('heading', \{ name: 'Техника ещё не добавлена' \}\)/);
+  assert.match(financeProductionSmokeSource, /cleanEmptyFleetChecked: !equipment\?\.id/);
 });
 
 test('finance equipment discovery does not choose sale-mode equipment for rental economics', async () => {

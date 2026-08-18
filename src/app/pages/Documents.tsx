@@ -1214,7 +1214,7 @@ export default function Documents() {
       : (equipmentInv ? equipmentByInventory.get(equipmentInv) : undefined);
     const normalizedClientId = doc.clientId || rental?.clientId || '';
     const normalizedCounterpartyId = doc.counterpartyId || rental?.counterpartyId || gantt?.counterpartyId || '';
-    const normalizedClient = doc.client || rental?.client || clientsById.get(normalizedClientId)?.company || '';
+    const normalizedClient = doc.client || doc.clientName || rental?.client || clientsById.get(normalizedClientId)?.company || '';
     const normalizedManager = doc.manager || rental?.manager || gantt?.manager || '';
     const documentDate = getDocumentDate(doc).slice(0, 10);
     const matchesSearch = q === ''
@@ -1259,8 +1259,8 @@ export default function Documents() {
 
     return matchesSearch && matchesType && matchesStatus && matchesUnsigned && matchesWithoutNumber && matchesDuplicates && matchesClient && matchesQuickClient && matchesRental && matchesManager && matchesPeriod && matchesQuickType;
   }).sort((left, right) => {
-    const leftClient = left.client || clientsById.get(left.clientId || '')?.company || '';
-    const rightClient = right.client || clientsById.get(right.clientId || '')?.company || '';
+    const leftClient = left.client || left.clientName || clientsById.get(left.clientId || '')?.company || '';
+    const rightClient = right.client || right.clientName || clientsById.get(right.clientId || '')?.company || '';
     if (sortKey === 'number') return getDocumentNumber(left).localeCompare(getDocumentNumber(right), 'ru');
     if (sortKey === 'client') return leftClient.localeCompare(rightClient, 'ru');
     if (sortKey === 'status') return getSafeDocumentStatus(left.status).localeCompare(getSafeDocumentStatus(right.status), 'ru');
@@ -1276,7 +1276,7 @@ export default function Documents() {
     const equipmentItem = equipmentId
       ? equipmentById.get(equipmentId)
       : (equipmentInv ? equipmentByInventory.get(equipmentInv) : undefined);
-    const clientName = doc.client || rental?.client || clientsById.get(doc.clientId || '')?.company;
+    const clientName = doc.client || doc.clientName || rental?.client || clientsById.get(doc.clientId || '')?.company;
     const managerName = doc.manager || rental?.manager || gantt?.manager;
     const docNumber = getDocumentNumber(doc);
     const serviceTicket = getDocumentServiceTicket(doc);
@@ -2612,7 +2612,11 @@ export default function Documents() {
                     </TableCell>
                     <TableCell className="sticky right-0 z-10 bg-white text-right group-hover:bg-accent dark:bg-slate-900">
                       <details className="relative inline-block" onClick={(event) => event.stopPropagation()}>
-                        <summary className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500 transition hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.12] [&::-webkit-details-marker]:hidden">
+                        <summary
+                          className="flex h-8 w-8 cursor-pointer list-none items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500 transition hover:bg-slate-100 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300 dark:hover:bg-white/[0.12] [&::-webkit-details-marker]:hidden"
+                          aria-label={`Действия для документа ${row.docNumber || 'без номера'}`}
+                          title={`Действия для документа ${row.docNumber || 'без номера'}`}
+                        >
                           <MoreHorizontal className="h-4 w-4" />
                         </summary>
                         <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-left shadow-xl dark:border-white/10 dark:bg-slate-900">
@@ -3474,7 +3478,7 @@ export default function Documents() {
                     <div className="grid gap-3 sm:grid-cols-2">
                       {[
                         ['Статус', getDocumentStatusLabel(selectedDocument.status)],
-                        ['Клиент', displayText(selectedDocument.client || clientsById.get(selectedDocument.clientId || '')?.company)],
+                        ['Клиент', displayText(selectedDocument.client || selectedDocument.clientName || clientsById.get(selectedDocument.clientId || '')?.company)],
                         ['Аренда', displayText(getDocumentRentalId(selectedDocument))],
                         ['Техника', displayText(getDocumentEquipmentInv(selectedDocument) || selectedDocument.equipmentId)],
                         ['Сервисная заявка', displayText(getDocumentServiceTicket(selectedDocument))],

@@ -382,14 +382,14 @@ function ManagementActionRequiredStrip({
         <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-2 sm:items-center">
             {actionRequiredTotal > 0 || error ? (
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300 sm:mt-0" />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning sm:mt-0" />
             ) : (
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300 sm:mt-0" />
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success sm:mt-0" />
             )}
             <div className="min-w-0 text-sm">
               <div className="app-shell-title text-sm font-extrabold text-foreground">Требует действия</div>
               <div className={`mt-0.5 break-words text-xs font-semibold ${
-                actionRequiredTotal > 0 || error ? 'text-amber-100/90' : 'text-emerald-100/90'
+                actionRequiredTotal > 0 || error ? 'text-warning-foreground' : 'text-success-foreground'
               }`}>
                 {error
                   ? `Не удалось загрузить очередь действий. ${apiErrorMessage(error, 'Проверьте доступ к /api/management/action-queue.')}`

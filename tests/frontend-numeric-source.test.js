@@ -28,7 +28,7 @@ test('Documents page guards legacy optional fields before filtering and renderin
   assert.match(source, /useDocumentReferences\(/);
   assert.match(source, /documentReferencesQuery\.data\?\.items \?\? \[\]/);
   assert.match(source, /searchText\(doc\.number\)/);
-  assert.match(source, /const normalizedClient = doc\.client \|\| rental\?\.client \|\| clientsById\.get\(normalizedClientId\)\?\.company \|\| ''/);
+  assert.match(source, /const normalizedClient = doc\.client \|\| doc\.clientName \|\| rental\?\.client \|\| clientsById\.get\(normalizedClientId\)\?\.company \|\| ''/);
   assert.match(source, /searchText\(normalizedClient\)/);
   assert.match(source, /getSafeDocumentStatus\(doc\.status\)/);
   assert.doesNotMatch(source, /doc\.number\.toLowerCase\(\)/);

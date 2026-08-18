@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
-import { createClient, createEquipment, createRentalPair, withAdminApi } from './helpers/api';
+import { createClient, createDocument, createEquipment, createRentalPair, withAdminApi } from './helpers/api';
 
 type UiIssue = {
   type: string;
@@ -44,7 +44,17 @@ test('admin creates rental contract draft with selected client in document wizar
       status: 'active',
       ganttStatus: 'active',
     });
-    return { client, equipment, rental };
+    const registryDocument = await createDocument(api, {
+      type: 'invoice',
+      number: '',
+      client: '',
+      clientName: client.company,
+      clientId: client.id,
+      rentalId: rental.id,
+      date: '2026-09-10',
+      status: 'draft',
+    });
+    return { client, equipment, rental, registryDocument };
   });
 
   const issues: UiIssue[] = [];
@@ -59,6 +69,13 @@ test('admin creates rental contract draft with selected client in document wizar
   apiRequests.length = 0;
   await navigateInApp(page, '/documents');
   await expect(page.getByRole('heading', { name: 'Документы', exact: true })).toBeVisible();
+  const registryRow = page.locator('tr').filter({ hasText: seed.registryDocument.number });
+  await expect(registryRow).toContainText(seed.client.company);
+  await expect(registryRow).toContainText(seed.rental.id);
+  await expect(registryRow.locator('summary')).toHaveAttribute(
+    'aria-label',
+    `Действия для документа ${seed.registryDocument.number}`,
+  );
   expect(apiRequests.filter(url => /\/api\/gantt_rentals(?:$|\?)/.test(url))).toHaveLength(0);
   const ganttReferencesResponse = page.waitForResponse(response => response.url().includes('/api/documents/gantt-references'));
   await page.getByRole('button', { name: /^Создать документ$/ }).first().click();
@@ -72,7 +89,7 @@ test('admin creates rental contract draft with selected client in document wizar
 
   await dialog.getByText('Выберите клиента-контрагента').click();
   await page.getByPlaceholder('Выберите клиента-контрагента').fill(seed.client.company);
-  await page.getByText(seed.client.company).click();
+  await page.getByRole('option', { name: seed.client.company }).click();
   await expect(dialog.getByText(seed.client.company)).toBeVisible();
   await expect(dialog.getByText(/^Аренда$/)).toHaveCount(0);
   await expect(dialog.getByText(/^Техника$/)).toHaveCount(0);
@@ -177,11 +194,11 @@ test('admin creates rental contract draft with selected client in document wizar
   });
 
   await navigateInApp(page, '/documents');
-  await page.getByRole('button', { name: 'Фильтры' }).click();
+  await page.getByRole('button', { name: /^Фильтры(?: \d+)?$/ }).click();
   await page.getByPlaceholder('Поиск по номеру, клиенту, технике, аренде, сервисной заявке...').fill(document.number);
   await page.getByRole('button', { name: 'Готово' }).click();
   await expect(page.locator('p:visible').filter({ hasText: document.number }).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Фильтры' }).click();
+  await page.getByRole('button', { name: /^Фильтры(?: \d+)?$/ }).click();
   await page.getByPlaceholder('Поиск по номеру, клиенту, технике, аренде, сервисной заявке...').fill(seed.client.company);
   await page.getByRole('button', { name: 'Готово' }).click();
   await expect(page.locator('p:visible').filter({ hasText: chain.spec.number }).first()).toBeVisible();

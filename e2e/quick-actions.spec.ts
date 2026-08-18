@@ -11,6 +11,8 @@ async function selectEquipment(page: import('@playwright/test').Page, query: str
 
 test('admin sees quick actions on client, equipment, rental and service cards', async ({ page }) => {
   const suffix = `quick-actions-${Date.now()}`;
+  const rentalStartDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const rentalEndDate = new Date(Date.now() + 44 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const seed = await withAdminApi(async (api) => {
     const client = await createClient(api, suffix);
     const otherClient = await createClient(api, `${suffix}-other`);
@@ -18,8 +20,8 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
     const pair = await createRentalPair(api, {
       client: client.company,
       equipment,
-      startDate: '2026-05-01',
-      endDate: '2026-05-15',
+      startDate: rentalStartDate,
+      endDate: rentalEndDate,
       status: 'active',
       ganttStatus: 'active',
     });
@@ -51,8 +53,8 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
         client: client.company,
         amount: 1000,
         paidAmount: 1000,
-        dueDate: '2026-05-12',
-        paidDate: '2026-05-12',
+        dueDate: rentalEndDate,
+        paidDate: rentalEndDate,
         status: 'paid',
         comment: 'E2E quick action payment',
       },
@@ -65,7 +67,7 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
         client: otherClient.company,
         amount: 1000,
         paidAmount: 0,
-        dueDate: '2026-05-12',
+        dueDate: rentalEndDate,
         status: 'pending',
         comment: 'E2E quick action other payment',
       },
@@ -84,7 +86,7 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
 
   await page.getByRole('button', { name: 'Документы клиента' }).click();
   await expect(page).toHaveURL(new RegExp(`#/documents.*clientId=${seed.client.id}`));
-  await expect(page.getByText(`E2E-DOC-${suffix}`).first()).toBeVisible();
+  await expect(page.locator('p:visible').filter({ hasText: `E2E-DOC-${suffix}` }).first()).toBeVisible();
   await expect(page.getByText(`E2E-DOC-${suffix}-OTHER`)).toHaveCount(0);
 
   await navigateInApp(page, `/clients/${seed.client.id}`);
@@ -98,7 +100,7 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
   await navigateInApp(page, `/clients/${seed.client.id}`);
   await page.getByRole('button', { name: 'Платежи клиента' }).click();
   await expect(page).toHaveURL(new RegExp(`#/payments.*clientId=${seed.client.id}`));
-  await expect(page.getByText(`E2E-PAY-${suffix}`).first()).toBeVisible();
+  await expect(page.locator('tr').filter({ hasText: `E2E-PAY-${suffix}` }).first()).toBeVisible();
   await expect(page.getByText(`E2E-PAY-${suffix}-OTHER`)).toHaveCount(0);
 
   await page.route('**/api/tasks-center', async (route) => {
@@ -115,7 +117,7 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
             clientName: seed.client.company,
             priority: 'medium',
             section: 'rentals',
-            dueDate: '2026-05-12',
+            dueDate: rentalEndDate,
             actionUrl: `/clients/${seed.client.id}`,
           },
           {
@@ -126,7 +128,7 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
             clientName: seed.otherClient.company,
             priority: 'medium',
             section: 'rentals',
-            dueDate: '2026-05-12',
+            dueDate: rentalEndDate,
             actionUrl: `/clients/${seed.otherClient.id}`,
           },
         ],

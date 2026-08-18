@@ -297,19 +297,19 @@ export function Layout() {
       )}
 
       {/* Mobile top bar */}
-      <header className="fixed top-0 left-0 right-0 z-20 flex h-14 items-center justify-between border-b border-sidebar-border bg-sidebar/95 px-4 backdrop-blur-xl sm:hidden">
+      <header className="fixed top-0 left-0 right-0 z-20 flex h-14 items-center justify-between gap-2 border-b border-sidebar-border bg-sidebar/95 px-3 backdrop-blur-xl sm:hidden">
         <button
           onClick={() => setSidebarOpen(true)}
-          className="rounded-lg p-2 transition-colors hover:bg-accent"
+          className="shrink-0 rounded-lg p-2 transition-colors hover:bg-accent"
           aria-label="Открыть меню"
         >
           <Menu className="h-5 w-5 text-sidebar-foreground" />
         </button>
-        <div className="flex items-center gap-2">
-          <LiftLogo className="h-8 w-8" />
-          <span className="app-shell-title text-base font-extrabold text-sidebar-foreground">{APP_BRAND_NAME}</span>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <LiftLogo className="h-8 w-8 shrink-0" />
+          <span className="app-shell-title hidden min-w-0 truncate text-base font-extrabold text-sidebar-foreground min-[480px]:block">{APP_BRAND_NAME}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5">
           {renderThemeToggleButton()}
           <NotificationCenter />
           <div className="relative">

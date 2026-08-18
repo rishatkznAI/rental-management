@@ -1417,6 +1417,7 @@ export interface Document {
   documentNumber?: string;
   counterpartyId?: string;
   clientId?: string;
+  clientName?: string;
   objectId?: string;
   contractId?: string;
   client: string;

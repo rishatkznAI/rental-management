@@ -9,12 +9,14 @@ function escapeRegExp(value: string) {
 async function seedServiceTicket(suffix: string) {
   return withAdminApi(async (api) => {
     const equipment = await createEquipment(api, `card-${suffix}`);
-    const client = await createClient(api, `Service Card ${suffix}`);
+    const client = await createClient(api, `service-card-${suffix}`);
+    const rentalStartDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const rentalEndDate = new Date(Date.now() + 38 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const { rental } = await createRentalPair(api, {
       client: client.company,
       equipment,
-      startDate: '2026-05-10',
-      endDate: '2026-05-18',
+      startDate: rentalStartDate,
+      endDate: rentalEndDate,
       status: 'active',
       ganttStatus: 'active',
     });
@@ -49,7 +51,7 @@ async function seedServiceTicket(suffix: string) {
         reporterContact: client.contact,
         source: 'manual',
         status: 'new',
-        plannedDate: '2026-05-12',
+        plannedDate: rentalStartDate,
         result,
         resultData: {
           summary: result,

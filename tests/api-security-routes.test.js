@@ -809,6 +809,43 @@ test('/api/clients rejects audit timestamp spoofing on patch but allows legacy t
   assert.equal(state.clients[0].lastRentalDate, '2020-01-10');
 });
 
+test('/api/clients bulk replace preserves server-owned opening receivable state by stable ID', async () => {
+  const { app, state } = createSecurityApp();
+  state.clients = [clientPayload({
+    id: 'C-1',
+    company: 'ООО Остаток',
+    inn: '1655123456',
+    debt: 130000,
+    openingReceivableAmount: 130000,
+    openingReceivableAsOfDate: '2026-08-01',
+    openingReceivableRevision: 2,
+    openingReceivableCreatedAt: '2026-08-01T00:00:00.000Z',
+    openingReceivableCreatedByUserId: 'U-admin',
+    openingReceivableCreatedBy: 'Админ',
+    openingReceivableUpdatedAt: '2026-08-02T00:00:00.000Z',
+    openingReceivableUpdatedByUserId: 'U-admin',
+    openingReceivableUpdatedBy: 'Админ',
+  })];
+  const expectedOpeningReceivable = Object.fromEntries(Object.entries(state.clients[0])
+    .filter(([field]) => field === 'debt' || field.startsWith('openingReceivable')));
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'PUT', '/api/clients', 'admin-token', [clientPayload({
+      id: 'C-1',
+      company: 'ООО Остаток Обновлено',
+      inn: '1655123456',
+    })]);
+    assert.equal(response.status, 200);
+  });
+
+  assert.equal(state.clients[0].company, 'ООО Остаток Обновлено');
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(state.clients[0])
+      .filter(([field]) => field === 'debt' || field.startsWith('openingReceivable'))),
+    expectedOpeningReceivable,
+  );
+});
+
 test('/api/clients bulk replace rejects unknown top-level fields without corrupting existing data', async () => {
   const { app, state } = createSecurityApp();
   state.clients = [

@@ -194,58 +194,6 @@ function roleBadgeVariant(role: UserRole): BadgeVariant {
 
 type SidebarSection = (typeof DEFAULT_SIDEBAR_ORDER)[number];
 
-const ADMIN_DEMO_USERS: SystemUser[] = [
-  {
-    id: 'demo-admin-ivanov',
-    name: 'Иванов И.И.',
-    email: 'ivanov@skytech.ru',
-    role: 'Администратор',
-    status: 'Активен',
-    password: '',
-  },
-  {
-    id: 'demo-rental-petrov',
-    name: 'Петров П.П.',
-    email: 'petrov@skytech.ru',
-    role: 'Менеджер по аренде',
-    status: 'Активен',
-    password: '',
-  },
-  {
-    id: 'demo-mechanic-sidorov',
-    name: 'Сидоров С.С.',
-    email: 'sidorov@skytech.ru',
-    role: 'Механик',
-    status: 'Активен',
-    password: '',
-  },
-  {
-    id: 'demo-investor-kuznetsova',
-    name: 'Кузнецова А.А.',
-    email: 'kuznetsova@skytech.ru',
-    role: 'Инвестор',
-    status: 'Активен',
-    ownerName: 'ООО СтройИнвест',
-    password: '',
-  },
-  {
-    id: 'demo-carrier-volkov',
-    name: 'Волков В.В.',
-    email: 'volkov@skytech.ru',
-    role: 'Перевозчик',
-    status: 'Неактивен',
-    password: '',
-  },
-];
-
-const ADMIN_LAST_LOGIN_FALLBACKS = [
-  '27.04.2026 10:24',
-  '27.04.2026 09:15',
-  '26.04.2026 17:42',
-  '26.04.2026 16:30',
-  '20.04.2026 11:05',
-];
-
 const ADMIN_DATA_COLLECTIONS = [
   'equipment',
   'rentals',
@@ -379,11 +327,11 @@ function formatAdminDate(value: unknown, fallback: string): string {
   }).replace(',', '');
 }
 
-function userLastLogin(user: SystemUser, index: number): string {
+function userLastLogin(user: SystemUser): string {
   const record = user as SystemUser & Record<string, unknown>;
   return formatAdminDate(
     record.lastLoginAt ?? record.lastLogin ?? record.lastSeenAt ?? record.updatedAt,
-    ADMIN_LAST_LOGIN_FALLBACKS[index] || '—',
+    '—',
   );
 }
 
@@ -717,11 +665,11 @@ export default function Settings() {
   const [roleFilter, setRoleFilter] = React.useState('all');
   const [selectedMenuGroup, setSelectedMenuGroup] = React.useState<SidebarNavGroupId>('main');
 
-  const displayUsers = users.length > 0 ? users : ADMIN_DEMO_USERS;
-  const userCount = users.length > 0 ? users.length : 42;
-  const roleCount = users.length > 0 ? new Set([...ROLES, ...users.map(item => item.role)]).size : 9;
+  const displayUsers = users;
+  const userCount = users.length;
+  const roleCount = new Set(users.map(item => normalizeUserRole(item.role)).filter(Boolean)).size;
   const enabledMenuCount = visibleSidebarOrder.filter(section => sidebarVisibility[section] !== false).length;
-  const menuCount = enabledMenuCount > 0 ? enabledMenuCount : 28;
+  const menuCount = enabledMenuCount;
   const collectionCount = ADMIN_DATA_COLLECTIONS.length;
 
   const roleOptions = React.useMemo(() => {
@@ -893,7 +841,7 @@ export default function Settings() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredUsers.map((item, index) => (
+                    {filteredUsers.map(item => (
                       <tr key={item.id} className="border-t border-border/60">
                         <td className="border-t border-border/60 py-2 pr-3">
                           <div className="flex min-w-0 items-center gap-2">
@@ -919,7 +867,7 @@ export default function Settings() {
                             {item.status}
                           </span>
                         </td>
-                        <td className="whitespace-nowrap border-t border-border/60 px-2 py-2 text-foreground">{userLastLogin(item, index)}</td>
+                        <td className="whitespace-nowrap border-t border-border/60 px-2 py-2 text-foreground">{userLastLogin(item)}</td>
                         <td className="border-t border-border/60 py-2 pl-2">
                           <div className="flex justify-end gap-1.5">
                             <button

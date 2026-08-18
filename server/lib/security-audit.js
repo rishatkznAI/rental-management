@@ -135,6 +135,42 @@ function normalizeAuditLogList(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function createAuditEntry(reqOrUser, {
+  action,
+  entityType,
+  entityId,
+  before = null,
+  after = null,
+  metadata = null,
+} = {}, {
+  generateId = prefix => `${prefix}-${Date.now()}`,
+  nowIso = () => new Date().toISOString(),
+} = {}) {
+  if (!action || !entityType) return null;
+  const user = reqOrUser?.user || reqOrUser || {};
+  const headers = reqOrUser?.headers || {};
+  return {
+    id: generateId('AUD'),
+    userId: user.userId || user.id || null,
+    userName: user.userName || user.name || null,
+    role: user.userRole || user.role || null,
+    rawRole: user.rawRole || user.role || null,
+    normalizedRole: user.normalizedRole || user.userRole || user.role || null,
+    action,
+    entityType,
+    entityId: entityId || null,
+    description: buildAuditDescription({ action, entityType, entityId, before, after, metadata }),
+    before: redactAuditValue(before),
+    after: redactAuditValue(after),
+    metadata: redactAuditValue(metadata),
+    ip: headers['x-forwarded-for']
+      ? String(headers['x-forwarded-for']).split(',')[0].trim()
+      : (reqOrUser?.ip || reqOrUser?.socket?.remoteAddress || null),
+    userAgent: headers['user-agent'] || null,
+    createdAt: nowIso(),
+  };
+}
+
 function createAuditLogger({
   readData,
   writeData,
@@ -151,29 +187,15 @@ function createAuditLogger({
     metadata = null,
   } = {}) {
     try {
-      if (!action || !entityType) return null;
-      const user = reqOrUser?.user || reqOrUser || {};
-      const headers = reqOrUser?.headers || {};
-      const entry = {
-        id: generateId('AUD'),
-        userId: user.userId || user.id || null,
-        userName: user.userName || user.name || null,
-        role: user.userRole || user.role || null,
-        rawRole: user.rawRole || user.role || null,
-        normalizedRole: user.normalizedRole || user.userRole || user.role || null,
+      const entry = createAuditEntry(reqOrUser, {
         action,
         entityType,
-        entityId: entityId || null,
-        description: buildAuditDescription({ action, entityType, entityId, before, after, metadata }),
-        before: redactAuditValue(before),
-        after: redactAuditValue(after),
-        metadata: redactAuditValue(metadata),
-        ip: headers['x-forwarded-for']
-          ? String(headers['x-forwarded-for']).split(',')[0].trim()
-          : (reqOrUser?.ip || reqOrUser?.socket?.remoteAddress || null),
-        userAgent: headers['user-agent'] || null,
-        createdAt: nowIso(),
-      };
+        entityId,
+        before,
+        after,
+        metadata,
+      }, { generateId, nowIso });
+      if (!entry) return null;
       const log = normalizeAuditLogList(readData(AUDIT_COLLECTION));
       log.push(entry);
       writeData(AUDIT_COLLECTION, log.slice(-10000));
@@ -186,6 +208,7 @@ function createAuditLogger({
 }
 
 module.exports = {
+  createAuditEntry,
   createAuditLogger,
   redactAuditValue,
   AUDIT_COLLECTION,

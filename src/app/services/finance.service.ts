@@ -9,12 +9,26 @@ import type {
   CompanyTaxSettings,
   DepreciationResponse,
   ManagerBreakdownResponse,
+  OpeningReceivable,
   ReceivableCollectionAction,
   ReceivablePaymentPlanItem,
   ReceivablesResponse,
 } from '../types';
 
 export const financeService = {
+  getOpeningReceivable: (clientId: string): Promise<OpeningReceivable> =>
+    api.get<OpeningReceivable>(`/api/finance/opening-receivables/${encodeURIComponent(clientId)}`),
+  updateOpeningReceivable: (
+    clientId: string,
+    data: {
+      counterpartyId: string;
+      amount: number;
+      asOfDate: string;
+      reason: string;
+      expectedRevision: number;
+    },
+  ): Promise<OpeningReceivable> =>
+    api.put<OpeningReceivable>(`/api/finance/opening-receivables/${encodeURIComponent(clientId)}`, data),
   getAccounts: (): Promise<FinanceAccount[]> =>
     api.get<FinanceAccount[]>('/api/finance/accounts'),
   createAccount: (

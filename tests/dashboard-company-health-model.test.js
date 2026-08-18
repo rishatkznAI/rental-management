@@ -763,6 +763,41 @@ test('empty dashboard data does not calculate a numeric company health score', (
   assert.equal(model.scoreDetails.directions.every(item => item.insufficientData), true);
 });
 
+test('successful exact-empty sources do not manufacture a numeric company health score', () => {
+  const model = buildCompanyHealthModel({
+    equipmentCount: 0,
+    rentalsCount: 0,
+    paymentsCount: 0,
+    serviceCount: 0,
+    documentsCount: 0,
+    deliveriesCount: 0,
+    clientsCount: 0,
+    financeOperationsCount: 0,
+    businessStateExactEmpty: true,
+    actualReceiptsAmount: 0,
+    actualReceiptsAvailable: true,
+    overdueReceivablesAmount: 0,
+    overdueReceivablesAvailable: true,
+    debtAging: reliableDebtAging({
+      totalOutstandingAmount: 0,
+      overdueOutstandingAmount: 0,
+      bucket1to30Amount: 0,
+      largestClientOverdueAmount: 0,
+    }),
+    rentalRevenueActual: 0,
+    rentalRevenueActualAvailable: true,
+    openServiceTicketsCount: 0,
+    overdueServiceTicketsCount: 0,
+    averageServiceDays: 0,
+    serviceLoadPercent: 0,
+  });
+
+  assert.equal(model.score, null);
+  assert.equal(model.label, 'Недостаточно данных для оценки');
+  assert.equal(model.subtitle, 'Недостаточно данных для расчёта здоровья компании');
+  assert.equal(model.scoreDetails.directions.every(item => item.insufficientData), true);
+});
+
 test('equipment-only dashboard data is still insufficient for company health', () => {
   const model = buildCompanyHealthModel({
     equipmentCount: 4,

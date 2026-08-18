@@ -257,9 +257,13 @@ async function getRentalModeEquipmentForEconomicsTab(apiUrl: string, token: stri
       requests: discovery.diagnostics.requests,
     });
     const fixtureWarning = discovery.diagnostics.productionFixture?.page1?.warning || discovery.diagnostics.productionFixture?.fetched?.warning;
-    if (fixtureWarning) {
+    const cleanEmptyFleet = Number(discovery.diagnostics.fetched.totalEquipment || 0) === 0;
+    if (fixtureWarning && !cleanEmptyFleet) {
       safeSmokeLog('productionFixtureWarning', { warning: fixtureWarning });
       throw new Error(fixtureWarning);
+    }
+    if (fixtureWarning && cleanEmptyFleet) {
+      safeSmokeLog('cleanEmptyFleet', { accepted: true, reason: 'production equipment registry is exactly empty' });
     }
     return discovery as EquipmentDiscovery;
   } finally {
@@ -470,7 +474,11 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
     assertEquipmentEconomicsUiStateSafe(await economicsPanel.innerText());
     await expectSafeVisibleText(page, 'Equipment Economics');
   } else {
-    throw new Error(`Finance production smoke could not find rental-mode equipment with an economics tab candidate: ${JSON.stringify(equipmentDiscovery.diagnostics)}`);
+    expect(Number(equipmentDiscovery.diagnostics.fetched.totalEquipment || 0), 'missing smoke fixture is safe only for an exactly empty fleet').toBe(0);
+    await page.goto(productionAppUrl(frontendUrl, '/equipment'), { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('main'), 'Equipment page main should be visible').toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Техника ещё не добавлена' })).toBeVisible();
+    await expectSafeVisibleText(page, 'Equipment clean empty state');
   }
 
   expect(blockedWrites, 'finance production smoke must not attempt protected write endpoints').toEqual([]);
@@ -483,5 +491,6 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
     cashFlowVisible: true,
     vatVisible: true,
     equipmentEconomicsChecked: Boolean(equipment?.id),
+    cleanEmptyFleetChecked: !equipment?.id,
   });
 });

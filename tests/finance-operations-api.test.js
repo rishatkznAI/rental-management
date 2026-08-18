@@ -12,6 +12,8 @@ const receivablesCore = require('../server/lib/receivables-core.js');
 
 function createApp() {
   let idCounter = 0;
+  const audits = [];
+  let nextBatchError = null;
   const state = {
     counterparties: [],
     clients: [],
@@ -27,6 +29,7 @@ function createApp() {
     receivable_payment_plans: [],
     finance_operations: [],
     finance_accounts: [],
+    audit_logs: audits,
   };
   const users = {
     admin: { userId: 'u-admin', userName: 'Admin', userRole: 'Администратор' },
@@ -39,6 +42,21 @@ function createApp() {
   const readData = name => state[name] || [];
   const writeData = (name, value) => {
     state[name] = value;
+  };
+  const writeDataBatch = entries => {
+    if (nextBatchError) {
+      const error = nextBatchError;
+      nextBatchError = null;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (entry.name === 'audit_logs') {
+        audits.splice(0, audits.length, ...(entry.value || []));
+        state.audit_logs = audits;
+      } else {
+        state[entry.name] = entry.value;
+      }
+    }
   };
   const accessControl = createAccessControl({ readData });
   const app = express();
@@ -71,16 +89,24 @@ function createApp() {
     requireWrite,
     readData,
     writeData,
+    writeDataBatch,
     accessControl,
     generateId: prefix => `${prefix}-${++idCounter}`,
     idPrefixes: { finance_accounts: 'FA', finance_operations: 'FO', debt_collection_actions: 'DCA', receivable_payment_plans: 'RPP' },
     nowIso: () => '2026-05-09T12:00:00.000Z',
-    auditLog: null,
+    auditLog: (_req, event) => audits.push(event),
     ...financeCore,
     ...receivablesCore,
   });
   app.use('/api', router);
-  return { app, state };
+  return {
+    app,
+    state,
+    audits,
+    failNextBatch(error = new Error('simulated atomic audit persistence failure')) {
+      nextBatchError = error;
+    },
+  };
 }
 
 async function withServer(app, fn) {
@@ -107,6 +133,163 @@ async function request(baseUrl, method, path, token, body) {
   const json = await response.json().catch(() => null);
   return { response, json };
 }
+
+test('opening AR is admin-only, counterparty-bound, revisioned and never creates a payment or revenue operation', async () => {
+  const { app, state, audits } = createApp();
+  state.counterparties = [{ id: 'CP-OPEN-1', legalName: 'Клиент', roles: ['customer'], status: 'active' }];
+  state.clients = [{
+    id: 'C-OPEN-1',
+    counterpartyId: 'CP-OPEN-1',
+    company: 'Клиент',
+    debt: 0,
+  }];
+
+  await withServer(app, async (baseUrl) => {
+    const initial = await request(baseUrl, 'GET', '/api/finance/opening-receivables/C-OPEN-1', 'office');
+    assert.equal(initial.response.status, 200);
+    assert.equal(initial.json.amount, 0);
+    assert.equal(initial.json.revision, 0);
+
+    const nonAdmin = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-1', 'office', {
+      counterpartyId: 'CP-OPEN-1',
+      amount: 125000,
+      asOfDate: '2026-08-18',
+      reason: 'Акт сверки',
+      expectedRevision: 0,
+    });
+    assert.equal(nonAdmin.response.status, 403);
+
+    const mismatch = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-1', 'admin', {
+      counterpartyId: 'CP-WRONG',
+      amount: 125000,
+      asOfDate: '2026-08-18',
+      reason: 'Акт сверки',
+      expectedRevision: 0,
+    });
+    assert.equal(mismatch.response.status, 409);
+    assert.equal(mismatch.json.code, 'COUNTERPARTY_RELATION_MISMATCH');
+
+    const activeCounterparty = state.counterparties[0];
+    state.counterparties = [];
+    const missing = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-1', 'admin', {
+      counterpartyId: 'CP-OPEN-1',
+      amount: 125000,
+      asOfDate: '2026-08-18',
+      reason: 'Акт сверки',
+      expectedRevision: 0,
+    });
+    assert.equal(missing.response.status, 409);
+    assert.equal(missing.json.code, 'COUNTERPARTY_RELATION_COUNTERPARTY_NOT_FOUND');
+    state.counterparties = [activeCounterparty];
+
+    state.counterparties[0].status = 'archived';
+    const archived = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-1', 'admin', {
+      counterpartyId: 'CP-OPEN-1',
+      amount: 125000,
+      asOfDate: '2026-08-18',
+      reason: 'Акт сверки',
+      expectedRevision: 0,
+    });
+    assert.equal(archived.response.status, 409);
+    assert.equal(archived.json.code, 'COUNTERPARTY_RELATION_COUNTERPARTY_ARCHIVED');
+
+    state.counterparties[0].status = 'active';
+    state.counterparties[0].roles = [];
+    const roleMissing = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-1', 'admin', {
+      counterpartyId: 'CP-OPEN-1',
+      amount: 125000,
+      asOfDate: '2026-08-18',
+      reason: 'Акт сверки',
+      expectedRevision: 0,
+    });
+    assert.equal(roleMissing.response.status, 409);
+    assert.equal(roleMissing.json.code, 'COUNTERPARTY_RELATION_CUSTOMER_ROLE_REQUIRED');
+    state.counterparties[0].roles = ['customer'];
+
+    const created = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-1', 'admin', {
+      counterpartyId: 'CP-OPEN-1',
+      amount: 125000.25,
+      asOfDate: '2026-08-18',
+      reason: 'Акт сверки на дату запуска',
+      expectedRevision: 0,
+    });
+    assert.equal(created.response.status, 200);
+    assert.equal(created.json.amount, 125000.25);
+    assert.equal(created.json.asOfDate, '2026-08-18');
+    assert.equal(created.json.revision, 1);
+    assert.equal(state.clients[0].counterpartyId, 'CP-OPEN-1');
+    assert.equal(state.clients[0].openingReceivableAmount, 125000.25);
+    assert.equal(state.clients[0].debt, 125000.25);
+    assert.deepEqual(state.payments, []);
+    assert.deepEqual(state.finance_operations, []);
+    assert.equal(audits.at(-1).action, 'opening_receivable.create');
+    assert.equal(audits.at(-1).after.reason, 'Акт сверки на дату запуска');
+
+    const stale = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-1', 'admin', {
+      counterpartyId: 'CP-OPEN-1',
+      amount: 1,
+      asOfDate: '2026-08-18',
+      reason: 'Устаревшая попытка',
+      expectedRevision: 0,
+    });
+    assert.equal(stale.response.status, 409);
+    assert.equal(stale.json.code, 'OPENING_AR_REVISION_CONFLICT');
+
+    const cleared = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-1', 'admin', {
+      counterpartyId: 'CP-OPEN-1',
+      amount: 0,
+      asOfDate: '2026-08-19',
+      reason: 'Исправление ошибочного остатка',
+      expectedRevision: 1,
+    });
+    assert.equal(cleared.response.status, 200);
+    assert.equal(cleared.json.status, 'cleared');
+    assert.equal(cleared.json.revision, 2);
+    assert.equal(state.clients[0].debt, 0);
+    assert.equal(audits.at(-1).action, 'opening_receivable.clear');
+    assert.deepEqual(state.payments, []);
+    assert.deepEqual(state.finance_operations, []);
+  });
+});
+
+test('opening AR rejects ambiguous or overflowing money and rolls balance back when atomic audit persistence fails', async () => {
+  const { app, state, audits, failNextBatch } = createApp();
+  state.counterparties = [{ id: 'CP-OPEN-SAFE', legalName: 'Клиент', roles: ['customer'], status: 'active' }];
+  state.clients = [{
+    id: 'C-OPEN-SAFE',
+    counterpartyId: 'CP-OPEN-SAFE',
+    company: 'Клиент',
+    debt: 0,
+  }];
+  const originalClient = structuredClone(state.clients[0]);
+  const baseInput = {
+    counterpartyId: 'CP-OPEN-SAFE',
+    asOfDate: '2026-08-18',
+    reason: 'Акт сверки',
+    expectedRevision: 0,
+  };
+
+  await withServer(app, async baseUrl => {
+    for (const amount of ['', '   ', 1e307, '90071992547409.92', '1.001', null]) {
+      const invalid = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-SAFE', 'admin', {
+        ...baseInput,
+        amount,
+      });
+      assert.equal(invalid.response.status, 400);
+      assert.deepEqual(state.clients[0], originalClient);
+      assert.deepEqual(audits, []);
+    }
+
+    failNextBatch();
+    const failedPersistence = await request(baseUrl, 'PUT', '/api/finance/opening-receivables/C-OPEN-SAFE', 'admin', {
+      ...baseInput,
+      amount: '125000.25',
+    });
+    assert.equal(failedPersistence.response.status, 500);
+    assert.deepEqual(state.clients[0], originalClient);
+    assert.deepEqual(audits, []);
+  });
+});
 
 test('finance operations API creates lists updates and archives manual operations', async () => {
   const { app, state } = createApp();

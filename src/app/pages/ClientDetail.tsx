@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
@@ -22,7 +23,7 @@ import {
   Star, CalendarDays, ReceiptText, BriefcaseBusiness, MapPinned,
 } from 'lucide-react';
 import { cn, formatDate, formatDateTime, formatCurrency } from '../lib/utils';
-import { useClientById, useDeleteClient, useUpdateClient } from '../hooks/useClients';
+import { CLIENT_KEYS, useClientById, useDeleteClient, useUpdateClient } from '../hooks/useClients';
 import { useGanttData, useRentalsList } from '../hooks/useRentals';
 import { usePaymentAllocationsList, usePaymentsList } from '../hooks/usePayments';
 import { useDocumentsList } from '../hooks/useDocuments';
@@ -35,6 +36,7 @@ import { ApiError } from '../lib/api';
 import { isCrmEnabled } from '../lib/features';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
+import { financeService } from '../services/finance.service';
 import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
 import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import { getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
@@ -405,6 +407,7 @@ export default function ClientDetail() {
   const { data: fetchedClient } = useClientById(id ?? '');
   const updateClient = useUpdateClient();
   const deleteClient = useDeleteClient();
+  const queryClient = useQueryClient();
 
   // Local optimistic state
   const [client, setClient] = useState<Client | null>(null);
@@ -432,6 +435,30 @@ export default function ClientDetail() {
   const [fileDraft, setFileDraft] = useState<ClientFileDraft>(emptyFileDraft);
   const [fileError, setFileError] = useState('');
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [openingArDialogOpen, setOpeningArDialogOpen] = useState(false);
+  const [openingArDraft, setOpeningArDraft] = useState({ amount: '', asOfDate: '', reason: '', confirmed: false });
+
+  const updateOpeningReceivable = useMutation({
+    mutationFn: (draft: { amount: number; asOfDate: string; reason: string; expectedRevision: number; counterpartyId: string }) =>
+      financeService.updateOpeningReceivable(id || '', draft),
+    onSuccess: (saved) => {
+      setClient(current => current ? {
+        ...current,
+        debt: saved.amount,
+        openingReceivableAmount: saved.amount,
+        openingReceivableAsOfDate: saved.asOfDate || undefined,
+        openingReceivableRevision: saved.revision,
+        openingReceivableUpdatedAt: saved.updatedAt || undefined,
+        openingReceivableUpdatedByUserId: saved.updatedByUserId || undefined,
+      } : current);
+      queryClient.invalidateQueries({ queryKey: CLIENT_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: CLIENT_KEYS.detail(id || '') });
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
+      setOpeningArDialogOpen(false);
+      toast.success(saved.amount > 0 ? 'Входящий остаток сохранён.' : 'Входящий остаток обнулён.');
+    },
+    onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось сохранить входящий остаток.'),
+  });
 
   // Related data via react-query
   const { data: rentals = [] } = useRentalsList({ enabled: canViewRentals });
@@ -632,14 +659,14 @@ export default function ClientDetail() {
 
   const saveEdit = () => {
     if (!client || !canEdit) return;
+    const safeEditData = { ...editData };
+    delete safeEditData.debt;
     const nextClient = {
       ...client,
-      ...editData,
+      ...safeEditData,
       inn: normalizeInn(editData.inn ?? client.inn),
       creditLimit: Math.max(0, Number(editData.creditLimit ?? client.creditLimit) || 0),
-      debt: canEditDebt
-        ? Math.max(0, Number(editData.debt ?? client.debt) || 0)
-        : client.debt,
+      debt: client.debt,
     };
     if (!isValidInn(nextClient.inn)) {
       setInnError(INN_ERROR);
@@ -664,7 +691,6 @@ export default function ClientDetail() {
         phone: 'телефон',
         paymentTerms: 'условия оплаты',
         creditLimit: 'кредитный лимит',
-        debt: 'задолженность',
         manager: 'менеджер',
         managerRole: 'роль менеджера',
         notes: 'примечание',
@@ -694,6 +720,49 @@ export default function ClientDetail() {
       },
     });
   };
+
+  function openOpeningReceivableDialog() {
+    if (!client || !canEditDebt) return;
+    if (!client.counterpartyId) {
+      toast.error('У клиента нет canonical Counterparty ID. Сначала исправьте связь клиента.');
+      return;
+    }
+    setOpeningArDraft({
+      amount: String(client.openingReceivableAmount ?? client.debt ?? 0),
+      asOfDate: client.openingReceivableAsOfDate || new Date().toISOString().slice(0, 10),
+      reason: '',
+      confirmed: false,
+    });
+    setOpeningArDialogOpen(true);
+  }
+
+  function saveOpeningReceivable() {
+    if (!client?.counterpartyId) return;
+    const amount = Number(openingArDraft.amount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error('Укажите неотрицательную сумму.');
+      return;
+    }
+    if (!openingArDraft.asOfDate) {
+      toast.error('Укажите дату входящего остатка.');
+      return;
+    }
+    if (openingArDraft.reason.trim().length < 3) {
+      toast.error('Укажите причину корректировки.');
+      return;
+    }
+    if (!openingArDraft.confirmed) {
+      toast.error('Подтвердите, что это входящий остаток, а не оплата или выручка.');
+      return;
+    }
+    updateOpeningReceivable.mutate({
+      amount,
+      asOfDate: openingArDraft.asOfDate,
+      reason: openingArDraft.reason.trim(),
+      expectedRevision: client.openingReceivableRevision || 0,
+      counterpartyId: client.counterpartyId,
+    });
+  }
 
   function openContactDialog() {
     if (!canEdit) return;
@@ -1099,6 +1168,12 @@ export default function ClientDetail() {
                   Редактировать
                 </Button>
               )}
+              {canEditDebt && (
+                <Button variant="secondary" onClick={openOpeningReceivableDialog}>
+                  <ReceiptText className="h-4 w-4" />
+                  Входящий остаток
+                </Button>
+              )}
               {canCreateRentals && (
                 <Link to={buildRentalNewRoute({ clientId: client.id })}>
                   <Button>
@@ -1490,14 +1565,8 @@ export default function ClientDetail() {
                           />
                         </EditField>
                         {canEditDebt ? (
-                          <EditField label="Ручная дебиторка, ₽" hint="Итоговый долг также учитывает неоплаченные аренды.">
-                            <Input
-                              className={editInputClassName}
-                              type="number"
-                              min={0}
-                              value={String(editData.debt ?? 0)}
-                              onChange={e => setEditData({ ...editData, debt: Number(e.target.value) })}
-                            />
+                          <EditField label="Входящий остаток" hint="Меняется отдельно с датой, причиной и аудитом." readonly>
+                            <ReadonlyEditValue value={formatCurrency(client.openingReceivableAmount ?? client.debt ?? 0)} />
                           </EditField>
                         ) : (
                           <EditField label="Текущая задолженность" readonly>
@@ -2225,19 +2294,13 @@ export default function ClientDetail() {
                       />
                     </EditField>
                     {canEditDebt && (
-                      <EditField label="Ручная дебиторка, ₽">
-                        <Input
-                          className={editInputClassName}
-                          type="number"
-                          min={0}
-                          value={String(editData.debt ?? 0)}
-                          onChange={e => setEditData({ ...editData, debt: Number(e.target.value) })}
-                        />
+                      <EditField label="Входящий остаток" hint="Меняется отдельно с датой, причиной и аудитом." readonly>
+                        <ReadonlyEditValue value={formatCurrency(client.openingReceivableAmount ?? client.debt ?? 0)} />
                       </EditField>
                     )}
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Итоговая задолженность складывается из ручной дебиторки и неоплаченных аренд.
+                    Итоговая задолженность складывается из входящего остатка и неоплаченных аренд.
                   </p>
                   <EditField label="Ответственный менеджер">
                     <Input
@@ -2277,8 +2340,8 @@ export default function ClientDetail() {
                           )}
                         </div>
                       </div>
-                      {(canEditDebt || (client.debt ?? 0) > 0) && (
-                        <Field label="Ручная дебиторка" value={formatCurrency(client.debt ?? 0)} />
+                      {(canEditDebt || (client.openingReceivableAmount ?? client.debt ?? 0) > 0) && (
+                        <Field label="Входящий остаток" value={formatCurrency(client.openingReceivableAmount ?? client.debt ?? 0)} />
                       )}
                     </>
                   ) : (
@@ -2781,6 +2844,67 @@ export default function ClientDetail() {
         </div>
       </div>
     </div>
+    <Dialog open={openingArDialogOpen} onOpenChange={setOpeningArDialogOpen}>
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-xl rounded-2xl bg-white p-5 dark:bg-gray-950 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>Входящий остаток дебиторской задолженности</DialogTitle>
+          <DialogDescription>
+            Отдельная административная операция. Она не создаёт оплату, доход или выручку; каждая корректировка попадает в audit log.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[65vh] space-y-4 overflow-y-auto py-4 pr-1">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs dark:border-gray-800 dark:bg-gray-900">
+            <p><span className="text-gray-500">Клиент:</span> <strong>{client.company}</strong></p>
+            <p className="mt-1 break-all"><span className="text-gray-500">Canonical Counterparty ID:</span> <code>{client.counterpartyId || 'нет'}</code></p>
+            <p className="mt-1"><span className="text-gray-500">Ревизия:</span> {client.openingReceivableRevision || 0}</p>
+          </div>
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Сумма, ₽</span>
+            <Input
+              type="number"
+              min={0}
+              step="0.01"
+              value={openingArDraft.amount}
+              onChange={event => setOpeningArDraft(current => ({ ...current, amount: event.target.value, confirmed: false }))}
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Остаток на дату</span>
+            <Input
+              type="date"
+              value={openingArDraft.asOfDate}
+              onChange={event => setOpeningArDraft(current => ({ ...current, asOfDate: event.target.value, confirmed: false }))}
+            />
+          </label>
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Основание / причина</span>
+            <Textarea
+              className="min-h-24"
+              maxLength={500}
+              value={openingArDraft.reason}
+              onChange={event => setOpeningArDraft(current => ({ ...current, reason: event.target.value, confirmed: false }))}
+              placeholder="Например: акт сверки на дату запуска"
+            />
+          </label>
+          <label className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4"
+              checked={openingArDraft.confirmed}
+              onChange={event => setOpeningArDraft(current => ({ ...current, confirmed: event.target.checked }))}
+            />
+            <span>Подтверждаю: это именно входящий остаток долга, а не оплата, арендная выручка или финансовая операция.</span>
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setOpeningArDialogOpen(false)}>Отмена</Button>
+          <Button onClick={saveOpeningReceivable} disabled={!openingArDraft.confirmed || updateOpeningReceivable.isPending}>
+            {updateOpeningReceivable.isPending ? 'Сохранение…' : 'Сохранить остаток'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <Dialog open={contactDialogOpen} onOpenChange={setContactDialogOpen}>
       <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl rounded-2xl bg-white p-5 dark:bg-gray-950 sm:p-6">
         <DialogHeader>

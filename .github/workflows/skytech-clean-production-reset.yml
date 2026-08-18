@@ -1,0 +1,143 @@
+name: Skytech Clean Production Reset
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Guarded reset operation
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - backup
+          - verify
+          - apply
+          - purge-quarantine
+      confirmation:
+        description: Exact confirmation token required by apply/purge
+        required: false
+        type: string
+      backup_filename:
+        description: Verified skytech-pre-clean-reset-*.zip filename
+        required: false
+        type: string
+      backup_sha256:
+        description: Verified backup SHA-256
+        required: false
+        type: string
+      pre_reset_audit:
+        description: Must be pass for production apply
+        required: false
+        default: fail
+        type: choice
+        options:
+          - fail
+          - pass
+      quarantine:
+        description: Exact quarantine basename for purge
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skytech-clean-production-reset
+  cancel-in-progress: false
+
+jobs:
+  reset-operation:
+    name: ${{ inputs.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Validate production reset secrets
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          SKYTECH_CLEAN_RESET_TOKEN: ${{ secrets.SKYTECH_CLEAN_RESET_TOKEN }}
+        run: |
+          test -n "$PRODUCTION_API_URL"
+          test "${#SKYTECH_CLEAN_RESET_TOKEN}" -ge 32
+
+      - name: Validate operation inputs
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          BACKUP_FILENAME: ${{ inputs.backup_filename }}
+          BACKUP_SHA256: ${{ inputs.backup_sha256 }}
+          PRE_RESET_AUDIT: ${{ inputs.pre_reset_audit }}
+          QUARANTINE: ${{ inputs.quarantine }}
+        run: |
+          if [[ "$MODE" == "apply" ]]; then
+            test "$CONFIRMATION" = "SKYTECH_CLEAN_PRODUCTION_RESET"
+            [[ "$BACKUP_FILENAME" =~ ^skytech-pre-clean-reset-[0-9]{8}T[0-9]{6}Z\.zip$ ]]
+            [[ "$BACKUP_SHA256" =~ ^[a-f0-9]{64}$ ]]
+            test "$PRE_RESET_AUDIT" = "pass"
+          fi
+          if [[ "$MODE" == "purge-quarantine" ]]; then
+            test "$CONFIRMATION" = "SKYTECH_PURGE_RESET_QUARANTINE"
+            [[ "$BACKUP_FILENAME" =~ ^skytech-pre-clean-reset-[0-9]{8}T[0-9]{6}Z\.zip$ ]]
+            [[ "$BACKUP_SHA256" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$QUARANTINE" =~ ^\.skytech-reset-quarantine-[0-9]{8}T[0-9]{6,9}Z$ ]]
+          fi
+
+      - name: Run guarded production operation
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          BACKUP_FILENAME: ${{ inputs.backup_filename }}
+          BACKUP_SHA256: ${{ inputs.backup_sha256 }}
+          PRE_RESET_AUDIT: ${{ inputs.pre_reset_audit }}
+          QUARANTINE: ${{ inputs.quarantine }}
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          SKYTECH_CLEAN_RESET_TOKEN: ${{ secrets.SKYTECH_CLEAN_RESET_TOKEN }}
+        run: |
+          base_url="${PRODUCTION_API_URL%/}/api/admin/skytech-clean-reset"
+          if [[ "$MODE" == "dry-run" || "$MODE" == "verify" ]]; then
+            curl --fail-with-body --silent --show-error \
+              --header "X-Skytech-Reset-Token: $SKYTECH_CLEAN_RESET_TOKEN" \
+              "$base_url/$MODE" > reset-response.json
+          elif [[ "$MODE" == "backup" ]]; then
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header "X-Skytech-Reset-Token: $SKYTECH_CLEAN_RESET_TOKEN" \
+              "$base_url/backup" > reset-response.json
+          elif [[ "$MODE" == "apply" ]]; then
+            jq -n \
+              --arg confirmation "$CONFIRMATION" \
+              --arg backupFilename "$BACKUP_FILENAME" \
+              --arg backupSha256 "$BACKUP_SHA256" \
+              --arg preResetAudit "$PRE_RESET_AUDIT" \
+              '{confirmation:$confirmation,backupFilename:$backupFilename,backupSha256:$backupSha256,preResetAudit:$preResetAudit}' \
+              > reset-request.json
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header 'Content-Type: application/json' \
+              --header "X-Skytech-Reset-Token: $SKYTECH_CLEAN_RESET_TOKEN" \
+              --data-binary @reset-request.json \
+              "$base_url/apply" > reset-response.json
+          else
+            jq -n \
+              --arg confirmation "$CONFIRMATION" \
+              --arg backupFilename "$BACKUP_FILENAME" \
+              --arg backupSha256 "$BACKUP_SHA256" \
+              --arg quarantine "$QUARANTINE" \
+              '{confirmation:$confirmation,backupFilename:$backupFilename,backupSha256:$backupSha256,quarantine:$quarantine}' \
+              > reset-request.json
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header 'Content-Type: application/json' \
+              --header "X-Skytech-Reset-Token: $SKYTECH_CLEAN_RESET_TOKEN" \
+              --data-binary @reset-request.json \
+              "$base_url/purge-quarantine" > reset-response.json
+          fi
+          jq -e '.ok == true' reset-response.json
+          jq . reset-response.json
+
+      - name: Upload non-secret reset evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: skytech-clean-reset-${{ inputs.mode }}-${{ github.run_id }}
+          path: reset-response.json
+          if-no-files-found: error
+          retention-days: 30

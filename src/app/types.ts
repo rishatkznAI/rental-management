@@ -1218,6 +1218,16 @@ export interface Client {
   paymentTerms: string;
   creditLimit: number;
   debt: number;
+  /** Opening AR balance; debt remains a backward-compatible display alias. */
+  openingReceivableAmount?: number;
+  openingReceivableAsOfDate?: string;
+  openingReceivableRevision?: number;
+  openingReceivableCreatedAt?: string;
+  openingReceivableCreatedByUserId?: string;
+  openingReceivableCreatedBy?: string;
+  openingReceivableUpdatedAt?: string;
+  openingReceivableUpdatedByUserId?: string;
+  openingReceivableUpdatedBy?: string;
   lastRentalDate?: string;
   totalRentals: number;
   manager?: string;
@@ -1233,6 +1243,19 @@ export interface Client {
   createdAt?: string;
   createdBy?: string;
   history?: AuditEntry[];
+}
+
+export interface OpeningReceivable {
+  clientId: string;
+  counterpartyId: string;
+  amount: number;
+  asOfDate: string | null;
+  revision: number;
+  createdAt: string | null;
+  createdByUserId: string | null;
+  updatedAt: string | null;
+  updatedByUserId: string | null;
+  status: 'active' | 'cleared';
 }
 
 export type CounterpartyType = 'legal_entity' | 'individual_entrepreneur' | 'individual';

@@ -93,6 +93,15 @@ test('receivable drill-downs use canonical identity rather than debtor names', (
   assert.doesNotMatch(dashboardSource, /`\/clients\/\$\{encodeURIComponent\(row\.name\)\}`/);
 });
 
+test('Dashboard money panel includes opening AR without inventing overdue aging', () => {
+  assert.match(dashboardSource, /buildClientReceivables/);
+  assert.match(dashboardSource, /const totalDebt = clientReceivables\.reduce/);
+  assert.match(dashboardSource, /row\.currentDebt > 0 && \(row\.manualDebt > 0 \|\| !row\.counterpartyId\)/);
+  assert.match(dashboardSource, /totalDebt: totalReceivablesAvailable \? formatCurrency\(totalDebt\) : '—'/);
+  assert.match(dashboardSource, /row\.manualDebt > 0[\s\S]{0,120}'срок не определён'/);
+  assert.doesNotMatch(dashboardSource, /totalDebt: overdueReceivablesAvailable \? formatCurrency\(companyHealthDebtAging\.totalOutstandingAmount\)/);
+});
+
 test('Dashboard V2 deduplicates service blockers and gates panels and health links by permission', () => {
   assert.match(dashboardSource, /const serviceBlockerTicketIds = new Set\(\[[\s\S]*criticalTickets[\s\S]*unassignedServiceTickets[\s\S]*ticketsWaitingParts[\s\S]*overdueServiceTickets[\s\S]*ticket\.id[\s\S]*const serviceBlockersCount = serviceBlockerTicketIds\.size/);
   assert.match(dashboardSource, /fleet: canViewEquipment \?/);

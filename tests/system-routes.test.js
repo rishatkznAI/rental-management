@@ -567,6 +567,69 @@ test('/api/sync rejects dangerous fields when legacy sync is explicitly enabled'
   }
 });
 
+test('/api/sync preserves server-owned opening receivable state by stable Client ID', async () => {
+  const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
+  process.env.ENABLE_LEGACY_SYNC = '1';
+  const openingReceivable = {
+    debt: 130000,
+    openingReceivableAmount: 130000,
+    openingReceivableAsOfDate: '2026-08-01',
+    openingReceivableRevision: 2,
+    openingReceivableCreatedAt: '2026-08-01T00:00:00.000Z',
+    openingReceivableCreatedByUserId: 'U-admin',
+    openingReceivableCreatedBy: 'Админ',
+    openingReceivableUpdatedAt: '2026-08-02T00:00:00.000Z',
+    openingReceivableUpdatedByUserId: 'U-admin',
+    openingReceivableUpdatedBy: 'Админ',
+  };
+  const collections = {
+    clients: [{
+      id: 'C-1',
+      counterpartyId: 'CP-1',
+      company: 'ООО Остаток',
+      inn: '1655123456',
+      ...openingReceivable,
+    }],
+    counterparties: [{
+      id: 'CP-1',
+      type: 'legal_entity',
+      legalName: 'ООО Остаток',
+      shortName: 'ООО Остаток',
+      inn: '1655123456',
+      roles: ['customer'],
+      status: 'active',
+    }],
+  };
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    getSnapshot: () => ({ clients: collections.clients }),
+    writeData: (name, value) => { collections[name] = value; },
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/sync', {
+        clients: [{
+          id: 'C-1',
+          counterpartyId: 'CP-1',
+          company: 'ООО Остаток Обновлено',
+          inn: '1655123456',
+        }],
+      });
+      assert.equal(response.status, 200);
+    });
+    assert.equal(collections.clients[0].company, 'ООО Остаток Обновлено');
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(collections.clients[0])
+        .filter(([field]) => field === 'debt' || field.startsWith('openingReceivable'))),
+      openingReceivable,
+    );
+  } finally {
+    if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
+    else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
+  }
+});
+
 test('/api/sync rejects Classic Rental replacement when legacy sync is explicitly enabled', async () => {
   const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
   process.env.ENABLE_LEGACY_SYNC = '1';
@@ -3242,7 +3305,19 @@ test('/api/admin/system-data/import rejects duplicate client INNs before writing
 
 test('/api/admin/system-data/import accepts valid clients payload', async () => {
   const collections = {
-    clients: [{ id: 'C-old', company: 'ООО Старый', inn: '7700654321' }],
+    clients: [{
+      id: 'C-1',
+      company: 'ООО Старый',
+      inn: '1655123456',
+      debt: 130000,
+      openingReceivableAmount: 130000,
+      openingReceivableAsOfDate: '2026-08-01',
+      openingReceivableRevision: 2,
+      openingReceivableCreatedAt: '2026-08-01T00:00:00.000Z',
+      openingReceivableCreatedByUserId: 'U-admin',
+      openingReceivableUpdatedAt: '2026-08-02T00:00:00.000Z',
+      openingReceivableUpdatedByUserId: 'U-admin',
+    }],
     users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password' }],
   };
   const writes = [];
@@ -3281,6 +3356,9 @@ test('/api/admin/system-data/import accepts valid clients payload', async () => 
       'contractor_profiles',
     ]);
     assert.equal(collections.clients.length, 2);
+    assert.equal(collections.clients.find(client => client.id === 'C-1').openingReceivableAmount, 130000);
+    assert.equal(collections.clients.find(client => client.id === 'C-1').openingReceivableRevision, 2);
+    assert.equal(collections.clients.find(client => client.id === 'C-1').debt, 130000);
     assert.equal(collections.counterparties.length, 2);
     assert.ok(collections.clients.every(client => collections.counterparties.some(counterparty => (
       counterparty.id === client.counterpartyId

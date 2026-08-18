@@ -7,8 +7,8 @@ type Credentials = {
 };
 
 export const ADMIN_CREDENTIALS: Credentials = {
-  email: 'smoke-admin@yandex.ru',
-  password: '123123',
+  email: process.env.E2E_ADMIN_EMAIL || 'smoke-admin@yandex.ru',
+  password: process.env.E2E_ADMIN_PASSWORD || '123123',
 };
 
 export const RENTAL_MANAGER_CREDENTIALS: Credentials = {

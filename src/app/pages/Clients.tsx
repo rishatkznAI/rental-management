@@ -29,19 +29,6 @@ import type { Client } from '../types';
 
 type ClientKind = 'rental' | 'sale';
 
-const MANAGER_FALLBACKS = [
-  'Хабибрахманов Р.',
-  'Иванов И.',
-  'Морозова С.',
-  'Дорофеев С.',
-] as const;
-
-const DEMO_TOTAL_CLIENTS = 128;
-const DEMO_RENTAL_CLIENTS = 86;
-const DEMO_SALE_CLIENTS = 42;
-const DEMO_TURNOVER = 125_480_600;
-const DEMO_NEW_CLIENTS = 9;
-
 function safeText(value: unknown, fallback = '—') {
   const text = String(value ?? '').trim();
   return text ? text : fallback;
@@ -89,8 +76,8 @@ function resolveClientKind(client: Client): ClientKind {
   return (client.totalRentals || 0) > 0 ? 'rental' : 'sale';
 }
 
-function managerName(client: Client, index: number) {
-  return safeText(client.manager, MANAGER_FALLBACKS[index % MANAGER_FALLBACKS.length]);
+function managerName(client: Client) {
+  return safeText(client.manager, 'Не назначен');
 }
 
 function initialsFor(name: string) {
@@ -249,10 +236,10 @@ export default function Clients() {
   const paginationMeta = clientsQuery.data?.pagination;
   const totalClients = paginationMeta?.total ?? computedClients.length;
 
-  const clientsWithMeta = React.useMemo(() => computedClients.map((client, index) => ({
+  const clientsWithMeta = React.useMemo(() => computedClients.map(client => ({
     client,
     kind: resolveClientKind(client),
-    manager: managerName(client, index),
+    manager: managerName(client),
   })), [computedClients]);
 
   const managerOptions = React.useMemo(() => {
@@ -277,11 +264,11 @@ export default function Clients() {
   );
   const newThisMonth = computedClients.filter(client => isThisMonth(client.createdAt)).length;
   const newThisWeek = computedClients.filter(client => isThisWeek(client.createdAt)).length;
-  const displayTotal = totalClients || DEMO_TOTAL_CLIENTS;
-  const displayRental = totalClients ? rentalClientCount : DEMO_RENTAL_CLIENTS;
-  const displaySale = totalClients ? saleClientCount : DEMO_SALE_CLIENTS;
-  const displayTurnover = turnover || computedClients.reduce((sum, client) => sum + Math.max(0, Number(client.debt) || 0), 0) || DEMO_TURNOVER;
-  const displayNew = newThisMonth || (totalClients ? Math.min(DEMO_NEW_CLIENTS, totalClients) : DEMO_NEW_CLIENTS);
+  const displayTotal = totalClients;
+  const displayRental = rentalClientCount;
+  const displaySale = saleClientCount;
+  const displayTurnover = turnover;
+  const displayNew = newThisMonth;
 
   const resetFilters = () => {
     pagination.reset();

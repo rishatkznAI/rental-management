@@ -114,7 +114,10 @@ async function createAuthedContext(email: string, password: string): Promise<API
 }
 
 export async function withAdminApi<T>(fn: (api: APIRequestContext) => Promise<T>) {
-  const api = await createAuthedContext('smoke-admin@yandex.ru', '123123');
+  const api = await createAuthedContext(
+    process.env.E2E_ADMIN_EMAIL || 'smoke-admin@yandex.ru',
+    process.env.E2E_ADMIN_PASSWORD || '123123',
+  );
   try {
     return await fn(api);
   } finally {

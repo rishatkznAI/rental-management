@@ -118,7 +118,7 @@ Open these screens with appropriate roles:
 
 ## 11. Protected Finance Production Smoke Fixture
 
-Finance Production Smoke depends on a read-only production data contract for one safe rental-mode equipment card. The fixture is not created by normal smoke workflows.
+Finance Production Smoke uses a read-only production data contract for one safe rental-mode equipment card when production contains equipment. The fixture is not created by normal smoke workflows. An exactly empty equipment registry is the single allowed exception for a clean-production launch: the smoke verifies the real Equipment zero-state instead of an economics card.
 
 Required fixture:
 
@@ -136,7 +136,7 @@ Required fixture:
 
 Standard UI/API operations must not delete this fixture, rename its inventory or serial number, convert it to sale/client/partner/repair mode, or otherwise remove it from the first page of the dedicated `available_for_rent` endpoint. Blocked write attempts return `409 SYSTEM_FIXTURE_PROTECTED`.
 
-Finance Production Smoke treats `productionFixtureWarning` as a hard failure. Expected diagnostics include missing fixture, `saleMode=true`, non-empty `saleStatus` / `salesStatus`, repair/client/partner mode, and absence from the first `available_for_rent` page. Restore the fixture only through a separate operational workflow or approved manual run after a fresh production data backup. Do not auto-create or mutate the fixture from the read-only smoke workflow.
+Finance Production Smoke treats `productionFixtureWarning` as a hard failure whenever any equipment exists. Expected diagnostics include missing fixture, `saleMode=true`, non-empty `saleStatus` / `salesStatus`, repair/client/partner mode, and absence from the first `available_for_rent` page. If and only if the authenticated API proves the entire equipment registry is empty, the missing fixture is accepted and the UI must render the honest `Техника ещё не добавлена` state. Restore the fixture only through a separate operational workflow or approved manual run after a fresh production data backup. Do not auto-create or mutate the fixture from the read-only smoke workflow.
 
 ## 12. Pass/Fail Decision
 
@@ -147,7 +147,7 @@ Pass only if:
 - frontend loads from GitHub Pages;
 - expected build identity is confirmed;
 - all role smoke checks pass;
-- Finance Production Smoke has no production fixture warning;
+- Finance Production Smoke has no production fixture warning, or has proved the exact clean-launch empty-fleet exception and rendered the Equipment zero-state;
 - no secrets are exposed;
 - no critical screen is blank or throwing runtime errors.
 

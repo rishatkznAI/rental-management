@@ -115,6 +115,8 @@ test('clean production copy has honest zero-state UI and exact-empty business AP
     issues: [],
   };
   let action = 'login';
+  let expectedUserCount = 0;
+  let expectedRoleCount = 0;
   installIssueCapture(page, report, () => action);
 
   try {
@@ -132,6 +134,9 @@ test('clean production copy has honest zero-state UI and exact-empty business AP
         report.zeroCollections[collection] = rows.length;
         expect(rows, `${collection} must be exactly empty`).toEqual([]);
       }
+      const users = await getArray(api, '/api/users') as Array<{ role?: string }>;
+      expectedUserCount = users.length;
+      expectedRoleCount = new Set(users.map(user => String(user.role || '').trim()).filter(Boolean)).size;
     });
 
     for (const required of REQUIRED_ROUTES) {
@@ -149,9 +154,20 @@ test('clean production copy has honest zero-state UI and exact-empty business AP
         await page.getByRole('tab', { name: 'Дебиторка' }).click();
         await expect(page.getByText(/Дебиторская задолженность|Дебиторка/).first()).toBeVisible();
       }
+      if (required.label === 'clients') {
+        await expect(page.getByTestId('clients-kpi-total-value')).toHaveText('0');
+        await expect(page.getByTestId('clients-kpi-total-caption')).toHaveText('0 за месяц');
+        await expect(page.getByTestId('clients-kpi-turnover-value')).toHaveText('0 ₽');
+        await expect(page.getByTestId('clients-kpi-turnover-caption')).toHaveText('По текущим данным');
+        await expect(page.getByTestId('clients-kpi-new-value')).toHaveText('0');
+        await expect(page.getByTestId('clients-kpi-new-caption')).toHaveText('0 за неделю');
+        await expect(page.getByText(/\+(?:12 за месяц|8% за месяц|3 за неделю)/)).toHaveCount(0);
+      }
       if (required.label === 'users') {
         await expect(page.getByRole('heading', { name: 'Панель администратора' })).toBeVisible();
         await expect(page.getByText('Управление пользователями')).toBeVisible();
+        await expect(page.getByTestId('admin-kpi-users-value')).toHaveText(String(expectedUserCount));
+        await expect(page.getByTestId('admin-kpi-roles-value')).toHaveText(String(expectedRoleCount));
       }
       const file = `${String(report.routes.length).padStart(2, '0')}-${required.label}`;
       report.routes.push({ label: required.label, route: required.route, screenshot: await screenshot(page, directory, file) });

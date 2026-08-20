@@ -178,13 +178,25 @@ async function firstHrefMatching(page: Page, patternSource: string) {
   }, patternSource);
 }
 
-async function expectCrmDisabledUiHidden(page: Page, frontendUrl: string) {
+async function expectCrmDisabledUiHidden(
+  page: Page,
+  frontendUrl: string,
+  expectedAdminCounts: { users: number; roles: number },
+) {
   await expectCrmHiddenFromNavigation(page);
   await expectNoCrmActivityControls(page.locator('main'), 'dashboard/equipment shell');
 
   await page.goto(productionAppUrl(frontendUrl, '/clients'), { waitUntil: 'domcontentloaded' });
   await expectHealthyMain(page, 'clients');
   await expectNoCrmActivityControls(page.locator('main'), 'clients list');
+  await expect(page.getByTestId('clients-kpi-total-value')).toBeVisible();
+  const clientCount = Number(await page.getByTestId('clients-kpi-total-value').innerText());
+  if (clientCount === 0) {
+    await expect(page.getByTestId('clients-kpi-total-caption')).toHaveText('0 за месяц');
+    await expect(page.getByTestId('clients-kpi-turnover-caption')).toHaveText('По текущим данным');
+    await expect(page.getByTestId('clients-kpi-new-caption')).toHaveText('0 за неделю');
+  }
+  await expect(page.getByText(/\+(?:12 за месяц|8% за месяц|3 за неделю)/)).toHaveCount(0);
 
   const firstClientHref = await firstHrefMatching(page, String.raw`/clients/(?!new(?:$|[?#]))[^/?#]+`);
   if (firstClientHref) {
@@ -210,6 +222,11 @@ async function expectCrmDisabledUiHidden(page: Page, frontendUrl: string) {
 
   await page.goto(productionAppUrl(frontendUrl, '/deliveries'), { waitUntil: 'domcontentloaded' });
   await expectHealthyMain(page, 'delivery');
+
+  await page.goto(productionAppUrl(frontendUrl, '/admin'), { waitUntil: 'domcontentloaded' });
+  await expectHealthyMain(page, 'admin');
+  await expect(page.getByTestId('admin-kpi-users-value')).toHaveText(String(expectedAdminCounts.users));
+  await expect(page.getByTestId('admin-kpi-roles-value')).toHaveText(String(expectedAdminCounts.roles));
 }
 
 test('production focused UI selector smoke stays read-only', async ({ page }) => {
@@ -269,6 +286,7 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
     baseURL: apiUrl,
     extraHTTPHeaders: { Authorization: `Bearer ${token}` },
   });
+  let expectedAdminCounts = { users: 0, roles: 0 };
   try {
     const sccResponse = await api.get('/api/admin/system-control-center');
     expect(sccResponse.ok(), 'system control center GET should succeed').toBeTruthy();
@@ -363,11 +381,20 @@ test('production focused UI selector smoke stays read-only', async ({ page }) =>
     });
     expect(safeFieldsPresent, 'assignees API should expose only expected safe identity fields').toBeTruthy();
     expect(unsafeFieldsAbsent, 'assignees API should not expose unsafe identity fields').toBeTruthy();
+
+    const usersResponse = await api.get('/api/users');
+    expect(usersResponse.ok(), 'users GET should succeed for admin count verification').toBeTruthy();
+    const users = await usersResponse.json() as Array<{ role?: string }>;
+    expectedAdminCounts = {
+      users: users.length,
+      roles: new Set(users.map(user => String(user.role || '').trim()).filter(Boolean)).size,
+    };
+    safeSmokeLog('adminCounts', expectedAdminCounts);
   } finally {
     await api.dispose();
   }
 
-  await expectCrmDisabledUiHidden(page, frontendUrl);
+  await expectCrmDisabledUiHidden(page, frontendUrl, expectedAdminCounts);
 
   await page.goto(productionAppUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible();

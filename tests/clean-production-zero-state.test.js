@@ -17,6 +17,12 @@ test('client registry derives every headline metric from loaded records without 
   assert.match(source, /const displayTurnover = turnover;/);
   assert.match(source, /const displayNew = newThisMonth;/);
   assert.match(source, /safeText\(client\.manager, 'Не назначен'\)/);
+  assert.doesNotMatch(source, /newThisMonth\s*\|\|\s*12/);
+  assert.doesNotMatch(source, /newThisWeek\s*\|\|\s*3/);
+  assert.doesNotMatch(source, /\+8% за месяц/);
+  assert.match(source, /testId="clients-kpi-total"[\s\S]*?caption=\{`\$\{newThisMonth\} за месяц`\}/);
+  assert.match(source, /testId="clients-kpi-turnover"[\s\S]*?caption="По текущим данным"/);
+  assert.match(source, /testId="clients-kpi-new"[\s\S]*?caption=\{`\$\{newThisWeek\} за неделю`\}/);
 });
 
 test('admin users and activity timestamps never fall back to invented records', () => {

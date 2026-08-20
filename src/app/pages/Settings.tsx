@@ -787,7 +787,7 @@ export default function Settings() {
                 </span>
                 <span className="min-w-0">
                   <span className={`block text-[13px] font-medium ${adminMutedTextClass}`}>{card.title}</span>
-                  <span className="mt-0.5 block text-[26px] font-extrabold leading-none text-foreground">{card.value}</span>
+                  <span data-testid={`admin-kpi-${card.id}-value`} className="mt-0.5 block text-[26px] font-extrabold leading-none text-foreground">{card.value}</span>
                   <span className="mt-3 block text-[12px] font-semibold text-primary-content">{card.link} →</span>
                 </span>
               </button>

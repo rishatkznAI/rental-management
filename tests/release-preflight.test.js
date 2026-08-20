@@ -194,6 +194,28 @@ test('release preflight allows frontend-deploy-tooling safe file scope and repor
   assert.match(backendGate.message, /Backend commit differs from frontend commit: expected for frontend-deploy-tooling release/);
 });
 
+test('release preflight accepts clean-production zero-state coverage as frontend deploy tooling', () => {
+  const changedFiles = [
+    'e2e/clean-production-zero-state-audit.spec.ts',
+    'e2e/helpers/api.ts',
+    'e2e/production-ui-selector-smoke.spec.ts',
+    'src/app/pages/Clients.tsx',
+    'src/app/pages/Settings.tsx',
+    'tests/clean-production-zero-state.test.js',
+  ];
+
+  const scope = assertFrontendDeployToolingReleaseScope({ releaseType: 'frontend-deploy-tooling', changedFiles });
+  assert.equal(scope.checked, true);
+  assert.deepEqual(scope.disallowedChangedFiles, []);
+
+  const classified = classifyReleaseChangedFiles(changedFiles);
+  assert.equal(classified.allowed, true);
+  assert.equal(classified.releaseType, 'frontend-deploy-tooling');
+  assert.equal(classified.hasFrontendRuntime, true);
+  assert.equal(classified.hasDeployTooling, true);
+  assert.deepEqual(classified.blockedFiles, []);
+});
+
 test('release preflight allows dashboard e2e coverage for frontend-deploy-tooling only', () => {
   const changedFiles = [
     'e2e/dashboard-layout.spec.ts',

@@ -154,6 +154,15 @@ function paymentAllocationCap(payment: Payment): number {
   return amount > 0 ? Math.min(paid, amount) : paid;
 }
 
+function financialRentalIds(rental: GanttRentalData): string[] {
+  return [...new Set([
+    rental.id,
+    rental.rentalId,
+    rental.sourceRentalId,
+    rental.originalRentalId,
+  ].map(value => String(value || '').trim()).filter(Boolean))];
+}
+
 function buildAllocationsByPaymentId(paymentAllocations: PaymentAllocation[] = []): Map<string, PaymentAllocation[]> {
   const map = new Map<string, PaymentAllocation[]>();
   const seen = new Set<string>();
@@ -300,7 +309,8 @@ export function buildRentalDebtRows(
   return rentals
     .filter(shouldCountRental)
     .map(rental => {
-      const paidAmount = paidByRentalId.get(rental.id) ?? 0;
+      const paidAmount = financialRentalIds(rental)
+        .reduce((sum, rentalId) => sum + (paidByRentalId.get(rentalId) ?? 0), 0);
       const billing = calculateRentalBilling(rental);
       const amount = billing.finalRentalAmount;
       const outstanding = Math.max(0, amount - paidAmount);

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 const financeSource = fs.readFileSync(new URL('../src/app/pages/Finance.tsx', import.meta.url), 'utf8');
 const equipmentDetailSource = fs.readFileSync(new URL('../src/app/pages/EquipmentDetail.tsx', import.meta.url), 'utf8');
 const financeServiceSource = fs.readFileSync(new URL('../src/app/services/finance.service.ts', import.meta.url), 'utf8');
+const financeHelpersSource = fs.readFileSync(new URL('../src/app/lib/finance.ts', import.meta.url), 'utf8');
 
 test('Finance contains Cash Flow and VAT settings UI without unsafe labels', () => {
   assert.match(financeSource, /TabsTrigger value="cash-flow">Cash Flow/);
@@ -23,4 +24,12 @@ test('Equipment detail contains depreciation economics block', () => {
   assert.match(equipmentDetailSource, /Экономика техники доступна только ролям с финансовым доступом/);
   assert.match(equipmentDetailSource, /getEconomics/);
   assert.doesNotMatch(equipmentDetailSource, /\[object Object\]/);
+});
+
+test('frontend AR reconciles allocations through linked Classic and Gantt rental IDs', () => {
+  assert.match(financeHelpersSource, /function financialRentalIds\(rental: GanttRentalData\)/);
+  assert.match(financeHelpersSource, /rental\.rentalId/);
+  assert.match(financeHelpersSource, /rental\.sourceRentalId/);
+  assert.match(financeHelpersSource, /rental\.originalRentalId/);
+  assert.match(financeHelpersSource, /financialRentalIds\(rental\)[\s\S]*paidByRentalId\.get\(rentalId\)/);
 });

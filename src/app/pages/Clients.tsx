@@ -147,17 +147,19 @@ function KindBadge({ kind }: { kind: ClientKind }) {
 
 function KpiCard({
   icon: Icon,
+  testId,
   title,
   value,
   caption,
 }: {
   icon: React.ComponentType<{ className?: string }>;
+  testId: string;
   title: string;
   value: string;
   caption: string;
 }) {
   return (
-    <div className="app-kpi-card min-h-[138px] p-4 text-card-foreground">
+    <div data-testid={testId} className="app-kpi-card min-h-[138px] p-4 text-card-foreground">
       <div className="flex items-start justify-between gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/25 bg-primary/12 text-primary-content shadow-[0_12px_30px_-24px_var(--rc-accent-border)]">
           <Icon className="h-5 w-5" />
@@ -165,8 +167,8 @@ function KpiCard({
         <span className="h-2 w-2 rounded-full bg-lime-500 shadow-[0_0_14px_rgba(132,204,22,0.48)] dark:bg-lime-300/80 dark:shadow-[0_0_16px_rgba(190,242,100,0.8)]" />
       </div>
       <p className="mt-4 text-sm font-medium text-muted-foreground">{title}</p>
-      <p className="mt-2 truncate text-2xl font-semibold tracking-normal text-foreground dark:text-white">{value}</p>
-      <p className="mt-2 text-xs font-semibold text-primary-content">{caption}</p>
+      <p data-testid={`${testId}-value`} className="mt-2 truncate text-2xl font-semibold tracking-normal text-foreground dark:text-white">{value}</p>
+      <p data-testid={`${testId}-caption`} className="mt-2 text-xs font-semibold text-primary-content">{caption}</p>
     </div>
   );
 }
@@ -357,11 +359,11 @@ export default function Clients() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <KpiCard icon={Users} title="Всего клиентов" value={String(displayTotal)} caption={`+${newThisMonth || 12} за месяц`} />
-        <KpiCard icon={Building2} title="Клиенты по аренде" value={String(displayRental)} caption={`${Math.round((displayRental / Math.max(displayTotal, 1)) * 100)}% от всех`} />
-        <KpiCard icon={ShoppingCart} title="Клиенты по продаже" value={String(displaySale)} caption={`${Math.round((displaySale / Math.max(displayTotal, 1)) * 100)}% от всех`} />
-        <KpiCard icon={Wallet} title="Общий оборот" value={compactCurrency(displayTurnover)} caption="+8% за месяц" />
-        <KpiCard icon={UserPlus} title="Новые клиенты" value={String(displayNew)} caption={`+${newThisWeek || 3} за неделю`} />
+        <KpiCard testId="clients-kpi-total" icon={Users} title="Всего клиентов" value={String(displayTotal)} caption={`${newThisMonth} за месяц`} />
+        <KpiCard testId="clients-kpi-rental" icon={Building2} title="Клиенты по аренде" value={String(displayRental)} caption={`${Math.round((displayRental / Math.max(displayTotal, 1)) * 100)}% от всех`} />
+        <KpiCard testId="clients-kpi-sale" icon={ShoppingCart} title="Клиенты по продаже" value={String(displaySale)} caption={`${Math.round((displaySale / Math.max(displayTotal, 1)) * 100)}% от всех`} />
+        <KpiCard testId="clients-kpi-turnover" icon={Wallet} title="Общий оборот" value={compactCurrency(displayTurnover)} caption="По текущим данным" />
+        <KpiCard testId="clients-kpi-new" icon={UserPlus} title="Новые клиенты" value={String(displayNew)} caption={`${newThisWeek} за неделю`} />
       </div>
 
       <section className="overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-[0_24px_58px_-42px_rgba(15,23,42,0.55)] dark:border-white/10 dark:bg-[#0d1524]/95 dark:shadow-[0_24px_80px_rgba(0,0,0,0.32)]">

@@ -93,7 +93,7 @@ function ganttProjectionStatusForCreatedRental(classicStatus: string) {
   return normalized === 'active' ? 'active' : 'created';
 }
 
-const API_BASE_URL = 'http://127.0.0.1:3000';
+const API_BASE_URL = process.env.PRODUCTION_API_URL || 'http://127.0.0.1:3000';
 
 async function createAuthedContext(email: string, password: string): Promise<APIRequestContext> {
   const bootstrap = await playwrightRequest.newContext({ baseURL: API_BASE_URL });

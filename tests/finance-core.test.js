@@ -174,6 +174,39 @@ test('buildRentalDebtRows calculates outstanding from related payments', () => {
   assert.equal(rows[0].outstanding, 60000);
 });
 
+test('buildRentalDebtRows applies Classic rental allocations to the linked Gantt projection', () => {
+  const rows = buildRentalDebtRows(
+    [
+      {
+        id: 'gr-1',
+        rentalId: 'r-1',
+        sourceRentalId: 'r-1',
+        originalRentalId: 'r-1',
+        clientId: 'c-1',
+        client: 'Клиент',
+        equipmentInv: '083',
+        manager: 'Руслан',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        amount: 100000,
+        status: 'active',
+      },
+    ],
+    [{ id: 'p-1', amount: 40000, paidAmount: 40000, status: 'paid' }],
+    {
+      paymentAllocations: [
+        { id: 'pa-1', paymentId: 'p-1', rentalId: 'r-1', amount: 40000, status: 'active' },
+      ],
+    },
+  );
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].rentalId, 'gr-1');
+  assert.equal(rows[0].paidAmount, 40000);
+  assert.equal(rows[0].outstanding, 60000);
+  assert.equal(rows[0].paymentStatus, 'partial');
+});
+
 test('buildRentalDebtRows uses downtime-adjusted rental amount', () => {
   const rows = buildRentalDebtRows(
     [

@@ -98,6 +98,15 @@ function getPaymentAllocationCap(payment) {
   return paid;
 }
 
+function financialRentalIds(rental) {
+  return [...new Set([
+    rental?.id,
+    rental?.rentalId,
+    rental?.sourceRentalId,
+    rental?.originalRentalId,
+  ].map(value => String(value || '').trim()).filter(Boolean))];
+}
+
 function normalizeFinanceArgs(value) {
   if (Array.isArray(value)) return { paymentAllocations: value };
   if (value && typeof value === 'object') {
@@ -250,7 +259,8 @@ function buildRentalDebtRows(rentals, payments, options) {
   return (rentals || [])
     .filter(shouldCountRental)
     .map((rental, sourceIndex) => {
-      const paidAmount = paidByRentalId.get(rental.id) || 0;
+      const paidAmount = financialRentalIds(rental)
+        .reduce((sum, rentalId) => sum + (paidByRentalId.get(rentalId) || 0), 0);
       const billing = calculateRentalBilling(rental);
       const amount = billing.finalRentalAmount;
       const outstanding = Math.max(0, amount - paidAmount);

@@ -517,7 +517,7 @@ test('smoke-service can use warranty mechanic UI and warranty workflows without 
   action = 'warranty tab';
   await goToRoute(page, '/service');
   await page.getByRole('tab', { name: /Рекламации/ }).click();
-  await expect(page.getByText(createdClaim.id).first()).toBeVisible();
+  await expect(page.getByText(createdClaim.number).first()).toBeVisible();
   await expect(page.getByText(claimPayload.failureDescription).first()).toBeVisible();
   await expectHealthyScreen(page, action);
 

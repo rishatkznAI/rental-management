@@ -50,7 +50,7 @@ test('rental contract wizard uses searchable customer Counterparty selection and
   assert.match(source, /signerName: wizardForm\.signerName/);
   assert.match(source, /signerBasis: wizardForm\.signerBasis/);
   assert.match(source, /clientBankName/);
-  assert.match(source, /Будет сгенерирован автоматически/);
+  assert.match(source, /Номер будет присвоен после создания/);
   assert.match(source, /Будет установлена автоматически/);
 });
 

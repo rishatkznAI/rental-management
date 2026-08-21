@@ -27,6 +27,9 @@ const {
   ensureCanonicalActualPostingSchema,
 } = require('./lib/canonical-actual-posting-schema');
 const {
+  ensureNumberSequenceSchema,
+} = require('./lib/number-sequences');
+const {
   assertClientInnListUnique,
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
@@ -153,6 +156,7 @@ function ensureDb() {
   ensureForecastReceivablesPlanningSchema(db);
   ensureActualSourceEligibilityDryRunSchema(db);
   ensureCanonicalActualPostingSchema(db);
+  ensureNumberSequenceSchema(db);
   syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }

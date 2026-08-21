@@ -7,12 +7,15 @@ import { buildClient360Summary } from '../src/app/lib/client360.js';
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const express = serverRequire('express');
+const Database = serverRequire('better-sqlite3');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { registerDeliveryRoutes } = require('../server/routes/deliveries.js');
 const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { validateRentalPayload } = require('../server/lib/rental-validation.js');
 const { buildFinanceReport } = require('../server/lib/finance-core.js');
+const { createNumberSequenceAllocator } = require('../server/lib/number-sequences.js');
+const { createBusinessNumberingService } = require('../server/lib/business-numbering.js');
 
 function createState() {
   return {
@@ -58,6 +61,16 @@ function createState() {
         activeInFleet: true,
         category: 'own',
       },
+      {
+        id: 'EQ-3',
+        inventoryNumber: 'INV-3',
+        serialNumber: 'SN-3',
+        manufacturer: 'Sky',
+        model: 'Lift 3',
+        status: 'available',
+        activeInFleet: true,
+        category: 'own',
+      },
     ],
     rentals: [],
     gantt_rentals: [],
@@ -80,6 +93,16 @@ function createApp(state = createState(), options = {}) {
     for (const entry of entries || []) state[entry.name] = entry.value;
   };
   const accessControl = createAccessControl({ readData });
+  const numberingDb = new Database(':memory:');
+  const businessNumbering = createBusinessNumberingService({
+    allocator: createNumberSequenceAllocator({
+      db: numberingDb,
+      scope: { scopeType: 'company', scopeId: 'SKYTECH' },
+      nowIso: () => '2026-05-01T09:00:00.000Z',
+    }),
+    readData,
+    nowIso: () => '2026-05-01T09:00:00.000Z',
+  });
   let idCounter = 0;
 
   function requireAuth(req, res, next) {
@@ -109,6 +132,7 @@ function createApp(state = createState(), options = {}) {
     getBotUsers: () => ({}),
     saveBotUsers: () => {},
     nowIso: () => '2026-05-01T09:00:00.000Z',
+    businessNumbering,
   };
 
   apiRouter.use(registerRentalRoutes(deps));
@@ -178,11 +202,44 @@ test('creating a client rental creates a linked planner row with stable ids', as
     assert.equal(response.body.equipmentDetails.serialNumber, 'SN-1');
     assert.equal(response.body.objectName, 'Склад');
     assert.equal(response.body.contractNumber, 'Д-1');
+    assert.equal(response.body.number, 'RNT-26-000001');
     assert.equal(state.gantt_rentals.length, 1);
     assert.equal(state.gantt_rentals[0].rentalId, response.body.id);
     assert.equal(state.gantt_rentals[0].clientId, 'C-1');
     assert.equal(state.gantt_rentals[0].equipmentId, 'EQ-1');
     assert.equal(state.gantt_rentals[0].endDate, '2026-05-20');
+    assert.equal(state.gantt_rentals[0].number, response.body.number);
+  });
+});
+
+test('three Rental creates receive sequential numbers and reject client number mutation', async () => {
+  const { app } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const payloads = [
+      rentalPayload({ equipmentId: 'EQ-1', equipment: ['INV-1'], equipmentInv: 'INV-1' }),
+      rentalPayload({ equipmentId: 'EQ-2', equipment: ['INV-2'], equipmentInv: 'INV-2' }),
+      rentalPayload({ equipmentId: 'EQ-3', equipment: ['INV-3'], equipmentInv: 'INV-3' }),
+    ];
+    const created = [];
+    for (const payload of payloads) {
+      const response = await request(baseUrl, 'POST', '/api/rentals', payload);
+      assert.equal(response.status, 201, JSON.stringify(response.body));
+      created.push(response.body);
+    }
+    assert.deepEqual(created.map(item => item.number), [
+      'RNT-26-000001',
+      'RNT-26-000002',
+      'RNT-26-000003',
+    ]);
+
+    const forgedCreate = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({ number: 'RNT-26-999999' }));
+    assert.equal(forgedCreate.status, 400);
+    assert.equal(forgedCreate.body.code, 'BUSINESS_NUMBER_SERVER_OWNED');
+
+    const forgedPatch = await request(baseUrl, 'PATCH', `/api/rentals/${created[0].id}`, { number: 'RNT-26-999999' });
+    assert.equal(forgedPatch.status, 400);
+    assert.equal(forgedPatch.body.code, 'BUSINESS_NUMBER_SERVER_OWNED');
   });
 });
 
@@ -821,6 +878,13 @@ test('delivery created from rental stores rentalId equipmentId and clientId from
     assert.equal(delivery.body.clientId, 'C-1');
     assert.equal(delivery.body.equipmentId, 'EQ-1');
     assert.equal(delivery.body.equipmentInv, 'INV-1');
+    assert.equal(delivery.body.number, 'DLV-26-000001');
+
+    const forgedPatch = await request(baseUrl, 'PATCH', `/api/deliveries/${delivery.body.id}`, {
+      number: 'DLV-26-999999',
+    });
+    assert.equal(forgedPatch.status, 400);
+    assert.equal(forgedPatch.body.code, 'BUSINESS_NUMBER_SERVER_OWNED');
   });
 });
 

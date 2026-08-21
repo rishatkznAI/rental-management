@@ -86,7 +86,7 @@ const DOCUMENT_TYPE_REGISTRY = {
     requiresCustomer: false,
     allowedRoles: ['Администратор', 'Офис-менеджер', 'Механик'],
     requiredFields: ['mechanicId'],
-    optionalFields: ['serviceCarId', 'serviceTicketId', 'deliveryId'],
+    optionalFields: ['vehicleTripId', 'serviceCarId', 'serviceTicketId', 'deliveryId'],
     defaultStatus: 'draft',
     supportedActions: ['open', 'print', 'send', 'markSigned', 'duplicate', 'delete'],
     purpose: 'Автомобиль, водитель/механик, маршрут, пробег, топливо, цель поездки.',

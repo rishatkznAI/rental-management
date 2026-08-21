@@ -257,7 +257,6 @@ async function seedSmokeOfficeData(api: APIRequestContext, suffix: string): Prom
     clientId: client.id,
     objectId: object.id,
     objectIds: [object.id],
-    number: `${prefix}-Contract`,
     status: 'active',
     startDate: '2026-05-01',
   });

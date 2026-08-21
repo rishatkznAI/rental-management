@@ -378,6 +378,7 @@ function canonicalizeGanttRentalFromClassic(
     : normalizeMatchRef(ganttRental.equipmentId);
   return {
     ...ganttRental,
+    number: rental.number || ganttRental.number,
     rentalId: rental.id,
     sourceRentalId: rental.id,
     originalRentalId: ganttRental.originalRentalId || rental.id,
@@ -417,6 +418,7 @@ function ganttRentalFromClassicRental(rental: Rental, equipmentList: Equipment[]
   const endDate = rental.plannedReturnDate || fields.endDate || rental.startDate || '';
   return {
     id: rental.id,
+    number: rental.number,
     rentalId: rental.id,
     sourceRentalId: rental.id,
     originalRentalId: rental.id,
@@ -1583,17 +1585,6 @@ export default function Rentals() {
       await queryClient.invalidateQueries({ queryKey: EQUIPMENT_KEYS.all });
     } catch {
       showToast('Не удалось сохранить технику', 'error');
-    }
-  }, [queryClient, showToast]);
-
-  const persistPayments = useCallback(async (list: Payment[]) => {
-    setPayments(list);
-    try {
-      await paymentsService.bulkReplace(list);
-      await queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all });
-      await queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt });
-    } catch {
-      showToast('Не удалось сохранить платежи', 'error');
     }
   }, [queryClient, showToast]);
 
@@ -3294,7 +3285,7 @@ export default function Rentals() {
   // ===== New handlers for RentalDrawer =====
 
   // Add payment: creates a Payment record, updates ganttRental.paymentStatus
-  const handleAddPayment = useCallback((rentalId: string, amount: number, paidDate: string, comment: string) => {
+  const handleAddPayment = useCallback(async (rentalId: string, amount: number, paidDate: string, comment: string, invoiceNumber: string) => {
     if (!canCreatePayments) return;
     const selectedCanonicalRentalId = selectedRental ? getDrawerCanonicalRentalId(selectedRental) : '';
     const selectedGanttRental = selectedRental && selectedCanonicalRentalId === rentalId
@@ -3309,22 +3300,31 @@ export default function Rentals() {
       ? selectedRental
       : rental;
 
-    const newPayment: Payment = {
-      id: `PAY-${Date.now()}`,
-      invoiceNumber: `INV-${canonicalRentalId}`,
-      rentalId: canonicalRentalId,
-      clientId: rental.clientId,
-      client: rental.client,
-      amount: getRentalBillingAmount(rental),
-      paidAmount: amount,
-      dueDate: rental.expectedPaymentDate || rental.endDate,
-      paidDate,
-      status: 'paid',
-      comment: comment || undefined,
-    };
+    let createdPayment: Payment;
+    try {
+      createdPayment = await paymentsService.create({
+        invoiceNumber,
+        rentalId: canonicalRentalId,
+        clientId: rental.clientId,
+        client: rental.client,
+        amount: getRentalBillingAmount(rental),
+        paidAmount: amount,
+        dueDate: rental.expectedPaymentDate || rental.endDate,
+        paidDate,
+        status: 'paid',
+        comment: comment || undefined,
+      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.all }),
+        queryClient.invalidateQueries({ queryKey: RENTAL_KEYS.gantt }),
+      ]);
+    } catch {
+      showToast('Не удалось сохранить платёж', 'error');
+      return;
+    }
 
-    const allPayments = [...payments, newPayment];
-    void persistPayments(allPayments);
+    const allPayments = [...payments, createdPayment];
+    setPayments(allPayments);
 
     // Recalculate paymentStatus for this rental
     const rentalPayments = allPayments.filter(p => {
@@ -3354,7 +3354,7 @@ export default function Rentals() {
     if (selectedRental && selectedCanonicalRentalId === canonicalRentalId) {
       setSelectedRental(current => current ? { ...current, paymentStatus: newPaymentStatus } : current);
     }
-  }, [canCreatePayments, ganttRentals, historyAuthor, payments, selectedRental]);
+  }, [canCreatePayments, ganttRentals, historyAuthor, payments, queryClient, selectedRental, showToast]);
 
   // Update UPD signed status + optional date
   const handleUpdChange = useCallback(async (rental: GanttRentalData, updSigned: boolean, updDate?: string) => {
@@ -3752,7 +3752,7 @@ export default function Rentals() {
               {row.rental.client || 'Без клиента'}
             </div>
             <div className="mt-0.5 break-all text-[11px] font-medium text-muted-foreground">
-              {row.sourceRentalId || row.rental.id}
+              {row.classicRental?.number || row.rental.number || row.sourceRentalId || row.rental.id}
             </div>
             {(row.classicRental?.contractId || row.classicRental?.contractNumber) && (
               <div className="mt-0.5 break-words text-[11px] text-muted-foreground">
@@ -5501,7 +5501,7 @@ export default function Rentals() {
 	                                  <div className="flex items-start justify-between gap-2">
 	                                    <div className="min-w-0">
 	                                      <div className="truncate font-semibold text-foreground">{row.rental.client || 'Без клиента'}</div>
-                                      <div className="mt-0.5 truncate text-xs text-muted-foreground">{row.sourceRentalId || row.rental.id}</div>
+                                      <div className="mt-0.5 truncate text-xs text-muted-foreground">{row.classicRental?.number || row.rental.number || row.sourceRentalId || row.rental.id}</div>
                                       {isBrokenRentalLink && (
                                         <span
                                           role={isAdminRole ? 'button' : undefined}
@@ -5703,7 +5703,7 @@ export default function Rentals() {
                           {activeWorkspaceTab === 'returns' ? (
                             <>
                               <td className="px-4 py-3">
-                                <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
+                                <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.classicRental?.number || row.rental.number || row.sourceRentalId || row.rental.id}>{row.classicRental?.number || row.rental.number || row.sourceRentalId || row.rental.id}</div>
                                 {isBrokenRentalLink && (
                                   <span
                                     role={isAdminRole ? 'button' : undefined}
@@ -5755,7 +5755,7 @@ export default function Rentals() {
                           ) : activeWorkspaceTab === 'debt_docs' ? (
                             <>
                               <td className="px-4 py-3">
-                                <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
+                                <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.classicRental?.number || row.rental.number || row.sourceRentalId || row.rental.id}>{row.classicRental?.number || row.rental.number || row.sourceRentalId || row.rental.id}</div>
                                 {isBrokenRentalLink && (
                                   <span
                                     role={isAdminRole ? 'button' : undefined}
@@ -5814,7 +5814,7 @@ export default function Rentals() {
                             <>
                               <td className="px-4 py-3" onClick={event => event.stopPropagation()}><input type="checkbox" aria-label={`Выбрать ${row.rental.id}`} /></td>
                               <td className="px-4 py-3">
-                                <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.sourceRentalId || row.rental.id}>{row.sourceRentalId || row.rental.id}</div>
+                                <div className="max-w-[190px] truncate font-semibold text-foreground" title={row.classicRental?.number || row.rental.number || row.sourceRentalId || row.rental.id}>{row.classicRental?.number || row.rental.number || row.sourceRentalId || row.rental.id}</div>
                                 {isBrokenRentalLink && (
                                   <span
                                     role={isAdminRole ? 'button' : undefined}

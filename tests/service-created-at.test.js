@@ -13,6 +13,8 @@ const express = serverRequire('express');
 const Database = serverRequire('better-sqlite3');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { createBusinessNumberingService } = require('../server/lib/business-numbering.js');
+const { createNumberSequenceAllocator } = require('../server/lib/number-sequences.js');
 const { createServiceCore } = require('../server/lib/service-core.js');
 const { backfillServiceTicketCreatedAt, normalizeServiceTicketForWrite } = require('../server/lib/service-dto.js');
 const { startServer } = require('../server/lib/startup.js');
@@ -50,6 +52,16 @@ function createApp(state = createState()) {
   ];
   let nowIndex = 0;
   const nowIso = () => nowValues[Math.min(nowIndex++, nowValues.length - 1)];
+  const numberingDb = new Database(':memory:');
+  const allocator = createNumberSequenceAllocator({
+    db: numberingDb,
+    nowIso: () => '2026-05-18T10:00:00.000Z',
+  });
+  const businessNumbering = createBusinessNumberingService({
+    allocator,
+    readData,
+    nowIso: () => '2026-05-18T10:00:00.000Z',
+  });
   const serviceCore = createServiceCore({
     readData,
     writeData,
@@ -87,8 +99,9 @@ function createApp(state = createState()) {
     serviceAuditLog: () => {},
     normalizeRecordClientLink: item => item,
     normalizeClientLinks: () => {},
+    businessNumbering,
   }));
-  return { app, state };
+  return { app, state, numberingDb };
 }
 
 async function withServer(app, fn) {
@@ -226,11 +239,35 @@ test('backend creates service ticket createdAt when payload omits it', async () 
     const response = await request(baseUrl, 'POST', '/api/service', baseTicket);
 
     assert.equal(response.status, 201);
+    assert.equal(response.body.number, 'SRV-26-000001');
     assert.equal(response.body.createdAt, '2026-05-18T10:00:00.000Z');
     assert.equal(response.body.updatedAt, '2026-05-18T10:00:00.000Z');
     assert.equal(response.body.createdBy, 'Админ');
     assert.equal(response.body.createdByName, 'Админ');
     assert.equal(state.service[0].createdAt, '2026-05-18T10:00:00.000Z');
+  });
+});
+
+test('backend owns service ticket number on create and update', async () => {
+  const { app, state } = createApp();
+  await withServer(app, async baseUrl => {
+    const forgedCreate = await request(baseUrl, 'POST', '/api/service', {
+      ...baseTicket,
+      number: 'SRV-26-999999',
+    });
+    assert.equal(forgedCreate.status, 400);
+    assert.equal(forgedCreate.body.code, 'BUSINESS_NUMBER_SERVER_OWNED');
+
+    const created = await request(baseUrl, 'POST', '/api/service', baseTicket);
+    assert.equal(created.status, 201);
+    assert.equal(created.body.number, 'SRV-26-000001');
+
+    const forgedPatch = await request(baseUrl, 'PATCH', `/api/service/${created.body.id}`, {
+      number: 'SRV-26-999998',
+    });
+    assert.equal(forgedPatch.status, 400);
+    assert.equal(forgedPatch.body.code, 'BUSINESS_NUMBER_SERVER_OWNED');
+    assert.equal(state.service[0].number, 'SRV-26-000001');
   });
 });
 

@@ -160,13 +160,6 @@ function managerInitials(name: string): string {
   return trimmed.split(/\s+/).map(part => part[0] || '').join('').slice(0, 2).toUpperCase();
 }
 
-function nextDocumentNumber(type: DocumentType, rentalId: string, existingCount: number) {
-  const suffix = String(existingCount + 1).padStart(2, '0');
-  if (type === 'contract') return `DOG-${rentalId}-${suffix}`;
-  if (type === 'act') return `ACT-${rentalId}-${suffix}`;
-  return `INV-${rentalId}-${suffix}`;
-}
-
 function parseMoneyValue(value: unknown): number | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : null;
@@ -798,17 +791,16 @@ export default function RentalDetail() {
 
   useEffect(() => {
     if (!rental) return;
-    const existingCount = documents.filter(doc => documentBelongsToRental(doc, rental.id)).length;
     setDocumentForm({
       type: 'invoice',
-      number: nextDocumentNumber('invoice', rental.id, existingCount),
+      number: '',
       date: new Date().toISOString().slice(0, 10),
       amount: String(rentalBillingAmount),
       status: 'draft',
     });
     const lastInvoiceNumber = documents
       .filter(doc => documentBelongsToRental(doc, rental.id) && doc.type === 'invoice')
-      .sort((a, b) => b.date.localeCompare(a.date))[0]?.number || `INV-${rental.id}`;
+      .sort((a, b) => b.date.localeCompare(a.date))[0]?.number || '';
     const suggestedAmount = Math.max(getRentalBillingAmount(rental) - paidAmount, 0);
     setPaymentForm({
       invoiceNumber: lastInvoiceNumber,
@@ -824,10 +816,6 @@ export default function RentalDetail() {
   const handleCreateDocument = async () => {
     if (!rental || !canCreateDocuments) return;
     const amount = Number(documentForm.amount);
-    if (!documentForm.number.trim()) {
-      setSaveError('Укажите номер документа.');
-      return;
-    }
     if (Number.isNaN(amount) || amount < 0) {
       setSaveError('Сумма документа должна быть числом не меньше 0.');
       return;
@@ -837,7 +825,7 @@ export default function RentalDetail() {
     try {
       await documentsService.create({
         type: documentForm.type,
-        number: documentForm.number.trim(),
+        number: '',
         clientId: rental.clientId,
         client: rental.client,
         date: documentForm.date,
@@ -1056,13 +1044,15 @@ export default function RentalDetail() {
           </Button>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">{rental.id}</h1>
+              <h1 className="text-2xl font-bold sm:text-3xl text-gray-900 dark:text-white">{rental.number || rental.id}</h1>
               {getRentalStatusBadge(isEditing ? formState.status : rental.status)}
               {pendingChangeRequests.length > 0 && (
                 <Badge variant="warning">Есть изменения на согласовании</Badge>
               )}
             </div>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{isEditing ? formState.client : rental.client}</p>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              {isEditing ? formState.client : rental.client}{rental.number ? ` · ID ${rental.id}` : ''}
+            </p>
           </div>
         </div>
         <div className="flex gap-3">
@@ -1599,7 +1589,7 @@ export default function RentalDetail() {
                     setDocumentForm(prev => ({
                       ...prev,
                       type: 'invoice',
-                      number: nextDocumentNumber('invoice', rental.id, relatedDocs.length),
+                      number: '',
                       amount: String(Math.max(remainingBalance, 0)),
                     }));
                     setDocumentDialogOpen(true);
@@ -1615,7 +1605,7 @@ export default function RentalDetail() {
                     setDocumentForm(prev => ({
                       ...prev,
                       type: 'act',
-                      number: nextDocumentNumber('act', rental.id, relatedDocs.length),
+                      number: '',
                       amount: String(rentalBillingAmount),
                     }));
                     setDocumentDialogOpen(true);
@@ -1631,7 +1621,7 @@ export default function RentalDetail() {
                     setDocumentForm(prev => ({
                       ...prev,
                       type: 'contract',
-                      number: nextDocumentNumber('contract', rental.id, relatedDocs.length),
+                      number: '',
                       amount: String(rental.price || 0),
                     }));
                     setDocumentDialogOpen(true);
@@ -2138,7 +2128,7 @@ export default function RentalDetail() {
                   onValueChange={(value) => setDocumentForm(prev => ({
                     ...prev,
                     type: value as DocumentType,
-                    number: nextDocumentNumber(value as DocumentType, rental.id, relatedDocs.length),
+                    number: '',
                   }))}
                 >
                   <SelectTrigger>
@@ -2170,10 +2160,9 @@ export default function RentalDetail() {
             </div>
             <div>
               <p className="mb-1 text-sm text-gray-500 dark:text-gray-400">Номер документа</p>
-              <Input
-                value={documentForm.number}
-                onChange={(e) => setDocumentForm(prev => ({ ...prev, number: e.target.value }))}
-              />
+              <div className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                Номер будет присвоен после создания
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>

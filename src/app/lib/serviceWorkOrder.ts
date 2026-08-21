@@ -80,16 +80,11 @@ export function getServiceWorkOrderTotals(ticket: ServiceTicket, workItems: Repa
   };
 }
 
-export function nextServiceWorkOrderNumber(ticketId: string, existingCount: number) {
-  const suffix = String(existingCount + 1).padStart(2, '0');
-  return `ZN-${ticketId}-${suffix}`;
-}
-
-export function buildServiceWorkOrderDocumentData(ticket: ServiceTicket, equipment: Equipment | undefined, workItems: RepairWorkItem[], partItems: RepairPartItem[], existingCount: number): Omit<Document, 'id'> {
+export function buildServiceWorkOrderDocumentData(ticket: ServiceTicket, equipment: Equipment | undefined, workItems: RepairWorkItem[], partItems: RepairPartItem[]): Omit<Document, 'id'> {
   const { grandTotal } = getServiceWorkOrderTotals(ticket, workItems, partItems);
   return {
     type: 'work_order',
-    number: nextServiceWorkOrderNumber(ticket.id, existingCount),
+    number: '',
     client: ticket.reporterContact || equipment?.currentClient || 'Внутренний сервис',
     date: new Date().toISOString().slice(0, 10),
     amount: grandTotal,

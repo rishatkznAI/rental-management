@@ -140,7 +140,6 @@ function blankVehicle(): CreateVehiclePayload {
 function blankTrip(vehicleId: string, currentMileage: number): CreateTripPayload {
   return {
     vehicleId,
-    sheetNumber: '',
     date: new Date().toISOString().slice(0, 10),
     driver: '',
     driverName: '',
@@ -168,7 +167,6 @@ function blankTrip(vehicleId: string, currentMileage: number): CreateTripPayload
 function tripFormFromTrip(trip: VehicleTrip): CreateTripPayload {
   return {
     vehicleId: trip.vehicleId,
-    sheetNumber: trip.sheetNumber || '',
     date: trip.date,
     driver: trip.driverName || trip.driver || '',
     driverName: trip.driverName || trip.driver || '',
@@ -362,7 +360,7 @@ export default function ServiceVehicleDetail() {
     alert(
       `Путевой лист (заготовка)\n\n` +
       `Машина: ${vehicle?.make} ${vehicle?.model} (${vehicle?.plateNumber})\n` +
-      `Номер: ${trip.sheetNumber || trip.id}\n` +
+      `Номер: ${trip.number || trip.sheetNumber || trip.id}\n` +
       `Дата: ${trip.date}\n` +
       `Водитель: ${trip.driverName || trip.driver}\n` +
       `Маршрут: ${route}\n` +
@@ -778,7 +776,9 @@ export default function ServiceVehicleDetail() {
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <TripField label="Дата выезда" type="date" value={tripForm.date} onChange={v => setTripForm(p => ({ ...p, date: v }))} />
-            <TripField label="Номер путевого листа" value={tripForm.sheetNumber || ''} onChange={v => setTripForm(p => ({ ...p, sheetNumber: v }))} />
+            <div className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              {editingTrip?.number || editingTrip?.sheetNumber || 'Номер будет присвоен после создания'}
+            </div>
             <TripField label="Водитель / механик *" value={tripForm.driverName || tripForm.driver || ''} onChange={v => setTripForm(p => ({ ...p, driver: v, driverName: v }))} />
             <TripField label="ID механика" value={tripForm.mechanicId || ''} onChange={v => setTripForm(p => ({ ...p, mechanicId: v || null }))} />
             <TripField label="Связанная сервисная заявка" value={tripForm.serviceRequestId || tripForm.serviceTicketId || ''} onChange={v => setTripForm(p => ({ ...p, serviceRequestId: v || null, serviceTicketId: v || null }))} />
@@ -912,7 +912,7 @@ function TripRow({
     <TableRow>
       <TableCell>
         <div className="min-w-28">
-          <p className="font-medium text-gray-900 dark:text-white">{trip.sheetNumber || trip.id}</p>
+          <p className="font-medium text-gray-900 dark:text-white">{trip.number || trip.sheetNumber || trip.id}</p>
           <p className="mt-1 flex items-center gap-1 text-xs text-gray-500"><Calendar className="h-3 w-3" />{formatDate(trip.date)}</p>
         </div>
       </TableCell>
@@ -1020,7 +1020,7 @@ function TripCard({
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate font-medium text-gray-900 dark:text-white">{trip.sheetNumber || trip.id}</div>
+          <div className="truncate font-medium text-gray-900 dark:text-white">{trip.number || trip.sheetNumber || trip.id}</div>
           <div className="mt-1 flex items-center gap-1 text-xs text-gray-500">
             <Calendar className="h-3 w-3 shrink-0" />
             {formatDate(trip.date)}

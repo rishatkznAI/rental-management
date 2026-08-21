@@ -211,6 +211,14 @@ const {
 } = require('./lib/service-dto');
 const { normalizeEquipmentStorageRecord } = require('./lib/equipment-classification');
 const {
+  assertBusinessNumberNotProvided,
+  createBusinessNumberingService,
+} = require('./lib/business-numbering');
+const {
+  createNumberSequenceAllocator,
+  resolveServerNumberingScope,
+} = require('./lib/number-sequences');
+const {
   DB_PATH,
   cloneCollectionIfMissing,
   countActiveSessions,
@@ -434,13 +442,23 @@ function logMaxBotRuntimeConfig() {
 
 logMaxBotRuntimeConfig();
 
+const numberSequenceAllocator = createNumberSequenceAllocator({
+  db: ensureDb(),
+  scope: resolveServerNumberingScope(process.env),
+});
+const businessNumbering = createBusinessNumberingService({
+  allocator: numberSequenceAllocator,
+  readData,
+});
+
 function readData(name) {
   return getData(name);
 }
 
 function writeData(name, data) {
+  const numberedEntries = businessNumbering.preparePersistenceEntries([{ name, value: data }]);
   const rentalEntries = canonicalizeRentalPersistenceEntries(
-    [{ name, value: data }],
+    numberedEntries,
     { readData },
   );
   const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
@@ -448,17 +466,20 @@ function writeData(name, data) {
   const warrantyEntries = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
   const finalEntries = canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData });
   assertPaymentAllocationPersistenceEntriesSafe(finalEntries, { readData });
+  businessNumbering.preparePersistenceEntries(finalEntries);
   const [entry] = finalEntries;
   setData(entry.name, entry.value);
 }
 
 function writeDataBatch(entries) {
-  const rentalEntries = canonicalizeRentalPersistenceEntries(entries, { readData });
+  const numberedEntries = businessNumbering.preparePersistenceEntries(entries);
+  const rentalEntries = canonicalizeRentalPersistenceEntries(numberedEntries, { readData });
   const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
   const serviceEntries = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
   const warrantyEntries = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
   const finalEntries = canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData });
   assertPaymentAllocationPersistenceEntriesSafe(finalEntries, { readData });
+  businessNumbering.preparePersistenceEntries(finalEntries);
   setDataBatch(finalEntries);
 }
 
@@ -1485,6 +1506,7 @@ apiRouter.use(registerRentalRoutes({
   canonicalizeRentalRelationForWrite: rental => canonicalizeRentalCounterpartyRelation(rental, { readData }),
   normalizeServiceTicketForWrite,
   botNotifications,
+  businessNumbering,
   nowIso,
 }));
 
@@ -1581,6 +1603,7 @@ registerDeliveryRoutes(apiRouter, {
   analyzeGanttRentalLinks,
   backfillGanttRentalLinks,
   botNotifications,
+  businessNumbering,
 });
 
 const serviceCore = createServiceCore({
@@ -1629,6 +1652,7 @@ registerDocumentRoutes(apiRouter, {
   auditLog,
   normalizeRecordClientLink,
   getDb: ensureDb,
+  businessNumbering,
 });
 
 apiRouter.use(registerEquipmentReadinessRoutes({
@@ -1681,6 +1705,7 @@ apiRouter.use(registerCrudRoutes({
   serviceAuditLog,
   normalizeRecordClientLink,
   normalizeServiceTicketForWrite,
+  businessNumbering,
 }));
 
 registerLeasingRoutes(apiRouter, {
@@ -2420,8 +2445,10 @@ function sendTripError(res, error, fallback = 'Ошибка путевого л�
  */
 apiRouter.post('/vehicle-trips', requireAuth, requireWrite('vehicle_trips'), (req, res) => {
   try {
+    assertBusinessNumberNotProvided(req.body, { fields: ['number', 'sheetNumber'] });
     const trips = readData('vehicle_trips') || [];
     const trip = normalizeVehicleTripPayload(req.body || {}, { req, trips });
+    businessNumbering.assignNewRecord('vehicle_trips', trip);
     trips.push(trip);
     writeData('vehicle_trips', trips);
     updateVehicleMileageFromTrip(trip);
@@ -2456,6 +2483,7 @@ apiRouter.get('/vehicle-trips', requireAuth, requireRead('vehicle_trips'), (req,
  */
 apiRouter.put('/vehicle-trips/:id', requireAuth, requireWrite('vehicle_trips'), (req, res) => {
   try {
+    assertBusinessNumberNotProvided(req.body, { fields: ['number', 'sheetNumber'] });
     const trips = readData('vehicle_trips') || [];
     const idx = trips.findIndex(t => t.id === req.params.id);
     if (idx === -1) return res.status(404).json({ ok: false, error: 'Запись не найдена' });
@@ -2492,8 +2520,10 @@ apiRouter.get('/service-vehicles/:vehicleId/trip-sheets/:id', requireAuth, requi
 
 apiRouter.post('/service-vehicles/:vehicleId/trip-sheets', requireAuth, requireWrite('vehicle_trips'), (req, res) => {
   try {
+    assertBusinessNumberNotProvided(req.body, { fields: ['number', 'sheetNumber'] });
     const trips = readData('vehicle_trips') || [];
     const trip = normalizeVehicleTripPayload({ ...(req.body || {}), vehicleId: req.params.vehicleId }, { req, trips });
+    businessNumbering.assignNewRecord('vehicle_trips', trip);
     trips.push(trip);
     writeData('vehicle_trips', trips);
     updateVehicleMileageFromTrip(trip);
@@ -2506,6 +2536,7 @@ apiRouter.post('/service-vehicles/:vehicleId/trip-sheets', requireAuth, requireW
 
 apiRouter.patch('/service-vehicles/:vehicleId/trip-sheets/:id', requireAuth, requireWrite('vehicle_trips'), (req, res) => {
   try {
+    assertBusinessNumberNotProvided(req.body, { fields: ['number', 'sheetNumber'] });
     const trips = readData('vehicle_trips') || [];
     const idx = trips.findIndex(t => t.vehicleId === req.params.vehicleId && t.id === req.params.id);
     if (idx === -1) return res.status(404).json({ ok: false, error: 'Путевой лист не найден' });

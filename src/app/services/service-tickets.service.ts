@@ -260,6 +260,7 @@ export function normalizeServiceTicketDto(value: unknown, index = 0): ServiceTic
   return {
     ...item,
     id,
+    number: stringValue(item.number) || undefined,
     equipmentId,
     equipment,
     serviceKind,

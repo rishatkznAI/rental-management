@@ -885,7 +885,7 @@ export default function Deliveries() {
   }
 
   async function cancelDelivery(delivery: Delivery) {
-    if (!window.confirm(`Отменить доставку ${delivery.id}?`)) return;
+    if (!window.confirm(`Отменить доставку ${delivery.number || delivery.id}?`)) return;
     await toggleField(delivery, { status: 'cancelled' });
   }
 
@@ -915,7 +915,7 @@ export default function Deliveries() {
       <>
         {mode === 'sheet' ? (
           <SheetHeader>
-            <SheetTitle>Доставка {delivery.id}</SheetTitle>
+            <SheetTitle>Доставка {delivery.number || delivery.id}</SheetTitle>
             <SheetDescription className="space-y-2">
               <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.className}`}>
                 {statusMeta.label}
@@ -935,7 +935,7 @@ export default function Deliveries() {
             >
               ×
             </button>
-            <h2 className="text-xl font-semibold leading-tight text-slate-950 dark:text-white">Доставка {delivery.id}</h2>
+            <h2 className="text-xl font-semibold leading-tight text-slate-950 dark:text-white">Доставка {delivery.number || delivery.id}</h2>
             <div className="space-y-2 text-sm leading-6 text-slate-500 dark:text-gray-400">
               <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${statusMeta.className}`}>
                 {statusMeta.label}
@@ -1361,7 +1361,7 @@ export default function Deliveries() {
               >
                 <div className="flex min-w-0 items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="break-words text-sm font-semibold text-gray-950 dark:text-white">{delivery.id}</div>
+                    <div className="break-words text-sm font-semibold text-gray-950 dark:text-white">{delivery.number || delivery.id}</div>
                     <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDate(delivery.transportDate)} · {delivery.pickupTime || 'время не указано'}</div>
                   </div>
                   <span className={`max-w-[52%] shrink-0 break-words rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_CLASSES[delivery.status] || STATUS_CLASSES.new}`}>{STATUS_LABELS[delivery.status] || delivery.status || 'Новая'}</span>
@@ -1405,7 +1405,7 @@ export default function Deliveries() {
                       }}
                       className="min-w-0 text-left"
                     >
-                      <span className="block break-words text-sm font-semibold text-primary-content">{delivery.id}</span>
+                      <span className="block break-words text-sm font-semibold text-primary-content">{delivery.number || delivery.id}</span>
                       <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
                         {formatDate(delivery.transportDate)} · {delivery.pickupTime || 'время не указано'}
                       </span>
@@ -1637,7 +1637,7 @@ export default function Deliveries() {
                           }}
                           className="text-left font-semibold text-primary-content underline-offset-2 hover:underline"
                         >
-                          {delivery.id}
+                          {delivery.number || delivery.id}
                         </button>
                         <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{formatDate(delivery.transportDate)}</div>
                         {isOverdue && (

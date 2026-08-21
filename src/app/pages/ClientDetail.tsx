@@ -424,7 +424,7 @@ export default function ClientDetail() {
   const [objectForm, setObjectForm] = useState({ name: '', address: '', contactName: '', contactPhone: '', notes: '' });
   const [editingObjectId, setEditingObjectId] = useState('');
   const [editObjectForm, setEditObjectForm] = useState({ name: '', address: '', contactName: '', contactPhone: '', notes: '' });
-  const [contractForm, setContractForm] = useState({ number: '', date: '', title: '', objectId: '', notes: '' });
+  const [contractForm, setContractForm] = useState({ date: '', title: '', objectId: '', notes: '' });
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
   const [contactDraft, setContactDraft] = useState<ClientContactDraft>(emptyContactDraft);
   const [contactErrors, setContactErrors] = useState<Record<string, string>>({});
@@ -1061,14 +1061,13 @@ export default function ClientDetail() {
       counterpartyId: client.counterpartyId,
       clientId: client.id,
       objectId: contractForm.objectId || undefined,
-      number: contractForm.number,
       date: contractForm.date || undefined,
       title: contractForm.title || undefined,
       notes: contractForm.notes || undefined,
       status: 'active',
     }, {
       onSuccess: () => {
-        setContractForm({ number: '', date: '', title: '', objectId: '', notes: '' });
+        setContractForm({ date: '', title: '', objectId: '', notes: '' });
         toast.success('Договор клиента добавлен.');
       },
       onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось сохранить договор.'),
@@ -2019,7 +2018,9 @@ export default function ClientDetail() {
             )}
             {canEdit && (
               <div className="grid gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-2">
-                <Input label="Номер договора" value={contractForm.number} onChange={e => setContractForm({ ...contractForm, number: e.target.value })} />
+                <div className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                  Номер договора будет присвоен после создания
+                </div>
                 <Input label="Дата" type="date" value={contractForm.date} onChange={e => setContractForm({ ...contractForm, date: e.target.value })} />
                 <Input label="Название" value={contractForm.title} onChange={e => setContractForm({ ...contractForm, title: e.target.value })} />
                 <div>
@@ -2036,7 +2037,7 @@ export default function ClientDetail() {
                   </select>
                 </div>
                 <div className="md:col-span-2">
-                  <Button onClick={handleCreateContract} disabled={createClientContract.isPending || !contractForm.number.trim()}>
+                  <Button onClick={handleCreateContract} disabled={createClientContract.isPending}>
                     <Plus className="h-4 w-4" />
                     Добавить договор
                   </Button>

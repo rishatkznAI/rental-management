@@ -27,7 +27,6 @@ async function createDateOnlyFixtures(api: APIRequestContext, suffix: string) {
   const tripResponse = await api.post('/api/vehicle-trips', {
     data: {
       vehicleId: vehicle.id,
-      sheetNumber: `WAY-${suffix}`,
       date: '2026-08-02',
       driver: 'QA Date Only',
       route,

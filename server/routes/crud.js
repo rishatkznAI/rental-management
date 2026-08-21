@@ -100,6 +100,7 @@ const {
   canonicalizeServiceTicketCounterpartyRelation,
   decorateServiceTicketCounterparty,
 } = require('../lib/service-counterparty-relations');
+const { assertBusinessNumberNotProvided } = require('../lib/business-numbering');
 const {
   canonicalizeWarrantyClaimCounterpartyRelation,
   decorateWarrantyClaimCounterparty,
@@ -183,6 +184,7 @@ function registerCrudRoutes(deps) {
     auditLog,
     serviceAuditLog,
     normalizeRecordClientLink,
+    businessNumbering = null,
   } = deps;
 
   const router = express.Router();
@@ -1306,7 +1308,7 @@ function registerCrudRoutes(deps) {
       }),
     },
     service: {
-      searchFields: ['id', 'equipment', 'inventoryNumber', 'serialNumber', 'reason', 'description', 'client', 'clientName', 'assignedMechanicName', 'assignedTo', 'createdByUserName', 'contractNumber'],
+      searchFields: ['id', 'number', 'equipment', 'inventoryNumber', 'serialNumber', 'reason', 'description', 'client', 'clientName', 'assignedMechanicName', 'assignedTo', 'createdByUserName', 'contractNumber'],
       sortFields: {
         createdAt: item => serviceCreatedAtValue(item),
         updatedAt: item => item.updatedAt || serviceCreatedAtValue(item),
@@ -1348,7 +1350,7 @@ function registerCrudRoutes(deps) {
       }),
     },
     warranty_claims: {
-      searchFields: ['id', 'equipmentLabel', 'factoryName', 'factoryCounterpartyId', 'factoryCounterpartyDisplayName', 'counterpartyId', 'counterpartyName', 'customerDisplayName', 'clientName', 'responsibleName', 'description'],
+      searchFields: ['id', 'number', 'equipmentLabel', 'factoryName', 'factoryCounterpartyId', 'factoryCounterpartyDisplayName', 'counterpartyId', 'counterpartyName', 'customerDisplayName', 'clientName', 'responsibleName', 'description'],
       sortFields: {
         createdAt: item => item.createdAt,
         updatedAt: item => item.updatedAt || item.createdAt,
@@ -1780,6 +1782,9 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
       }
       try {
+        if (businessNumbering && ['service', 'warranty_claims', 'client_contracts'].includes(collection)) {
+          assertBusinessNumberNotProvided(req.body);
+        }
         accessControl.assertCanCreateCollection(collection, req.user, req.body);
         let input = accessControl.sanitizeCreateInput(collection, req.body, req.user);
         const idempotencyKey = readInlineRelationIdempotencyKey(req, collection);
@@ -1854,6 +1859,9 @@ function registerCrudRoutes(deps) {
 
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
+        if (collection === 'client_contracts' && businessNumbering) {
+          businessNumbering.assignNewRecord('client_contracts', newItem);
+        }
         newItem = normalizeClientDomainRecord(collection, newItem);
         if (AR_WORKFLOW_COLLECTIONS.has(collection)) {
           newItem = assertCanonicalArWorkflowWrite(collection, newItem, { readData }, {
@@ -1911,6 +1919,9 @@ function registerCrudRoutes(deps) {
         }
         if (collection === 'clients' || collection === 'equipment') {
           newItem = mergeEntityHistory(collection, null, newItem, req.user.userName);
+        }
+        if (['service', 'warranty_claims'].includes(collection) && businessNumbering) {
+          businessNumbering.assignNewRecord(collection, newItem);
         }
         let clientCompatibilityWrite = null;
         if (collection === 'clients') {
@@ -2061,6 +2072,13 @@ function registerCrudRoutes(deps) {
       }
       if (officeManagerCanOnlyCreateRental(req, collection, 'PATCH')) {
         return res.status(403).json({ ok: false, error: 'Недостаточно прав: офис-менеджер может только создавать аренду.' });
+      }
+      if (businessNumbering && ['service', 'warranty_claims', 'client_contracts'].includes(collection)) {
+        try {
+          assertBusinessNumberNotProvided(req.body);
+        } catch (error) {
+          return res.status(error.status || 400).json({ ok: false, code: error.code, error: error.message });
+        }
       }
       let data = [...(readData(collection) || [])];
       const idx = data.findIndex(entry => entry.id === req.params.id);

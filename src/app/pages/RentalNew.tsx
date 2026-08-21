@@ -209,7 +209,6 @@ export default function RentalNew() {
   const [newObjectName, setNewObjectName] = useState('');
   const [newObjectAddress, setNewObjectAddress] = useState('');
   const [showContractCreator, setShowContractCreator] = useState(false);
-  const [newContractNumber, setNewContractNumber] = useState('');
   const [newContractDate, setNewContractDate] = useState(today);
   const [newContractTitle, setNewContractTitle] = useState('');
   const [relationError, setRelationError] = useState('');
@@ -246,7 +245,6 @@ export default function RentalNew() {
     setShowContractCreator(false);
     setNewObjectName('');
     setNewObjectAddress('');
-    setNewContractNumber('');
     setNewContractDate(today);
     setNewContractTitle('');
     setRelationError('');
@@ -604,14 +602,13 @@ export default function RentalNew() {
     if (contractCreateInFlightRef.current) return;
     setRelationError('');
     setRelationRefreshWarning('');
-    if (!selectedClient || !objectId || !newContractNumber.trim()) {
-      setRelationError('Для нового договора выберите объект и укажите номер.');
+    if (!selectedClient || !objectId) {
+      setRelationError('Для нового договора выберите объект.');
       return;
     }
     const payload = {
       clientId: selectId(selectedClient.id),
       objectId,
-      number: newContractNumber.trim(),
       date: newContractDate || undefined,
       title: newContractTitle.trim() || undefined,
       status: 'active' as const,
@@ -645,7 +642,6 @@ export default function RentalNew() {
       rentalContextVersionRef.current += 1;
       const selectedContractContextVersion = contractContextVersionRef.current;
       setContractId(createdContractId);
-      setNewContractNumber('');
       setNewContractDate(today);
       setNewContractTitle('');
       setShowContractCreator(false);
@@ -1023,11 +1019,9 @@ export default function RentalNew() {
                   </Button>
                   {showContractCreator && objectId && (
                     <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
-                      <Input
-                        placeholder="Номер договора"
-                        value={newContractNumber}
-                        onChange={(event) => setNewContractNumber(event.target.value)}
-                      />
+                      <div className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                        Номер договора будет присвоен после создания
+                      </div>
                       <Input
                         type="date"
                         value={newContractDate}

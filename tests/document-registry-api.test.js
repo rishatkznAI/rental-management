@@ -10,6 +10,8 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const express = serverRequire('express');
 const Database = serverRequire('better-sqlite3');
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { createBusinessNumberingService } = require('../server/lib/business-numbering.js');
+const { createNumberSequenceAllocator } = require('../server/lib/number-sequences.js');
 const { registerDocumentRoutes } = require('../server/routes/documents.js');
 const { backfillSqlShadowIndexes } = require('../server/lib/sql-shadow-indexes.js');
 
@@ -43,6 +45,7 @@ function createApp(options = {}) {
     }],
     client_objects: [],
     client_contracts: [],
+    vehicle_trips: [],
     clients: [{
       id: 'C-1',
       counterpartyId: 'CP-1',
@@ -82,6 +85,15 @@ function createApp(options = {}) {
     state[name] = value;
   };
   const accessControl = createAccessControl({ readData });
+  const numberingDb = options.businessNumbering ? new Database(':memory:') : null;
+  const businessNumbering = numberingDb ? createBusinessNumberingService({
+    allocator: createNumberSequenceAllocator({
+      db: numberingDb,
+      nowIso: () => '2026-05-09T10:00:00.000Z',
+    }),
+    readData,
+    nowIso: () => '2026-05-09T10:00:00.000Z',
+  }) : null;
   const requireAuth = (req, res, next) => {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const user = users[token];
@@ -111,9 +123,10 @@ function createApp(options = {}) {
     auditLog: null,
     normalizeRecordClientLink: item => item,
     getDb: options.getDb,
+    businessNumbering,
   });
   app.use('/api', router);
-  return { app, state };
+  return { app, state, numberingDb };
 }
 
 function makeSqlDb(seed) {
@@ -422,6 +435,103 @@ test('documents API creates documents with automatic numbers and separate sequen
     assert.equal(invoice.response.status, 201);
     assert.equal(invoice.json.number, 'INVOICE-2026-0001');
   });
+});
+
+test('SQL-backed document routes enforce sequences, immutability, and master ownership', async () => {
+  const { app, state, numberingDb } = createApp({ businessNumbering: true });
+  state.client_contracts = [{
+    id: 'CC-1',
+    counterpartyId: 'CP-1',
+    clientId: 'C-1',
+    number: 'CTR-26-000001',
+    status: 'active',
+  }];
+  state.vehicle_trips = [{
+    id: 'VT-1',
+    vehicleId: 'CAR-1',
+    mechanicId: 'M-1',
+    number: 'PL-26-000001',
+    sheetNumber: 'PL-26-000001',
+    date: '2026-05-09',
+  }];
+  state.mechanics = [{ id: 'M-1', name: 'Петров' }];
+  state.service_vehicles = [{ id: 'CAR-1', make: 'УАЗ', model: 'Профи', plateNumber: 'А001АА' }];
+
+  await withServer(app, async baseUrl => {
+    const contract = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'rental_contract',
+      contractId: 'CC-1',
+      counterpartyId: 'CP-1',
+      clientId: 'C-1',
+      signerName: 'Иванов Иван',
+      signerPosition: 'директор',
+      signerBasis: 'Устав',
+      date: '2026-05-09',
+    });
+    assert.equal(contract.response.status, 201, JSON.stringify(contract.json));
+    assert.equal(contract.json.number, 'CTR-26-000001');
+
+    const tripTicket = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'trip_ticket',
+      vehicleTripId: 'VT-1',
+      mechanicId: 'M-1',
+      serviceCarId: 'CAR-1',
+      date: '2026-05-09',
+    });
+    assert.equal(tripTicket.response.status, 201, JSON.stringify(tripTicket.json));
+    assert.equal(tripTicket.json.number, 'PL-26-000001');
+
+    const transfer = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'transfer_act_to_client',
+      counterpartyId: 'CP-1',
+      clientId: 'C-1',
+      equipmentId: 'EQ-1',
+      transferDate: '2026-05-09',
+      date: '2026-05-09',
+    });
+    const returned = await request(baseUrl, 'POST', '/api/documents/generate', 'office', {
+      type: 'return_act_from_client',
+      counterpartyId: 'CP-1',
+      clientId: 'C-1',
+      equipmentId: 'EQ-1',
+      returnDate: '2026-05-10',
+      date: '2026-05-10',
+    });
+    assert.equal(transfer.response.status, 201, JSON.stringify(transfer.json));
+    assert.equal(returned.response.status, 201, JSON.stringify(returned.json));
+    assert.equal(transfer.json.number, 'AP-26-000001');
+    assert.equal(returned.json.number, 'AR-26-000001');
+
+    const invoice2025 = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'invoice',
+      counterpartyId: 'CP-1',
+      clientId: 'C-1',
+      client: 'ООО Клиент',
+      date: '2025-12-31',
+      status: 'draft',
+    });
+    assert.equal(invoice2025.response.status, 201, JSON.stringify(invoice2025.json));
+    assert.equal(invoice2025.json.number, 'INV-25-000001');
+
+    const forgedCreate = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'invoice',
+      number: 'INV-26-999999',
+      date: '2026-05-09',
+      status: 'draft',
+    });
+    assert.equal(forgedCreate.response.status, 400);
+    assert.equal(forgedCreate.json.code, 'BUSINESS_NUMBER_SERVER_OWNED');
+
+    const forgedPatch = await request(baseUrl, 'PATCH', `/api/documents/${invoice2025.json.id}`, 'office', {
+      number: 'INV-25-999999',
+    });
+    assert.equal(forgedPatch.response.status, 400);
+    assert.equal(forgedPatch.json.code, 'BUSINESS_NUMBER_SERVER_OWNED');
+  });
+
+  assert.equal(numberingDb.prepare("SELECT COUNT(*) AS count FROM business_numbers WHERE entity_type = 'CLIENT_CONTRACT'").get().count, 0);
+  assert.equal(numberingDb.prepare("SELECT COUNT(*) AS count FROM business_numbers WHERE entity_type = 'VEHICLE_TRIP'").get().count, 0);
+  numberingDb.close();
 });
 
 test('customer Documents accept CP-only identity and reject mismatch, inactive role, and name-only identity', async () => {

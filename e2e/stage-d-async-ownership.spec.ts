@@ -141,9 +141,9 @@ test('late inline object and contract responses never select relations for a new
     return route.abort('failed');
   });
 
-  const contractNumber = `D-${Date.now()}`;
+  const contractTitle = `Stage-D contract ${Date.now()}`;
   await page.getByRole('button', { name: 'Добавить договор' }).click();
-  await page.getByPlaceholder('Номер договора').fill(contractNumber);
+  await page.getByPlaceholder('Название (необязательно)').fill(contractTitle);
   await page.getByRole('button', { name: 'Сохранить договор' }).click();
   await contractStarted.promise;
   await page.getByTestId('rental-client-select').selectOption(setup.clientB.id);
@@ -159,15 +159,15 @@ test('late inline object and contract responses never select relations for a new
   const createdContract = await withAdminApi(async (api) => {
     const response = await api.get('/api/client_contracts');
     expect(response.ok()).toBeTruthy();
-    const contracts = await response.json() as Array<{ id: string; clientId: string; number: string }>;
-    return contracts.find(item => item.clientId === setup.clientA.id && item.number === contractNumber);
+    const contracts = await response.json() as Array<{ id: string; clientId: string; number: string; title?: string }>;
+    return contracts.find(item => item.clientId === setup.clientA.id && item.title === contractTitle);
   });
   expect(createdContract).toBeTruthy();
 
   await page.getByTestId('rental-client-select').selectOption(setup.clientA.id);
   await expect(page.getByTestId('rental-object-select')).toHaveValue(createdObject!.id);
   await page.getByRole('button', { name: 'Добавить договор' }).click();
-  await page.getByPlaceholder('Номер договора').fill(contractNumber);
+  await page.getByPlaceholder('Название (необязательно)').fill(contractTitle);
   const retryContract = page.getByRole('button', { name: 'Сохранить договор' });
   await expect(retryContract).toBeEnabled();
   await retryContract.click();
@@ -179,9 +179,9 @@ test('late inline object and contract responses never select relations for a new
       api.get('/api/client_contracts'),
     ]);
     const objects = await objectsResponse.json() as Array<{ clientId: string; name: string }>;
-    const contracts = await contractsResponse.json() as Array<{ clientId: string; number: string }>;
+    const contracts = await contractsResponse.json() as Array<{ clientId: string; number: string; title?: string }>;
     expect(objects.filter(item => item.clientId === setup.clientA.id && item.name === objectName)).toHaveLength(1);
-    expect(contracts.filter(item => item.clientId === setup.clientA.id && item.number === contractNumber)).toHaveLength(1);
+    expect(contracts.filter(item => item.clientId === setup.clientA.id && item.title === contractTitle)).toHaveLength(1);
   });
   await expect.poll(() => new URL(page.url()).hash).toBe(
     `#/rentals/new?clientId=${encodeURIComponent(setup.clientA.id)}`,

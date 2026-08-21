@@ -70,7 +70,7 @@ interface RentalDrawerProps {
   onDelete: (rental: GanttRentalData) => void;
   onUpdate: (rental: GanttRentalData, data: Partial<GanttRentalData>) => void | Promise<void>;
   onAddComment: (rental: GanttRentalData, text: string) => void;
-  onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string) => void;
+  onAddPayment: (rentalId: string, amount: number, paidDate: string, comment: string, invoiceNumber: string) => void | Promise<void>;
   onEarlyReturn: (rental: GanttRentalData, actualReturnDate: string) => void;
   onUpdChange: (rental: GanttRentalData, updSigned: boolean, updDate?: string) => void;
   onExtended?: (response: RentalExtensionResponse) => void;
@@ -219,6 +219,7 @@ export function RentalDrawer({
   const [payAmount, setPayAmount] = useState('');
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [payComment, setPayComment] = useState('');
+  const [payInvoiceNumber, setPayInvoiceNumber] = useState('');
   const [payError, setPayError] = useState('');
 
   const [showExtend, setShowExtend] = useState(false);
@@ -366,6 +367,14 @@ export function RentalDrawer({
     doc.rentalId,
     doc.rental,
   ].some(value => rentalPaymentIds.has(String(value || '').trim())));
+  const relatedInvoices = relatedDocuments
+    .filter(doc => (doc.documentType || doc.type) === 'invoice')
+    .sort((left, right) => String(right.date || '').localeCompare(String(left.date || '')));
+  const openAddPaymentForm = () => {
+    setPayInvoiceNumber(relatedInvoices[0]?.number || '');
+    setPayError('');
+    setShowAddPayment(true);
+  };
   const todayKey = new Date().toISOString().slice(0, 10);
   const documentControlRental = {
     ...rental,
@@ -616,10 +625,15 @@ export function RentalDrawer({
       setPayError('Укажите дату оплаты');
       return;
     }
+    if (!payInvoiceNumber.trim()) {
+      setPayError('Укажите номер существующего счёта');
+      return;
+    }
     setPayError('');
-    onAddPayment(canonicalRentalId || rental.id, amt, payDate, payComment);
+    void onAddPayment(canonicalRentalId || rental.id, amt, payDate, payComment, payInvoiceNumber.trim());
     setPayAmount('');
     setPayComment('');
+    setPayInvoiceNumber('');
     setPayDate(new Date().toISOString().slice(0, 10));
     setShowAddPayment(false);
   };
@@ -774,7 +788,8 @@ export function RentalDrawer({
               )}
             </div>
             <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500 dark:text-gray-400">
-              <span className="font-mono">{rental.id}</span>
+              <span className="font-mono font-semibold text-slate-700 dark:text-gray-200">{rental.number || rental.id}</span>
+              {rental.number && rental.number !== rental.id ? <span className="font-mono text-xs">ID {rental.id}</span> : null}
               <span>·</span>
               <span className="max-w-full break-words">
                 {rental.equipmentInv} {currentEquipment?.model}
@@ -976,7 +991,7 @@ export function RentalDrawer({
                     </Button>
                   )}
                   {canRegisterPayment && (
-                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" onClick={() => { setActiveTab('payments'); setShowAddPayment(true); }}>
+                    <Button size="sm" variant="secondary" className="justify-start rounded-xl" onClick={() => { setActiveTab('payments'); openAddPaymentForm(); }}>
                       <CreditCard className="h-4 w-4" />
                       Добавить оплату
                     </Button>
@@ -1390,7 +1405,7 @@ export function RentalDrawer({
 
               {canRegisterPayment && !showAddPayment && (
                 <button
-                  onClick={() => setShowAddPayment(true)}
+                  onClick={openAddPaymentForm}
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-medium text-primary-content transition-colors hover:bg-primary/15"
                 >
                   <Plus className="h-4 w-4" />
@@ -1450,6 +1465,21 @@ export function RentalDrawer({
             {canRegisterPayment && showAddPayment && (
               <div className="mt-2 rounded-lg border border-primary/30 bg-primary/10 p-3">
                 <div className="mb-2 text-xs font-medium text-primary-content">Создать платёж по аренде</div>
+                <div className="mb-2">
+                  <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Номер счёта *</label>
+                  <input
+                    type="text"
+                    value={payInvoiceNumber}
+                    onChange={event => setPayInvoiceNumber(event.target.value)}
+                    placeholder="Например, INV-26-000001"
+                    list="rental-payment-invoices"
+                    className="w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white"
+                  />
+                  <datalist id="rental-payment-invoices">
+                    {relatedInvoices.map(invoice => <option key={invoice.id} value={invoice.number} />)}
+                  </datalist>
+                  <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Платёж ссылается на существующий счёт и не получает номер INV.</p>
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs text-gray-600 dark:text-gray-400">Сумма (₽) *</label>
@@ -1577,7 +1607,7 @@ export function RentalDrawer({
                         <div className="mt-2 text-xs text-slate-500 dark:text-gray-400">{delivery.comment}</div>
                       )}
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-gray-400">
-                        <span className="font-mono">{delivery.id}</span>
+                        <span className="font-mono">{delivery.number || delivery.id}</span>
                         {canViewMoney && <span>{formatCurrency(Number(delivery.cost) || 0)}</span>}
                       </div>
                     </div>

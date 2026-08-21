@@ -33,6 +33,7 @@ const {
   itemMatchesSearch,
   wantsPaginatedResponse,
 } = require('../lib/pagination');
+const { assertBusinessNumberNotProvided } = require('../lib/business-numbering');
 
 function registerDeliveryRoutes(router, deps) {
   const {
@@ -53,6 +54,7 @@ function registerDeliveryRoutes(router, deps) {
     accessControl,
     auditLog,
     botNotifications = null,
+    businessNumbering = null,
   } = deps;
   const requiredAccessMethods = ['filterCollectionByScope', 'canAccessEntity', 'assertCanUpdateEntity', 'assertCanDeleteEntity'];
   const missingAccessMethods = !accessControl
@@ -283,6 +285,7 @@ function registerDeliveryRoutes(router, deps) {
     const canUseCurrentCreatorContact = !existing || (existingCreatorName && existingCreatorName === currentCreatorName);
     const next = {
       id: existing?.id || body.id || generateId(idPrefixes.deliveries),
+      number: existing?.number || '',
       type,
       status,
       transportDate,
@@ -1039,6 +1042,7 @@ function registerDeliveryRoutes(router, deps) {
     if (wantsPaginatedResponse(req.query)) {
       let rows = responseItems.filter(item => itemMatchesSearch(item, req.query.search, [
         'id',
+        'number',
         'client',
         'clientName',
         'clientId',
@@ -1119,6 +1123,7 @@ function registerDeliveryRoutes(router, deps) {
 
   router.post('/deliveries', requireAuth, requireWrite('deliveries'), async (req, res) => {
     try {
+      assertBusinessNumberNotProvided(req.body);
       const author = req.user.userName;
       const safeBody = sanitizeDeliveryBody(req.body, null, req);
       let delivery = normalizeDeliveryPayload(enrichDeliveryBodyFromRentalContext(safeBody), null, author, buildDeliveryCreator(req));
@@ -1146,6 +1151,8 @@ function registerDeliveryRoutes(router, deps) {
           carrierUserId: null,
         };
       }
+
+      if (businessNumbering) businessNumbering.assignNewRecord('deliveries', delivery);
 
       const linkedRentalSync = buildLinkedRentalSync(delivery, author);
       delivery = await trySendToCarrier(delivery);
@@ -1181,6 +1188,7 @@ function registerDeliveryRoutes(router, deps) {
 
   router.patch('/deliveries/:id', requireAuth, requireWrite('deliveries'), async (req, res) => {
     try {
+      assertBusinessNumberNotProvided(req.body);
       const deliveries = [...(readData('deliveries') || [])];
       const idx = deliveries.findIndex((item) => item.id === req.params.id);
       if (idx === -1) {

@@ -10,11 +10,11 @@ export type CreateVehiclePayload = Omit<ServiceVehicle,
 export type UpdateVehiclePayload = Partial<CreateVehiclePayload>;
 
 export type CreateTripPayload = Omit<VehicleTrip,
-  'id' | 'distance' | 'distanceKm' | 'fuelConsumption' | 'createdAt' | 'createdBy' | 'updatedAt' | 'updatedBy'
+  'id' | 'number' | 'sheetNumber' | 'distance' | 'distanceKm' | 'fuelConsumption' | 'createdAt' | 'createdBy' | 'updatedAt' | 'updatedBy'
 >;
 
 export type UpdateTripPayload = Partial<Omit<VehicleTrip,
-  'id' | 'vehicleId' | 'distance' | 'distanceKm' | 'fuelConsumption' | 'createdAt' | 'createdBy' | 'updatedAt' | 'updatedBy'
+  'id' | 'number' | 'sheetNumber' | 'vehicleId' | 'distance' | 'distanceKm' | 'fuelConsumption' | 'createdAt' | 'createdBy' | 'updatedAt' | 'updatedBy'
 >>;
 
 // ── Service ───────────────────────────────────────────────────────────────────

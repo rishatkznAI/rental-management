@@ -24,7 +24,7 @@ export const DOCUMENT_TYPE_REGISTRY: Record<string, DocumentRegistryItem> = {
     numberPrefix: 'DA',
     requiresCustomer: true,
     allowedRoles: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде'],
-    requiredFields: ['signerName', 'signerPosition', 'signerBasis'],
+    requiredFields: ['contractId', 'signerName', 'signerPosition', 'signerBasis'],
     optionalFields: [
       'clientLegalName',
       'clientInn',
@@ -108,7 +108,7 @@ export const DOCUMENT_TYPE_REGISTRY: Record<string, DocumentRegistryItem> = {
     numberPrefix: 'PL',
     requiresCustomer: false,
     allowedRoles: ['Администратор', 'Офис-менеджер', 'Механик'],
-    requiredFields: ['mechanicId'],
+    requiredFields: ['vehicleTripId', 'mechanicId'],
     optionalFields: ['serviceCarId', 'serviceTicketId', 'deliveryId'],
     defaultStatus: 'draft',
     supportedActions: ['open', 'print', 'send', 'markSigned', 'duplicate', 'delete'],

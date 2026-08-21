@@ -672,7 +672,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
 
   async function handleDeleteClaim() {
     if (!selectedClaim || !canDelete) return;
-    if (!window.confirm(`Удалить рекламацию ${selectedClaim.id}?`)) return;
+    if (!window.confirm(`Удалить рекламацию ${selectedClaim.number || selectedClaim.id}?`)) return;
 
     try {
       await deleteClaim.mutateAsync(selectedClaim.id);
@@ -1053,7 +1053,7 @@ export function WarrantyClaimsTab({ tickets, canEdit, canDelete, canCreateDocume
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-primary">{selectedClaim.id}</span>
+                        <span className="font-semibold text-primary">{selectedClaim.number || selectedClaim.id}</span>
                         {getManagementStatusBadge(selectedClaim.status)}
                         <Badge variant="default">{getPriorityLabel(selectedClaim.priority)}</Badge>
                       </div>

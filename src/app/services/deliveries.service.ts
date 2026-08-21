@@ -2,7 +2,7 @@ import { api, buildPaginatedQuery, type PaginatedQueryParams, type PaginatedResp
 import { normalizeDeliveriesResponse, normalizeDeliveryRecord } from '../lib/deliveries-view.js';
 import type { Delivery, DeliveryCarrier } from '../types';
 
-export type CreateDeliveryPayload = Omit<Delivery, 'id' | 'createdAt' | 'updatedAt' | 'createdBy' | 'botSentAt' | 'botSendError'>;
+export type CreateDeliveryPayload = Omit<Delivery, 'id' | 'number' | 'createdAt' | 'updatedAt' | 'createdBy' | 'botSentAt' | 'botSendError'>;
 export type UpdateDeliveryPayload = Partial<CreateDeliveryPayload> & {
   status?: Delivery['status'];
   carrierInvoiceReceived?: boolean;

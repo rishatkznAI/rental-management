@@ -1012,46 +1012,51 @@ export default function ServiceDetail({
     setWorkOrderError(null);
 
     try {
-      const existingOrdersCount = documents.filter(
-        (doc) => doc.type === 'work_order' && doc.serviceTicket === ticket.id,
-      ).length;
       const generatedDocument = buildServiceWorkOrderDocumentData(
         ticket,
         currentEquipment,
         repairWorkItems,
         repairPartItems,
-        existingOrdersCount,
       );
-      const nextDocument = relatedWorkOrder
-        ? {
-            ...generatedDocument,
-            number: relatedWorkOrder.number,
-            date: relatedWorkOrder.date,
-            status: relatedWorkOrder.status,
-          }
-        : generatedDocument;
-      const contentHtml = buildServiceWorkOrderHtml({
-        document: nextDocument,
-        ticket,
-        equipment: currentEquipment,
-        workItems: repairWorkItems,
-        partItems: repairPartItems,
-      });
-
+      let printableDocument: Omit<Document, 'id'> | Document;
       if (relatedWorkOrder) {
+        printableDocument = {
+          ...generatedDocument,
+          number: relatedWorkOrder.number,
+          date: relatedWorkOrder.date,
+          status: relatedWorkOrder.status,
+        };
+        const contentHtml = buildServiceWorkOrderHtml({
+          document: printableDocument,
+          ticket,
+          equipment: currentEquipment,
+          workItems: repairWorkItems,
+          partItems: repairPartItems,
+        });
+        const { number: _serverOwnedNumber, ...updateData } = generatedDocument;
         await documentsService.update(relatedWorkOrder.id, {
-          ...nextDocument,
+          ...updateData,
           contentHtml,
         });
+        openPrintableHtml(contentHtml);
       } else {
-        await documentsService.create({
-          ...nextDocument,
-          contentHtml,
+        const created = await documentsService.create({
+          ...generatedDocument,
+          contentHtml: '',
         });
+        printableDocument = created;
+        const contentHtml = buildServiceWorkOrderHtml({
+          document: printableDocument,
+          ticket,
+          equipment: currentEquipment,
+          workItems: repairWorkItems,
+          partItems: repairPartItems,
+        });
+        await documentsService.update(created.id, { contentHtml });
+        openPrintableHtml(contentHtml);
       }
 
       await queryClient.invalidateQueries({ queryKey: DOCUMENT_KEYS.all });
-      openPrintableHtml(contentHtml);
     } catch {
       setWorkOrderError('Не удалось сформировать заказ-наряд. Попробуйте ещё раз.');
     } finally {
@@ -1296,7 +1301,7 @@ export default function ServiceDetail({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-bold uppercase text-gray-500 dark:text-gray-400">Сервисная заявка</span>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{ticket.id}</h1>
+              <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">{ticket.number || ticket.id}</h1>
               <StatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.priority} />
             </div>
@@ -1450,7 +1455,7 @@ export default function ServiceDetail({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-2 sm:grid-cols-2">
-                  <DetailTile label="Номер" value={ticket.id} mono />
+                  <DetailTile label="Номер" value={ticket.number || ticket.id} mono />
                   <DetailTile label="Статус" value={STATUS_LABELS[ticket.status]} />
                   <DetailTile label="Приоритет" value={PRIORITY_LABELS[ticket.priority] ?? ticket.priority} />
                   <DetailTile label="Сценарий" value={serviceScenarioLabel} />
@@ -1519,7 +1524,7 @@ export default function ServiceDetail({
                     )}
                     {relatedDeliveries.slice(0, 2).map(delivery => (
                       <Link key={delivery.id} to={`/deliveries/${delivery.id}`}>
-                        <Button type="button" size="sm" variant="outline" className="w-full sm:w-auto">Доставка {delivery.id}</Button>
+                        <Button type="button" size="sm" variant="outline" className="w-full sm:w-auto">Доставка {delivery.number || delivery.id}</Button>
                       </Link>
                     ))}
                     {relatedWarrantyClaims.slice(0, 2).map(claim => (

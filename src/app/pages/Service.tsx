@@ -2141,7 +2141,7 @@ export default function Service() {
                                   : 'border-gray-200 bg-gray-50 dark:border-white/10 dark:bg-white/[0.04]'
                               }`}
                             >
-                              <div className="font-mono text-xs font-bold text-primary-content">{ticket.id}</div>
+                              <div className="font-mono text-xs font-bold text-primary-content">{ticket.number || ticket.id}</div>
                               <div className="mt-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{getTicketEquipmentTitle(ticket)}</div>
                               <div className="mt-1 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">{ticket.reason || 'Без описания'}</div>
                             </button>
@@ -2210,7 +2210,7 @@ export default function Service() {
                           }`}
                         >
                           <div className="min-w-0 text-left">
-                            <div className="break-all font-mono text-sm font-bold text-primary-content xl:truncate">{ticket.id}</div>
+                            <div className="break-all font-mono text-sm font-bold text-primary-content xl:truncate">{ticket.number || ticket.id}</div>
                             <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                           </div>
                           <div className="flex min-w-0 items-center gap-3 text-left">
@@ -2376,7 +2376,7 @@ export default function Service() {
                         }`}
                       >
                         <div className="min-w-0 text-left">
-                          <div className="break-all font-mono text-sm font-bold text-primary-content lg:truncate">{ticket.id}</div>
+                          <div className="break-all font-mono text-sm font-bold text-primary-content lg:truncate">{ticket.number || ticket.id}</div>
                           <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                         </div>
                         <div className="min-w-0">
@@ -2519,7 +2519,7 @@ export default function Service() {
                     }`}
                   >
                     <div className="min-w-0 text-left">
-                      <div className="break-all font-mono text-sm font-bold text-primary-content lg:truncate">{ticket.id}</div>
+                      <div className="break-all font-mono text-sm font-bold text-primary-content lg:truncate">{ticket.number || ticket.id}</div>
                       <div className="mt-1 text-xs text-gray-400 dark:text-gray-500">{formatTicketDate(ticket.createdAt)}</div>
                     </div>
                     <div className="min-w-0">

@@ -120,7 +120,11 @@ function buildDocumentNumber(setting, sequence) {
 function duplicateKey(doc, fallbackIso) {
   const number = documentNumber(doc);
   if (!number) return '';
-  return `${normalizeDocumentType(doc?.documentType || doc?.type)}:${getDocumentYear(doc, fallbackIso)}:${number.toLowerCase()}`;
+  const type = normalizeDocumentType(doc?.documentType || doc?.type);
+  // These documents display the immutable number of their master business entity.
+  // Multiple stored renderings/versions may therefore legitimately share it.
+  if (type === 'rental_contract' || type === 'trip_ticket') return '';
+  return `${type}:${getDocumentYear(doc, fallbackIso)}:${number.toLowerCase()}`;
 }
 
 function assertDocumentNumberUnique(documents, candidate, { excludeId = '', fallbackIso = new Date().toISOString() } = {}) {

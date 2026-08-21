@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -38,6 +38,12 @@ import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
 import { financeService } from '../services/finance.service';
 import { appendAuditHistory, buildFieldDiffHistory } from '../lib/entity-history';
+import { ClientDetailTabContent } from '../components/clients/ClientDetailTabContent';
+import {
+  CLIENT_DETAIL_TABS,
+  buildClientDetailTabModel,
+  resolveClientDetailTab,
+} from '../lib/clientDetailTabs.js';
 import { buildClientFinancialSnapshots, buildRentalDebtRows } from '../lib/finance';
 import { getRentalBillingAmount } from '../lib/rentalDowntimeFlow.js';
 import { buildClient360Summary } from '../lib/client360.js';
@@ -396,6 +402,7 @@ const RENTAL_STATUS_LABELS: Record<string, { label: string; variant: BadgeVarian
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { can } = usePermissions();
   const { user } = useAuth();
   const canEdit = can('edit', 'clients');
@@ -403,6 +410,27 @@ export default function ClientDetail() {
   const canEditDebt = user?.role === 'Администратор';
   const canCreateRentals = can('create', 'rentals');
   const canViewRentals = can('view', 'rentals');
+  const canViewFinance = can('view', 'finance');
+  const canViewPayments = can('view', 'payments') || canViewFinance;
+  const canViewDocuments = can('view', 'documents');
+  const canCreateDocuments = can('create', 'documents') || can('edit', 'documents');
+  const canViewEquipment = can('view', 'equipment');
+  const requestedTab = searchParams.get('tab');
+  const activeTab = resolveClientDetailTab(requestedTab);
+
+  React.useEffect(() => {
+    if (!requestedTab || requestedTab === activeTab) return;
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', 'overview');
+    setSearchParams(next, { replace: true });
+  }, [activeTab, requestedTab, searchParams, setSearchParams]);
+
+  const selectTab = React.useCallback((tab: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'overview') next.delete('tab');
+    else next.set('tab', tab);
+    setSearchParams(next);
+  }, [searchParams, setSearchParams]);
 
   const { data: fetchedClient } = useClientById(id ?? '');
   const updateClient = useUpdateClient();
@@ -462,9 +490,9 @@ export default function ClientDetail() {
 
   // Related data via react-query
   const { data: rentals = [] } = useRentalsList({ enabled: canViewRentals });
-  const { data: ganttRentals = [] } = useGanttData();
-  const { data: payments = [] } = usePaymentsList();
-  const { data: paymentAllocations = [] } = usePaymentAllocationsList();
+  const { data: ganttRentals = [] } = useGanttData({ enabled: canViewRentals || canViewFinance });
+  const { data: payments = [] } = usePaymentsList({ enabled: canViewPayments });
+  const { data: paymentAllocations = [] } = usePaymentAllocationsList({ enabled: canViewPayments });
   const { data: serviceTickets = [] } = useServiceTicketsList();
   const { data: clientObjectsAll = [] } = useClientObjectsList();
   const { data: clientContractsAll = [] } = useClientContractsList();
@@ -483,7 +511,7 @@ export default function ClientDetail() {
   );
   const activeRentals = clientRentals.filter(r => r.status === 'active' || r.status === 'created');
 
-  const { data: allDocs = [] } = useDocumentsList();
+  const { data: allDocs = [] } = useDocumentsList({ enabled: canViewDocuments });
   const clientObjects = useMemo(
     () => clientObjectsAll.filter(item => client && item.clientId === client.id),
     [client, clientObjectsAll],
@@ -493,6 +521,16 @@ export default function ClientDetail() {
     [client, clientContractsAll],
   );
   const activeClientObjects = clientObjects.filter(item => item.status !== 'archived');
+  const clientTabModel = useMemo(() => buildClientDetailTabModel({
+    client,
+    rentals,
+    ganttRentals,
+    payments,
+    paymentAllocations,
+    documents: allDocs,
+    contracts: clientContractsAll,
+    crmActivities,
+  }), [allDocs, client, clientContractsAll, crmActivities, ganttRentals, paymentAllocations, payments, rentals]);
 
   const clientFinancial = React.useMemo(() => {
     if (!client) return null;
@@ -557,8 +595,6 @@ export default function ClientDetail() {
     }),
     [allDocs, client, ganttRentals, payments, rentalDebtRows, serviceTickets],
   );
-  const canViewFinance = can('view', 'finance');
-  const canViewPayments = can('view', 'payments') || canViewFinance;
   const quickActions = useMemo(
     () => buildClientQuickActions({ client, can, role: user?.role }),
     [can, client, user?.role],
@@ -1255,7 +1291,11 @@ export default function ClientDetail() {
         </div>
       )}
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div
+        className={activeTab === 'overview'
+          ? 'grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]'
+          : 'grid min-w-0 gap-4'}
+      >
         <div className="min-w-0 space-y-4">
           <Card className="overflow-hidden rounded-[24px] border-gray-200/80 bg-white shadow-[0_24px_80px_-56px_rgba(15,23,42,0.65)] dark:border-gray-800 dark:bg-gray-950">
             <CardContent className="p-0">
@@ -1416,37 +1456,57 @@ export default function ClientDetail() {
                 </div>
               </div>
 
-              <div className="flex gap-1 overflow-x-auto border-t border-gray-100 px-5 dark:border-gray-800 sm:px-7">
-                {[
-                  ['Обзор', null],
-                  ['Аренды', clientRentals.length],
-                  ['Платежи', canViewPayments ? client360.payments.total : null],
-                  ['Документы', client360.documents.total],
-                  ['Техника', client360.rentals.active.length],
-                  ['История активности', (client.history || []).length],
-                ].map(([label, count], index) => (
+              <div
+                className="flex gap-1 overflow-x-auto border-t border-gray-100 px-5 dark:border-gray-800 sm:px-7"
+                role="tablist"
+                aria-label="Разделы карточки клиента"
+              >
+                {CLIENT_DETAIL_TABS.map((tab) => {
+                  const count = tab.id === 'overview'
+                    ? null
+                    : clientTabModel.counters[tab.id];
+                  const selected = activeTab === tab.id;
+                  return (
                   <button
-                    key={String(label)}
+                    key={tab.id}
+                    id={`client-tab-${tab.id}`}
                     type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    aria-controls={`client-tabpanel-${tab.id}`}
+                    tabIndex={selected ? 0 : -1}
+                    data-client-tab={tab.id}
+                    onClick={() => selectTab(tab.id)}
                     className={cn(
                       'flex h-12 shrink-0 items-center gap-2 border-b-2 px-3 text-sm font-medium transition-colors',
-                      index === 0
+                      selected
                         ? 'border-primary text-primary-content'
                         : 'border-transparent text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white',
                     )}
                   >
-                    {label}
+                    {tab.label}
                     {typeof count === 'number' && (
                       <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                         {count}
                       </span>
                     )}
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
 
+          {activeTab === 'overview' ? (
+          <>
+          <section
+            id="client-tabpanel-overview"
+            role="tabpanel"
+            aria-labelledby="client-tab-overview"
+            tabIndex={0}
+            data-client-tab-panel="overview"
+            className="space-y-4"
+          >
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
             <Card className={editing ? 'border-primary/30 bg-primary/5 dark:bg-primary/10' : undefined}>
               <CardHeader className={profileCardHeaderClassName}>
@@ -1719,8 +1779,26 @@ export default function ClientDetail() {
               </CardContent>
             </Card>
           </div>
+          </section>
+          </>
+          ) : (
+            <ClientDetailTabContent
+              activeTab={activeTab}
+              model={clientTabModel}
+              client={client}
+              displayedDebt={displayedDebt}
+              canCreateRentals={canCreateRentals}
+              canViewRentals={canViewRentals}
+              canViewPayments={canViewPayments}
+              canViewFinance={canViewFinance}
+              canViewDocuments={canViewDocuments}
+              canCreateDocuments={canCreateDocuments}
+              canViewEquipment={canViewEquipment}
+            />
+          )}
         </div>
 
+        {activeTab === 'overview' && (
         <div className="min-w-0 space-y-4">
           <Card>
             <CardHeader className={profileRailHeaderClassName}>
@@ -1896,8 +1974,11 @@ export default function ClientDetail() {
             </Card>
           )}
         </div>
+        )}
       </div>
 
+      {activeTab === 'overview' && (
+      <>
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardHeader>
@@ -2844,6 +2925,8 @@ export default function ClientDetail() {
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
     <Dialog open={openingArDialogOpen} onOpenChange={setOpeningArDialogOpen}>
       <DialogContent className="w-[calc(100vw-2rem)] max-w-xl rounded-2xl bg-white p-5 dark:bg-gray-950 sm:p-6">

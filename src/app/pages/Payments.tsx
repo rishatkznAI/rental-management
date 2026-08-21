@@ -13,6 +13,7 @@ import {
   useCreatePayment,
   useCreatePaymentAllocation,
   useDeletePaymentAllocation,
+  usePaymentById,
   usePaymentAllocationsList,
   usePaymentsList,
   usePaginatedPayments,
@@ -1044,6 +1045,14 @@ export default function Payments() {
   const paymentsHeadingRef = React.useRef<HTMLHeadingElement>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedPaymentId, setSelectedPaymentId] = useState('');
+  const requestedPaymentId = text(searchParams.get('paymentId'));
+  const { data: requestedPayment } = usePaymentById(requestedPaymentId);
+  const openedRequestedPaymentRef = React.useRef('');
+  React.useEffect(() => {
+    if (!requestedPaymentId || !requestedPayment || openedRequestedPaymentRef.current === requestedPaymentId) return;
+    openedRequestedPaymentRef.current = requestedPaymentId;
+    setSelectedPaymentId(requestedPaymentId);
+  }, [requestedPayment, requestedPaymentId]);
   const { data: documents = [] } = useDocumentsList({
     enabled: showAddModal || Boolean(selectedPaymentId),
   });
@@ -1128,8 +1137,9 @@ export default function Payments() {
   const forecastAmount = receivablesQuery.data?.summary?.totalDebt ?? totalPending + totalOverdue;
   const rentalsById = useMemo(() => new Map((ganttRentals as GanttRentalData[]).map(rental => [rental.id, rental])), [ganttRentals]);
   const selectedPayment = useMemo(
-    () => paymentList.find(payment => payment.id === selectedPaymentId),
-    [paymentList, selectedPaymentId],
+    () => paymentList.find(payment => payment.id === selectedPaymentId)
+      || (requestedPayment?.id === selectedPaymentId ? requestedPayment : undefined),
+    [paymentList, requestedPayment, selectedPaymentId],
   );
   const relatedDocuments = useMemo(() => {
     if (!selectedPayment) return [];

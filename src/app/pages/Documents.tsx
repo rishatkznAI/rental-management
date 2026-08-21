@@ -52,6 +52,7 @@ import {
   useAssignDocumentNumber,
   useCreateDocument,
   useDeleteDocument,
+  useDocumentById,
   useDocumentGanttReferences,
   useDocumentReferences,
   useDuplicateDocument,
@@ -885,6 +886,14 @@ export default function Documents() {
   const [selectedMechanicId, setSelectedMechanicId] = React.useState<string>('');
   const [mechanicDocuments, setMechanicDocuments] = React.useState<MechanicDocument[]>([]);
   const [selectedDocument, setSelectedDocument] = React.useState<Doc | null>(null);
+  const requestedDocumentId = String(searchParams.get('documentId') || '').trim();
+  const { data: requestedDocument } = useDocumentById(requestedDocumentId);
+  const openedRequestedDocumentRef = React.useRef('');
+  React.useEffect(() => {
+    if (!requestedDocumentId || !requestedDocument || openedRequestedDocumentRef.current === requestedDocumentId) return;
+    openedRequestedDocumentRef.current = requestedDocumentId;
+    setSelectedDocument(requestedDocument as Doc);
+  }, [requestedDocument, requestedDocumentId]);
   const [sortKey, setSortKey] = React.useState<'date' | 'number' | 'client' | 'status' | 'createdAt'>('date');
   const [createContractKind, setCreateContractKind] = React.useState<DocumentContractKind>('rental');
   const [contractForm, setContractForm] = React.useState<ContractFormState>({

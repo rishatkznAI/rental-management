@@ -15,6 +15,7 @@ on:
       - 'package-lock.json'
       - 'scripts/vite-build.mjs'
       - '.github/workflows/deploy.yml'
+      - 'scripts/release-classifier.mjs'
       - 'scripts/release-preflight.mjs'
       - 'scripts/frontend-build-marker.mjs'
       - 'scripts/backend-release-marker.mjs'
@@ -28,6 +29,7 @@ on:
       - 'e2e/production-smoke.spec.ts'
       - 'e2e/production-ui-selector-smoke.spec.ts'
       - 'tests/release-preflight.test.js'
+      - 'tests/release-classifier.test.js'
       - 'tests/release-smoke-conservation.test.js'
       - 'docs/*release*.md'
       - 'docs/**/*release*.md'
@@ -67,6 +69,7 @@ jobs:
     outputs:
       release_type: ${{ steps.classify.outputs.release_type }}
       changed_files: ${{ steps.classify.outputs.changed_files }}
+      requires_backend: ${{ steps.classify.outputs.requires_backend }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -92,13 +95,13 @@ jobs:
             fi
           fi
 
-          changed_files="$(IFS=,; echo "${files[*]}")"
-          echo "changed_files=$changed_files" >> "$GITHUB_OUTPUT"
-
           requested_release_type="${{ inputs.release_type || '' }}"
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             release_type="${requested_release_type:-full-stack}"
+            changed_files="$(IFS=,; echo "${files[*]}")"
             echo "release_type=$release_type" >> "$GITHUB_OUTPUT"
+            echo "changed_files=$changed_files" >> "$GITHUB_OUTPUT"
+            echo "requires_backend=$([[ "$release_type" == "backend" || "$release_type" == "full-stack" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
             {
               echo "### Release classification"
               echo
@@ -110,66 +113,13 @@ jobs:
             exit 0
           fi
 
-          frontend_allowed='^(src/|public/|tests/.*\.test\.js$|docs/.*\.md$|index\.html$|vite\.config\.[^/]+$|postcss\.config\.[^/]+$|tsconfig[^/]*\.json$|package\.json$|package-lock\.json$|scripts/vite-build\.mjs$)'
-          deploy_tooling_allowed='^(\.github/workflows/(deploy|.*smoke)\.yml|scripts/release-preflight\.mjs|scripts/frontend-build-marker\.mjs|scripts/backend-release-marker\.mjs|scripts/finance-smoke-equipment-discovery\.mjs|e2e/helpers/(api|auth|releaseSmoke)\.ts|e2e/(clean-production-zero-state-audit|dashboard-layout|stage-ui-a)\.spec\.ts|e2e/.*smoke\.spec\.ts|e2e/auth-login\.spec\.ts|e2e/sidebar-navigation\.spec\.ts|tests/.*\.test\.js|docs/.*(release|deploy|smoke|preflight).*\.md)$'
-          release_critical='^((server|backend|api|routes|lib|db|storage|migrations)/|server/data/|.*(^|/)(app\.sqlite|.*\.sqlite3?|.*\.db)$|.*(^|/)(railway\.json|railway\.toml|nixpacks\.toml|Procfile|Dockerfile(\.[^/]*)?|docker-compose\.ya?ml|render\.ya?ml|fly\.toml)$|\.railway/|.*(^|/)\.env($|[.-])|.*(^|/)[^/]*(secret|token|credential)[^/]*($|\.)|(config|configs)/|(server|api|backend)\.(config|env)\.)'
-
-          has_frontend_runtime=0
-          has_deploy_tooling=0
-          blocked=()
-
-          for file in "${files[@]}"; do
-            if [[ "$file" =~ ^docs/pr-assets/dashboard-dark-theme/.*\.png$ && ! -e "$file" ]]; then
-              continue
-            fi
-            if [[ "$file" =~ $release_critical ]]; then
-              blocked+=("$file")
-              continue
-            fi
-            if [[ "$file" =~ $deploy_tooling_allowed ]]; then
-              has_deploy_tooling=1
-              continue
-            fi
-            if [[ "$file" =~ $frontend_allowed ]]; then
-              [[ "$file" =~ ^(src/|public/|index\.html$|vite\.config\.|postcss\.config\.|tsconfig|package\.json$|package-lock\.json$|scripts/vite-build\.mjs$) ]] && has_frontend_runtime=1
-              continue
-            fi
-            blocked+=("$file")
-          done
-
-          if (( ${#blocked[@]} > 0 )); then
-            {
-              echo "### Production deploy blocked"
-              echo
-              echo "Automatic GitHub Pages deploy did not run because this push changed backend or deploy-critical files."
-              echo "Run the appropriate \`backend\` or \`full-stack\` release after the backend deployment is verified."
-              echo
-              echo "Blocked files:"
-              printf -- "- \`%s\`\n" "${blocked[@]}"
-            } >> "$GITHUB_STEP_SUMMARY"
-            printf 'Backend/deploy-critical files changed:\n'
-            printf ' - %s\n' "${blocked[@]}"
-            exit 1
-          fi
-
-          if (( has_deploy_tooling == 1 && has_frontend_runtime == 1 )); then
-            release_type="frontend-deploy-tooling"
-          elif (( has_deploy_tooling == 1 )); then
-            release_type="deploy-tooling"
-          else
-            release_type="frontend-only"
-          fi
-
-          echo "release_type=$release_type" >> "$GITHUB_OUTPUT"
-          {
-            echo "### Release classification"
-            echo
-            echo "- event: push"
-            echo "- release_type: \`$release_type\`"
-            echo "- expected commit: \`${GITHUB_SHA}\`"
-            echo "- changed files:"
-            printf '  - `%s`\n' "${files[@]}"
-          } >> "$GITHUB_STEP_SUMMARY"
+          changed_files_file="${RUNNER_TEMP}/release-classifier-files.txt"
+          printf '%s\n' "${files[@]}" > "$changed_files_file"
+          node scripts/release-classifier.mjs \
+            --changed-files-file "$changed_files_file" \
+            --github-output "$GITHUB_OUTPUT" \
+            --github-summary "$GITHUB_STEP_SUMMARY" \
+            --expected-commit "$GITHUB_SHA"
 
   basic-ci:
     name: Basic CI

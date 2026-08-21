@@ -76,8 +76,8 @@ test('release preflight allows frontend-only safe file scope and reports backend
     'package.json',
     'package-lock.json',
     'scripts/vite-build.mjs',
-    'tests/dashboard-overdue-status.test.js',
-    'docs/release-notes.md',
+    'e2e/client-detail-tabs.spec.ts',
+    'docs/product-notes.md',
   ];
 
   const scope = assertFrontendOnlyReleaseScope({ releaseType: 'frontend-only', changedFiles });
@@ -216,20 +216,22 @@ test('release preflight accepts clean-production zero-state coverage as frontend
   assert.deepEqual(classified.blockedFiles, []);
 });
 
-test('release preflight allows dashboard e2e coverage for frontend-deploy-tooling only', () => {
+test('release preflight keeps ordinary dashboard e2e coverage in frontend-only scope', () => {
   const changedFiles = [
     'e2e/dashboard-layout.spec.ts',
     'e2e/stage-ui-a.spec.ts',
     'src/app/pages/Dashboard.tsx',
   ];
 
-  const scope = assertFrontendDeployToolingReleaseScope({ releaseType: 'frontend-deploy-tooling', changedFiles });
+  const scope = assertFrontendOnlyReleaseScope({ releaseType: 'frontend-only', changedFiles });
   assert.equal(scope.checked, true);
-  assert.deepEqual(scope.disallowedChangedFiles, []);
+  assert.deepEqual(scope.unsafeChangedFiles, []);
 
   const classified = classifyReleaseChangedFiles(changedFiles);
   assert.equal(classified.allowed, true);
-  assert.equal(classified.releaseType, 'frontend-deploy-tooling');
+  assert.equal(classified.releaseType, 'frontend-only');
+  assert.equal(classified.hasFrontendTests, true);
+  assert.equal(classified.requiresBackendDeploy, false);
   assert.deepEqual(classified.blockedFiles, []);
 });
 
@@ -331,7 +333,8 @@ test('release classifier does not treat backend workflows as deploy-tooling', ()
   const result = classifyReleaseChangedFiles(['.github/workflows/backend-deploy.yml']);
 
   assert.equal(result.allowed, false);
-  assert.equal(result.releaseType, '');
+  assert.equal(result.releaseType, 'unknown');
+  assert.equal(result.failClosed, true);
   assert.deepEqual(result.blockedFiles, ['.github/workflows/backend-deploy.yml']);
 });
 
@@ -384,7 +387,8 @@ test('release classifier blocks frontend runtime with deploy tooling and backend
   ]);
 
   assert.equal(result.allowed, false);
-  assert.equal(result.releaseType, '');
+  assert.equal(result.releaseType, 'full-stack');
+  assert.equal(result.requiresBackendDeploy, true);
   assert.deepEqual(result.blockedFiles, ['server/server.js']);
 });
 
@@ -427,6 +431,16 @@ test('release preflight blocks frontend-only when non-build scripts changed', ()
       changedFiles: ['scripts/backup-sqlite.cjs'],
     }),
     /release_type=frontend-only is not allowed because backend\/deploy-critical files changed: scripts\/backup-sqlite\.cjs/,
+  );
+});
+
+test('release preflight fails closed for an unknown frontend-only path', () => {
+  assert.throws(
+    () => assertFrontendOnlyReleaseScope({
+      releaseType: 'frontend-only',
+      changedFiles: ['src/app/pages/Dashboard.tsx', 'platform/runtime.policy'],
+    }),
+    /release_type=frontend-only is not allowed because backend\/deploy-critical files changed: platform\/runtime\.policy/,
   );
 });
 

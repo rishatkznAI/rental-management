@@ -5,7 +5,7 @@ import { findUnsafePayloadViolations } from '../scripts/release-targeted-smoke.m
 const EXPECTED_EXECUTION_LABELS = new Set(['Открыто', 'В работе', 'Отложено', 'Решено', 'Игнорировано']);
 const SAFE_ASSIGNEE_FIELDS = ['userId', 'name', 'role', 'active'] as const;
 const UNSAFE_ASSIGNEE_FIELDS = ['email', 'password', 'passwordHash', 'token', 'secret'] as const;
-const UNSAFE_VISIBLE_TEXT_PATTERN = /\bundefined\b|\bnull\b|\[object Object\]/i;
+const UNSAFE_VISIBLE_TEXT_PATTERN = /\bNaN\b|\bundefined\b|\bnull\b|\[object Object\]/i;
 const CRM_ACTIVITY_CONTROL_SELECTOR = [
   '[data-testid="crm-add-call"]',
   '[data-testid="crm-add-visit"]',
@@ -153,6 +153,29 @@ async function expectHealthyMain(page: Page, label: string) {
   expect((await main.innerText()).trim().length, `${label}: main should not be blank`).toBeGreaterThan(10);
 }
 
+function finiteLocalizedNumber(text: string) {
+  const token = text.match(/-?\d(?:[\d\u00a0\u202f ]*\d)?(?:[.,]\d+)?/)?.[0] || '';
+  if (!token) return null;
+  const value = Number(token.replace(/[\u00a0\u202f ]/g, '').replace(',', '.'));
+  return Number.isFinite(value) ? value : null;
+}
+
+async function expectValidKpiValue(page: Page, testId: string, label: string) {
+  const locator = page.getByTestId(testId);
+  await expect(locator, `${label}: KPI value should be visible`).toBeVisible();
+  const text = (await locator.innerText()).trim();
+  expect(text, `${label}: KPI value should not expose an invalid placeholder`).not.toMatch(UNSAFE_VISIBLE_TEXT_PATTERN);
+  expect(finiteLocalizedNumber(text), `${label}: KPI value should contain a finite localized number; received "${text}"`).not.toBeNull();
+}
+
+async function expectValidKpiCaption(page: Page, testId: string, label: string) {
+  const locator = page.getByTestId(testId);
+  await expect(locator, `${label}: KPI caption should be visible`).toBeVisible();
+  const text = (await locator.innerText()).trim();
+  expect(text.length, `${label}: KPI caption should not be blank`).toBeGreaterThan(0);
+  expect(text, `${label}: KPI caption should not expose an invalid placeholder`).not.toMatch(UNSAFE_VISIBLE_TEXT_PATTERN);
+}
+
 async function expectCrmHiddenFromNavigation(page: Page) {
   const nav = page.getByRole('navigation').first();
   await expect(nav, 'main navigation should be visible before CRM hidden checks').toBeVisible();
@@ -189,12 +212,23 @@ async function expectCrmDisabledUiHidden(
   await page.goto(productionAppUrl(frontendUrl, '/clients'), { waitUntil: 'domcontentloaded' });
   await expectHealthyMain(page, 'clients');
   await expectNoCrmActivityControls(page.locator('main'), 'clients list');
-  await expect(page.getByTestId('clients-kpi-total-value')).toBeVisible();
-  const clientCount = Number(await page.getByTestId('clients-kpi-total-value').innerText());
-  if (clientCount === 0) {
-    await expect(page.getByTestId('clients-kpi-total-caption')).toHaveText('0 за месяц');
-    await expect(page.getByTestId('clients-kpi-turnover-caption')).toHaveText('По текущим данным');
-    await expect(page.getByTestId('clients-kpi-new-caption')).toHaveText('0 за неделю');
+  for (const [testId, label] of [
+    ['clients-kpi-total-value', 'total clients'],
+    ['clients-kpi-rental-value', 'rental clients'],
+    ['clients-kpi-sale-value', 'sale clients'],
+    ['clients-kpi-turnover-value', 'client turnover'],
+    ['clients-kpi-new-value', 'new clients'],
+  ] as const) {
+    await expectValidKpiValue(page, testId, label);
+  }
+  for (const [testId, label] of [
+    ['clients-kpi-total-caption', 'total clients'],
+    ['clients-kpi-rental-caption', 'rental clients'],
+    ['clients-kpi-sale-caption', 'sale clients'],
+    ['clients-kpi-turnover-caption', 'client turnover'],
+    ['clients-kpi-new-caption', 'new clients'],
+  ] as const) {
+    await expectValidKpiCaption(page, testId, label);
   }
   await expect(page.getByText(/\+(?:12 за месяц|8% за месяц|3 за неделю)/)).toHaveCount(0);
 

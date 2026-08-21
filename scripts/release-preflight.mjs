@@ -3,6 +3,23 @@
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import {
+  classifyReleaseChangedFiles,
+  classifyReleasePath,
+  isDeployToolingAllowedChangedFile,
+  isFrontendDeployToolingAllowedChangedFile,
+  isFrontendRuntimeChangedFile,
+  isReleaseCriticalChangedFile,
+  normalizeChangedFilePath,
+} from './release-classifier.mjs';
+
+export {
+  classifyReleaseChangedFiles,
+  isDeployToolingAllowedChangedFile,
+  isFrontendDeployToolingAllowedChangedFile,
+  isFrontendRuntimeChangedFile,
+  isReleaseCriticalChangedFile,
+} from './release-classifier.mjs';
 
 const ENVIRONMENTS = new Set(['staging', 'production']);
 const RELEASE_TYPE_OPTIONS = ['frontend-only', 'backend', 'full-stack', 'deploy-tooling', 'frontend-deploy-tooling'];
@@ -13,86 +30,6 @@ const FRONTEND_RELEASE_TYPES = new Set(['frontend-only', 'deploy-tooling', 'fron
 const MIN_GIT_SHA_LENGTH = 7;
 const MAX_GIT_SHA_LENGTH = 40;
 const DEFAULT_RELEASE_PROBE_TIMEOUT_MS = 15_000;
-const FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS = [
-  /^(server|backend|api)(\/|$)/,
-  /^(routes|lib|db|storage|migrations)(\/|$)/,
-  /^scripts\/(?!vite-build\.mjs$)/,
-  /^\.github\/workflows\//,
-  /^e2e\/helpers\/api\.ts$/,
-  /^e2e\/helpers\/auth\.ts$/,
-  /^e2e\/helpers\/releaseSmoke\.ts$/,
-  /^e2e\/clean-production-zero-state-audit\.spec\.ts$/,
-  /^e2e\/.*smoke\.spec\.ts$/,
-  /^e2e\/auth-login\.spec\.ts$/,
-  /^e2e\/sidebar-navigation\.spec\.ts$/,
-  /^playwright\.production\.config\.ts$/,
-  /^(?!package\.json$)(^|\/)package\.json$/,
-  /^(?!package-lock\.json$)(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.lock)$/,
-  /(^|\/)(railway\.json|railway\.toml|nixpacks\.toml|Procfile|Dockerfile(?:\.[^/]*)?|docker-compose\.ya?ml|render\.ya?ml|fly\.toml)$/,
-  /^\.railway(\/|$)/,
-  /(^|\/)\.env(?:$|[.-])/,
-  /^(config|configs)(\/|$)/,
-  /^(server|api|backend)\.(config|env)\./,
-];
-const DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
-  /^\.github\/workflows\/(?:deploy|.*smoke)\.yml$/,
-  /^scripts\/release-preflight\.mjs$/,
-  /^scripts\/frontend-build-marker\.mjs$/,
-  /^scripts\/backend-release-marker\.mjs$/,
-  /^scripts\/finance-smoke-equipment-discovery\.mjs$/,
-  /^e2e\/helpers\/api\.ts$/,
-  /^e2e\/helpers\/auth\.ts$/,
-  /^e2e\/helpers\/releaseSmoke\.ts$/,
-  /^e2e\/clean-production-zero-state-audit\.spec\.ts$/,
-  /^e2e\/.*smoke\.spec\.ts$/,
-  /^e2e\/auth-login\.spec\.ts$/,
-  /^e2e\/sidebar-navigation\.spec\.ts$/,
-  /^tests\/.*\.test\.js$/,
-  /^docs\/(?:release-runbook|deploy-checklist|production-smoke-checklist)\.md$/,
-  /^docs\/.*(?:release|deploy|smoke|preflight).*\.md$/,
-];
-const FRONTEND_DEPLOY_TOOLING_COVERAGE_FILE_PATTERNS = [
-  /^e2e\/dashboard-layout\.spec\.ts$/,
-  /^e2e\/stage-ui-a\.spec\.ts$/,
-];
-const FRONTEND_DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS = [
-  /^src\//,
-  /^public\//,
-  /^tests\/.*\.test\.js$/,
-  /^docs\/.*\.md$/,
-  /^index\.html$/,
-  /^vite\.config\.[^/]+$/,
-  /^postcss\.config\.[^/]+$/,
-  /^tsconfig[^/]*\.json$/,
-  /^package\.json$/,
-  /^package-lock\.json$/,
-  /^scripts\/vite-build\.mjs$/,
-  ...FRONTEND_DEPLOY_TOOLING_COVERAGE_FILE_PATTERNS,
-  ...DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS,
-];
-const FRONTEND_RUNTIME_FILE_PATTERNS = [
-  /^src\//,
-  /^public\//,
-  /^index\.html$/,
-  /^vite\.config\.[^/]+$/,
-  /^postcss\.config\.[^/]+$/,
-  /^tsconfig[^/]*\.json$/,
-  /^package\.json$/,
-  /^package-lock\.json$/,
-  /^scripts\/vite-build\.mjs$/,
-];
-const RELEASE_CRITICAL_FILE_PATTERNS = [
-  /^(server|backend|api)(\/|$)/,
-  /^(routes|lib|db|storage|migrations)(\/|$)/,
-  /^server\/data\//,
-  /(^|\/)(app\.sqlite|.*\.sqlite(?:3)?|.*\.db)$/,
-  /(^|\/)(railway\.json|railway\.toml|nixpacks\.toml|Procfile|Dockerfile(?:\.[^/]*)?|docker-compose\.ya?ml|render\.ya?ml|fly\.toml)$/,
-  /^\.railway(\/|$)/,
-  /(^|\/)\.env(?:$|[.-])/,
-  /(^|\/)(?:[^/]*secret[^/]*|[^/]*token[^/]*|[^/]*credential[^/]*)(?:\.[^/]*)?$/i,
-  /^(config|configs)(\/|$)/,
-  /^(server|api|backend)\.(config|env)\./,
-];
 
 export function normalizeReleaseType(value = '') {
   return String(value || '').trim().toLowerCase() || 'full-stack';
@@ -463,14 +400,6 @@ export function backendDriftMessage({ expectedCommit = '', backendCommit = '', r
   return `Backend commit differs from frontend commit: expected for ${backendDriftReleaseType(releaseType)} release. expected=${shortCommit(expectedCommit)} actual=${backendCommit}`;
 }
 
-function normalizeChangedFilePath(value = '') {
-  return String(value || '')
-    .trim()
-    .replace(/^["']|["']$/g, '')
-    .replace(/\\/g, '/')
-    .replace(/^\.\//, '');
-}
-
 export function parseChangedFiles(value = '') {
   return unique(String(value || '').split(/\r?\n|,/).map(normalizeChangedFilePath));
 }
@@ -535,8 +464,9 @@ export function resolveChangedFiles(args = {}) {
 
 export function isFrontendOnlyUnsafeChangedFile(file = '') {
   const normalized = normalizeChangedFilePath(file);
+  const kind = classifyReleasePath(normalized).kind;
   if (!normalized) return false;
-  return FRONTEND_ONLY_FORBIDDEN_FILE_PATTERNS.some(pattern => pattern.test(normalized));
+  return !['frontend-runtime', 'frontend-test', 'documentation'].includes(kind);
 }
 
 export function frontendOnlyUnsafeChangedFiles(changedFiles = []) {
@@ -568,12 +498,6 @@ export function assertFrontendOnlyReleaseScope({ releaseType = '', changedFiles 
   return { checked: true, changedFiles: files, unsafeChangedFiles };
 }
 
-export function isDeployToolingAllowedChangedFile(file = '') {
-  const normalized = normalizeChangedFilePath(file);
-  if (!normalized) return false;
-  return DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS.some(pattern => pattern.test(normalized));
-}
-
 export function deployToolingDisallowedChangedFiles(changedFiles = []) {
   return normalizedChangedFiles(changedFiles).filter(file => !isDeployToolingAllowedChangedFile(file));
 }
@@ -598,27 +522,6 @@ export function assertDeployToolingReleaseScope({ releaseType = '', changedFiles
   return { checked: true, changedFiles: files, disallowedChangedFiles };
 }
 
-function matchesAnyPattern(file = '', patterns = []) {
-  const normalized = normalizeChangedFilePath(file);
-  return normalized && patterns.some(pattern => pattern.test(normalized));
-}
-
-export function isReleaseCriticalChangedFile(file = '') {
-  return matchesAnyPattern(file, RELEASE_CRITICAL_FILE_PATTERNS);
-}
-
-export function isFrontendDeployToolingAllowedChangedFile(file = '') {
-  return matchesAnyPattern(file, FRONTEND_DEPLOY_TOOLING_ALLOWED_FILE_PATTERNS);
-}
-
-export function isFrontendRuntimeChangedFile(file = '') {
-  return matchesAnyPattern(file, FRONTEND_RUNTIME_FILE_PATTERNS);
-}
-
-export function isFrontendDeployToolingCoverageChangedFile(file = '') {
-  return matchesAnyPattern(file, FRONTEND_DEPLOY_TOOLING_COVERAGE_FILE_PATTERNS);
-}
-
 export function frontendDeployToolingDisallowedChangedFiles(changedFiles = []) {
   return normalizedChangedFiles(changedFiles).filter(file =>
     isReleaseCriticalChangedFile(file) || !isFrontendDeployToolingAllowedChangedFile(file),
@@ -637,39 +540,18 @@ export function assertFrontendDeployToolingReleaseScope({ releaseType = '', chan
   );
 
   const disallowedChangedFiles = frontendDeployToolingDisallowedChangedFiles(files);
+  const classified = classifyReleaseChangedFiles(files);
   assertOk(
     disallowedChangedFiles.length === 0,
     `release_type=frontend-deploy-tooling is allowed only for frontend runtime plus deploy/preflight/smoke tooling files. Disallowed files: ${disallowedChangedFiles.join(', ')}`,
   );
 
   assertOk(
-    files.some(isFrontendRuntimeChangedFile) &&
-      files.some(file => isDeployToolingAllowedChangedFile(file) || isFrontendDeployToolingCoverageChangedFile(file)),
+    classified.releaseType === 'frontend-deploy-tooling',
     'release_type=frontend-deploy-tooling requires both frontend runtime and deploy/preflight/smoke tooling changes',
   );
 
   return { checked: true, changedFiles: files, disallowedChangedFiles };
-}
-
-export function classifyReleaseChangedFiles(changedFiles = []) {
-  const files = normalizedChangedFiles(changedFiles);
-  const blocked = files.filter(file => isReleaseCriticalChangedFile(file) || !isFrontendDeployToolingAllowedChangedFile(file));
-  const hasFrontendRuntime = files.some(isFrontendRuntimeChangedFile);
-  const hasDeployTooling = files.some(file => isDeployToolingAllowedChangedFile(file) || isFrontendDeployToolingCoverageChangedFile(file));
-
-  if (blocked.length > 0) {
-    return { allowed: false, releaseType: '', changedFiles: files, blockedFiles: blocked, hasFrontendRuntime, hasDeployTooling };
-  }
-  if (hasFrontendRuntime && hasDeployTooling) {
-    return { allowed: true, releaseType: 'frontend-deploy-tooling', changedFiles: files, blockedFiles: [], hasFrontendRuntime, hasDeployTooling };
-  }
-  if (hasDeployTooling) {
-    return { allowed: true, releaseType: 'deploy-tooling', changedFiles: files, blockedFiles: [], hasFrontendRuntime, hasDeployTooling };
-  }
-  if (hasFrontendRuntime) {
-    return { allowed: true, releaseType: 'frontend-only', changedFiles: files, blockedFiles: [], hasFrontendRuntime, hasDeployTooling };
-  }
-  return { allowed: true, releaseType: 'docs-only', changedFiles: files, blockedFiles: [], hasFrontendRuntime, hasDeployTooling };
 }
 
 export function backendCommitGateResult({ env = '', releaseType = '', backendBuild = {}, expectedCommit = '' } = {}) {

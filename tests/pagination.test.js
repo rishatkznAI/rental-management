@@ -130,12 +130,12 @@ test('documents page uses bounded reference search instead of loading full regis
   assert.match(routeSource, /pageSize: req\.query\.pageSize \|\| '25'/);
 });
 
-test('payments page does not call forbidden finance endpoints or full documents on initial rental manager load', () => {
+test('payments page loads documents only for selected payment or invoice-reference entry', () => {
   const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/pages/Payments.tsx'), 'utf8');
   const routeSource = fs.readFileSync(path.join(process.cwd(), 'server/routes/finance.js'), 'utf8');
 
   assert.match(pageSource, /usePaginatedPayments\(\{/);
-  assert.match(pageSource, /useDocumentsList\(\{\s*enabled: Boolean\(selectedPaymentId\),\s*\}\)/);
+  assert.match(pageSource, /useDocumentsList\(\{\s*enabled: showAddModal \|\| Boolean\(selectedPaymentId\),\s*\}\)/);
   assert.match(pageSource, /financeService\.getReceivables\(\)/);
   assert.match(routeSource, /router\.get\('\/finance\/receivables', requireAuth, requireRead\('payments'\)/);
   assert.match(routeSource, /filterCollectionByScope\('payments'/);

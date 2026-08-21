@@ -1,6 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
-import { createClient, createDocument, createEquipment, createRentalPair, withAdminApi } from './helpers/api';
+import {
+  createClient,
+  createClientRentalRelations,
+  createDocument,
+  createEquipment,
+  createRentalPair,
+  withAdminApi,
+} from './helpers/api';
 
 type UiIssue = {
   type: string;
@@ -34,10 +41,13 @@ test('admin creates rental contract draft with selected client in document wizar
   const seed = await withAdminApi(async (api) => {
     const client = await createClient(api, suffix);
     const equipment = await createEquipment(api, suffix);
+    const relations = await createClientRentalRelations(api, client.id, suffix);
     const { rental } = await createRentalPair(api, {
       client: client.company,
       clientId: client.id,
       equipment,
+      objectId: relations.object.id,
+      contractId: relations.contract.id,
       startDate: '2026-09-10',
       endDate: '2026-09-12',
       amount: 30000,
@@ -54,7 +64,7 @@ test('admin creates rental contract draft with selected client in document wizar
       date: '2026-09-10',
       status: 'draft',
     });
-    return { client, equipment, rental, registryDocument };
+    return { client, equipment, rental, relations, registryDocument };
   });
 
   const issues: UiIssue[] = [];
@@ -91,6 +101,9 @@ test('admin creates rental contract draft with selected client in document wizar
   await page.getByPlaceholder('Выберите клиента-контрагента').fill(seed.client.company);
   await page.getByRole('option', { name: seed.client.company }).click();
   await expect(dialog.getByText(seed.client.company)).toBeVisible();
+  const masterContractField = dialog.getByText('Master-договор клиента').locator('..');
+  await masterContractField.getByRole('combobox').click();
+  await page.getByRole('option', { name: new RegExp(seed.relations.contract.number) }).click();
   await expect(dialog.getByText(/^Аренда$/)).toHaveCount(0);
   await expect(dialog.getByText(/^Техника$/)).toHaveCount(0);
   await expect(dialog.getByText(/^Сервисная заявка$/)).toHaveCount(0);
@@ -106,7 +119,7 @@ test('admin creates rental contract draft with selected client in document wizar
   await dialog.getByRole('button', { name: 'Далее' }).click();
   await expect(dialog.getByText('Банк')).toBeVisible();
   await dialog.getByRole('button', { name: 'Далее' }).click();
-  await expect(dialog.getByText('Будет сгенерирован автоматически')).toBeVisible();
+  await expect(dialog.getByText('Будет присвоен после создания')).toBeVisible();
 
   const generateResponse = page.waitForResponse(response =>
     response.url().includes('/api/documents/generate') && response.request().method() === 'POST',
@@ -118,6 +131,8 @@ test('admin creates rental contract draft with selected client in document wizar
   expect(document.counterpartyId).toBe(seed.client.counterpartyId);
   expect(document.clientId).toBe(seed.client.id);
   expect(document.rentalId).toBeFalsy();
+  expect(document.contractId).toBe(seed.relations.contract.id);
+  expect(document.number).toBe(seed.relations.contract.number);
   expect(document.type).toBe('rental_contract');
   expect(document.payload.signer.name).toBe('Иванов Иван Иванович');
   expect(document.payload.signer.basis).toBe('Устав');

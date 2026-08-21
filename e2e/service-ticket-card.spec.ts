@@ -79,7 +79,7 @@ async function seedServiceTicket(suffix: string) {
       },
     });
     expect(res.ok()).toBeTruthy();
-    const ticket = (await res.json()) as { id: string };
+    const ticket = (await res.json()) as { id: string; number: string };
 
     return { client, equipment, rental, ticket, reason, description, result, mechanic, workName, partName, comment };
   });
@@ -104,7 +104,7 @@ test('service list opens the full ticket card as a modal and keeps filters after
 
   const dialog = page.getByRole('dialog', { name: new RegExp(escapeRegExp(seed.ticket.id)) });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('heading', { name: seed.ticket.id })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: seed.ticket.number })).toBeVisible();
   await expect(dialog.getByText(seed.reason).first()).toBeVisible();
   await expect(dialog.getByText(seed.description).first()).toBeVisible();
   await expect(dialog.getByText(seed.equipment.inventoryNumber).first()).toBeVisible();

@@ -707,6 +707,7 @@ export interface RentalDowntimePeriod {
 
 export interface Rental {
   id: string;
+  number?: string;
   counterpartyId?: string;
   clientId?: string;
   objectId?: string;
@@ -1026,6 +1027,7 @@ export type SparePartCatalogItem = SparePart;
 
 export interface ServiceTicket {
   id: string;
+  number?: string;
   equipmentId: string;
   equipment: string;
   serviceKind?: ServiceScenario;
@@ -1367,7 +1369,7 @@ export interface ClientContract {
   clientId?: string;
   objectId?: string;
   objectIds?: string[];
-  number: string;
+  number?: string;
   date?: string;
   title?: string;
   status: 'active' | 'archived';
@@ -1443,6 +1445,7 @@ export interface Document {
   clientName?: string;
   objectId?: string;
   contractId?: string;
+  vehicleTripId?: string;
   client: string;
   date: string;
   documentDate?: string;
@@ -2696,6 +2699,7 @@ export type DeliveryStatus = 'new' | 'sent' | 'accepted' | 'in_transit' | 'compl
 
 export interface Delivery {
   id: string;
+  number?: string;
   type: DeliveryType;
   status: DeliveryStatus;
   transportDate: string;
@@ -2803,6 +2807,7 @@ export interface ServiceVehicle {
 
 export interface VehicleTrip {
   id: string;
+  number?: string;
   vehicleId: string;
   sheetNumber?: string;
   date: string;

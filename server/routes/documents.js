@@ -28,6 +28,12 @@ const {
   queryDocumentsIndex,
   queryGanttIndex,
 } = require('../lib/sql-shadow-indexes');
+const { normalizeDocumentType } = require('../lib/document-registry');
+const {
+  DOCUMENT_ENTITY_TYPES,
+  OWNED_DOCUMENT_TYPES,
+  assertBusinessNumberNotProvided,
+} = require('../lib/business-numbering');
 
 const UNSIGNED_DOCUMENT_TYPES = new Set([
   'contract',
@@ -77,6 +83,7 @@ function registerDocumentRoutes(router, deps) {
     auditLog,
     normalizeRecordClientLink,
     getDb,
+    businessNumbering = null,
   } = deps;
 
   const documentsRouter = express.Router();
@@ -123,6 +130,16 @@ function registerDocumentRoutes(router, deps) {
 
   function canManualNumber(user) {
     return isAdmin(user) || isOffice(user);
+  }
+
+  function isSqlNumberedDocumentType(value) {
+    const type = normalizeDocumentType(value);
+    return Boolean(DOCUMENT_ENTITY_TYPES[type]) || OWNED_DOCUMENT_TYPES.has(type);
+  }
+
+  function rejectClientNumberForManagedDocument(input, typeValue) {
+    if (!businessNumbering || !isSqlNumberedDocumentType(typeValue)) return;
+    assertBusinessNumberNotProvided(input, { fields: ['number', 'documentNumber'] });
   }
 
   function canManageNumberingSettings(user) {
@@ -600,6 +617,13 @@ function registerDocumentRoutes(router, deps) {
   documentsRouter.post('/documents/number-preview', requireAuth, requireRead('documents'), (req, res) => {
     try {
       accessControl.assertCanReadCollection('documents', req.user);
+      if (businessNumbering && isSqlNumberedDocumentType(req.body?.documentType || req.body?.type)) {
+        return res.status(409).json({
+          ok: false,
+          code: 'BUSINESS_NUMBER_ASSIGNED_ON_CREATE',
+          error: 'Номер будет присвоен сервером после создания документа.',
+        });
+      }
       const documents = accessControl.filterCollectionByScope('documents', readData('documents') || [], req.user);
       const year = Number(req.body?.year) || Number(String(req.body?.date || req.body?.documentDate || nowIso()).slice(0, 4));
       const preview = nextDocumentNumber(documents, readSettings(), req.body?.documentType || req.body?.type, year);
@@ -731,12 +755,16 @@ function registerDocumentRoutes(router, deps) {
   documentsRouter.post('/documents', requireAuth, requireWrite('documents'), (req, res) => {
     try {
       accessControl.assertCanCreateCollection('documents', req.user, req.body);
+      rejectClientNumberForManagedDocument(req.body, req.body?.documentType || req.body?.type);
       const input = accessControl.sanitizeCreateInput('documents', req.body, req.user);
       if ((input.number || input.documentNumber) && !canManualNumber(req.user)) {
         return res.status(403).json({ ok: false, error: 'Ручной номер документа может задать только администратор или офис-менеджер' });
       }
       const documents = readData('documents') || [];
       const normalized = withRentalBillingSnapshot(normalizeDocumentDomainRecord({ ...input, id: input.id || generateId(idPrefixes.documents || 'D') }));
+      if (businessNumbering && isSqlNumberedDocumentType(normalized.documentType || normalized.type)) {
+        businessNumbering.assignNewRecord('documents', normalized);
+      }
       const prepared = prepareDocumentCreate(normalized, {
         documents,
         settings: readSettings(),
@@ -764,12 +792,16 @@ function registerDocumentRoutes(router, deps) {
       const raw = req.body?.data && typeof req.body.data === 'object' ? req.body.data : req.body;
       const generatedInput = prepareGeneratedDocument(raw, documentCollections(), { nowIso });
       accessControl.assertCanCreateCollection('documents', req.user, generatedInput);
+      rejectClientNumberForManagedDocument(raw, generatedInput.documentType || generatedInput.type);
       const input = accessControl.sanitizeCreateInput('documents', generatedInput, req.user);
       if ((input.number || input.documentNumber) && !canManualNumber(req.user)) {
         return res.status(403).json({ ok: false, error: 'Ручной номер документа может задать только администратор или офис-менеджер' });
       }
       const documents = readData('documents') || [];
       const normalized = withRentalBillingSnapshot(normalizeDocumentDomainRecord({ ...input, id: input.id || generateId(idPrefixes.documents || 'D') }));
+      if (businessNumbering && isSqlNumberedDocumentType(normalized.documentType || normalized.type)) {
+        businessNumbering.assignNewRecord('documents', normalized);
+      }
       const prepared = prepareDocumentCreate(normalized, {
         documents,
         settings: readSettings(),
@@ -798,6 +830,9 @@ function registerDocumentRoutes(router, deps) {
       const idx = documents.findIndex(item => item.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       accessControl.assertCanUpdateEntity('documents', documents[idx], req.user);
+      if (businessNumbering && isSqlNumberedDocumentType(documents[idx].documentType || documents[idx].type)) {
+        assertBusinessNumberNotProvided(req.body, { fields: ['number', 'documentNumber'] });
+      }
       const safePatch = accessControl.sanitizeUpdateInput('documents', req.body, req.user, documents[idx]);
       const normalized = normalizeDocumentDomainRecord({ ...documents[idx], ...safePatch, id: documents[idx].id }, documents[idx]);
       if (safePatch.number !== undefined && safePatch.documentNumber === undefined) {
@@ -885,6 +920,9 @@ function registerDocumentRoutes(router, deps) {
       accessControl.assertCanCreateCollection('documents', req.user, copyInput);
       const input = accessControl.sanitizeCreateInput('documents', copyInput, req.user);
       const normalized = normalizeDocumentDomainRecord({ ...input, id: generateId(idPrefixes.documents || 'D') });
+      if (businessNumbering && isSqlNumberedDocumentType(normalized.documentType || normalized.type)) {
+        businessNumbering.assignNewRecord('documents', normalized);
+      }
       const prepared = prepareDocumentCreate(normalized, {
         documents,
         settings: readSettings(),
@@ -931,6 +969,13 @@ function registerDocumentRoutes(router, deps) {
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       accessControl.assertCanUpdateEntity('documents', documents[idx], req.user);
       if (documentNumber(documents[idx])) return res.json(documents[idx]);
+      if (businessNumbering && isSqlNumberedDocumentType(documents[idx].documentType || documents[idx].type)) {
+        return res.status(409).json({
+          ok: false,
+          code: 'BUSINESS_NUMBER_ASSIGNMENT_REQUIRES_CREATE',
+          error: 'SQL-backed номер присваивается только при создании business-сущности.',
+        });
+      }
       const settings = readSettings();
       const generated = nextDocumentNumber(documents, settings, documents[idx].documentType || documents[idx].type, Number(String(documents[idx].documentDate || documents[idx].date || documents[idx].createdAt || nowIso()).slice(0, 4)));
       const normalized = normalizeDocumentDomainRecord(documents[idx], documents[idx]);

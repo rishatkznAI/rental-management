@@ -44,11 +44,11 @@ function buildTripRoute(input, previous = {}) {
 function getTripSheetNumber(input, vehicleId, existingTrips, previous = null, date = new Date()) {
   const value = normalizeTripText(input.sheetNumber ?? previous?.sheetNumber);
   if (value) return value;
-  const nextNumber = existingTrips.filter(trip => trip.vehicleId === vehicleId && trip.id !== previous?.id).length + 1;
-  return `${date.getFullYear()}-${String(nextNumber).padStart(4, '0')}`;
+  return '';
 }
 
 function assertTripSheetNumberUnique(trips, candidate, vehicleId, id = '') {
+  if (!normalizeTripText(candidate)) return;
   const conflict = trips.find(trip =>
     trip.vehicleId === vehicleId &&
     trip.id !== id &&

@@ -1,7 +1,7 @@
 import { api } from '../lib/api';
 import type { ClientContract } from '../types';
 
-export type ClientContractCreateInput = Omit<ClientContract, 'id' | 'counterpartyId'> & {
+export type ClientContractCreateInput = Omit<ClientContract, 'id' | 'counterpartyId' | 'number'> & {
   counterpartyId?: string;
 };
 

@@ -58,6 +58,7 @@ const {
   createSystemFixtureProtectedError,
   isProductionSmokeEquipmentFixture,
 } = require('../lib/protected-fixtures');
+const { assertBusinessNumberNotProvided } = require('../lib/business-numbering');
 
 const AUDIT_COLLECTION = 'audit_logs';
 const RENTAL_CREATE_IDEMPOTENCY_COLLECTION = 'rental_create_idempotency';
@@ -83,6 +84,7 @@ const RENTAL_PLANNER_SYNC_FIELDS = new Set([
   'managerId',
   'manager',
   'status',
+  'number',
   'paymentStatus',
   'updSigned',
   'updDate',
@@ -203,7 +205,7 @@ function isTerminalRentalStatus(status) {
 }
 
 const RENTAL_PAGINATION_CONFIG = {
-  searchFields: ['id', 'client', 'clientName', 'clientId', 'equipmentInv', 'equipment', 'manager', 'managerName', 'objectName', 'contractNumber'],
+  searchFields: ['id', 'number', 'client', 'clientName', 'clientId', 'equipmentInv', 'equipment', 'manager', 'managerName', 'objectName', 'contractNumber'],
   sortFields: {
     startDate: item => item.startDate,
     endDate: item => item.endDate || item.plannedReturnDate,
@@ -438,6 +440,7 @@ function registerRentalRoutes(deps) {
     accessControl,
     auditLog,
     botNotifications = null,
+    businessNumbering = null,
     reconcileEquipmentRentalProjection: reconcileEquipmentRentalProjectionForWrite = reconcileEquipmentRentalProjection,
     writeDataBatch: persistDataBatchUnsafe = entries => {
       for (const entry of entries || []) writeData(entry.name, entry.value);
@@ -1377,6 +1380,7 @@ function registerRentalRoutes(deps) {
         rentalId: classicRental.id,
         sourceRentalId: classicRental.id,
         originalRentalId: classicRental.id,
+        number: classicRental.number || '',
         clientId: classicRental.clientId || '',
         objectId: classicRental.objectId || undefined,
         contractId: classicRental.contractId || undefined,
@@ -1770,6 +1774,13 @@ function registerRentalRoutes(deps) {
       if (forbiddenReason) {
         return res.status(403).json({ ok: false, error: forbiddenReason });
       }
+      if (collection === 'rentals') {
+        try {
+          assertBusinessNumberNotProvided(req.body);
+        } catch (error) {
+          return res.status(error.status || 400).json({ ok: false, code: error.code, error: error.message });
+        }
+      }
 
       const data = readData(collection) || [];
       const equipment = readData('equipment') || [];
@@ -1911,6 +1922,13 @@ function registerRentalRoutes(deps) {
         newItem = normalizeGanttRentalStatus(newItem);
         newItem = mergeRentalHistory(null, newItem, req.user.userName);
       }
+      if (collection === 'rentals' && businessNumbering) {
+        try {
+          businessNumbering.assignNewRecord('rentals', newItem);
+        } catch (error) {
+          return res.status(error.status || 500).json({ ok: false, code: error.code, error: error.message });
+        }
+      }
       let linkedGanttRental = null;
       try {
         if (collection === 'rentals') {
@@ -1975,6 +1993,13 @@ function registerRentalRoutes(deps) {
       const forbiddenReason = rentalWriteForbiddenReason(req, collection, 'PATCH');
       if (forbiddenReason) {
         return res.status(403).json({ ok: false, error: forbiddenReason });
+      }
+      if (collection === 'rentals') {
+        try {
+          assertBusinessNumberNotProvided(req.body);
+        } catch (error) {
+          return res.status(error.status || 400).json({ ok: false, code: error.code, error: error.message });
+        }
       }
 
       const { patch: rawPatch, meta: rawMeta } = stripRentalPatchMeta(req.body);

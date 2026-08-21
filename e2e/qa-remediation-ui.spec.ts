@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
-import { createClient, createEquipment, createRentalPair, withAdminApi } from './helpers/api';
+import { createClient, createClientRentalRelations, createEquipment, createRentalPair, withAdminApi } from './helpers/api';
 
 async function setHashRoute(page: import('@playwright/test').Page, route: string) {
   await page.evaluate(nextRoute => {
@@ -141,6 +141,7 @@ test('payment create intent is consumed for every completion path and preserves 
   await expectConsumed();
 
   await openIntent();
+  await dialog.getByLabel(/Номер счёта/).fill('INV-26-000001');
   await dialog.getByLabel('Сумма к оплате').fill('1000');
   await dialog.getByRole('combobox', { name: /Контрагент/ }).selectOption(client.counterpartyId);
   await dialog.getByRole('button', { name: 'Сохранить платёж' }).click();
@@ -172,6 +173,7 @@ test('payment dialog uses a safe focus fallback and exposes validation errors', 
   const restoredTrigger = page.getByRole('button', { name: 'Новый платеж', exact: true });
   await restoredTrigger.click();
   const restoredDialog = page.getByRole('dialog', { name: 'Новый платёж' });
+  await restoredDialog.getByLabel(/Номер счёта/).fill('INV-26-000001');
   await restoredDialog.getByLabel('Сумма к оплате').fill('1000');
   await restoredDialog.getByRole('button', { name: 'Сохранить платёж' }).click();
   const clientError = restoredDialog.getByRole('alert');
@@ -197,9 +199,11 @@ test('contract details action opens the specification wizard', async ({ page }) 
   const suffix = `spec-chain-${Date.now()}`;
   const contract = await withAdminApi(async (api) => {
     const client = await createClient(api, suffix);
+    const relations = await createClientRentalRelations(api, client.id, suffix);
     const response = await api.post('/api/documents/generate', {
       data: {
         type: 'rental_contract',
+        contractId: relations.contract.id,
         clientId: client.id,
         date: '2026-08-02',
         signerName: 'Иванов Иван Иванович',

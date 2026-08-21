@@ -243,7 +243,6 @@ async function seedSmokeRentalData(api: APIRequestContext, suffix: string): Prom
   const contract = await postJson<{ id: string; number: string }>(api, '/api/client_contracts', {
     clientId: client.id,
     objectId: object.id,
-    number: `${prefix}-Contract`,
     title: `${prefix}-Contract title`,
     date: '2026-06-01',
     status: 'active',
@@ -544,7 +543,7 @@ test('smoke-rental can use rental manager UI without admin access or runtime err
   for (const detail of [
     { label: 'equipment detail', path: `/equipment/${seed.equipment.id}`, text: seed.equipment.model },
     { label: 'client detail', path: `/clients/${seed.client.id}`, text: seed.client.company },
-    { label: 'rental detail', path: `/rentals/${seed.rental.id}`, text: seed.rental.id },
+    { label: 'rental detail', path: `/rentals/${seed.rental.id}`, text: seed.rental.number },
     { label: 'service detail', path: `/service/${seed.serviceTicket.id}`, text: seed.serviceTicket.reason },
     { label: 'service vehicle detail', path: `/service-vehicles/${seed.serviceVehicle.id}`, text: seed.serviceVehicle.plateNumber },
   ]) {
@@ -560,7 +559,7 @@ test('smoke-rental can use rental manager UI without admin access or runtime err
   await navigateInApp(page, `/clients/${seed.client.id}`);
   await expect(page.locator('main')).toContainText(seed.object.name);
   await expect(page.locator('main')).toContainText(seed.contract.number);
-  await expect(page.locator('main')).toContainText(seed.rental.id);
+  await expect(page.locator('main')).toContainText(seed.rental.number);
   await expectHealthyScreen(page, action);
 
   action = 'forbidden direct routes';

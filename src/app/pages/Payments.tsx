@@ -41,11 +41,6 @@ import { counterpartiesService } from '../services/counterparties.service';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-function genId() { return `pay-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; }
-function genInvoice(payments: Payment[]) {
-  const n = payments.length + 1;
-  return `СЧ-${String(n).padStart(4, '0')}`;
-}
 function today() { return new Date().toISOString().slice(0, 10); }
 function text(value: unknown) { return String(value ?? '').trim(); }
 function money(value: unknown) {
@@ -185,16 +180,16 @@ function PaymentKpiCard({
 interface AddPaymentModalProps {
   open: boolean;
   onClose: () => void;
-  onSave: (p: Payment) => void;
-  existing: Payment[];
+  onSave: (p: Omit<Payment, 'id'>) => void;
   rentals: GanttRentalData[];
+  documents: Document[];
   clients: Client[];
   counterparties: Counterparty[];
   allPayments: Payment[];
   fallbackFocusRef: React.RefObject<HTMLElement | null>;
 }
 
-function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, counterparties, allPayments, fallbackFocusRef }: AddPaymentModalProps) {
+function AddPaymentModal({ open, onClose, onSave, rentals, documents, clients, counterparties, allPayments, fallbackFocusRef }: AddPaymentModalProps) {
   const presence = useAnimatedPresence(open, animationDurations.base);
   const dialogRef = React.useRef<HTMLDivElement>(null);
   const previousFocusRef = React.useRef<HTMLElement | null>(null);
@@ -202,6 +197,7 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
   const [clientError, setClientError] = useState('');
   const [formError, setFormError] = useState('');
   const [form, setForm] = useState({
+    invoiceNumber: '',
     rentalId: '',
     counterpartyId: '',
     clientId: '',
@@ -275,6 +271,10 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
           next.clientId = r.clientId || '';
           next.client = r.client;
         }
+        const invoice = documents
+          .filter(document => document.type === 'invoice' && (document.rentalId === v || document.rental === v))
+          .sort((left, right) => String(right.date || '').localeCompare(String(left.date || '')))[0];
+        next.invoiceNumber = invoice?.number || '';
       }
       return next;
     });
@@ -298,6 +298,10 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
       setClientError('Выберите контрагента из базы');
       return;
     }
+    if (!form.invoiceNumber.trim()) {
+      setFormError('Укажите номер существующего счёта');
+      return;
+    }
     const amt = Number(form.amount);
     if (!Number.isFinite(amt) || amt < 0) {
       setFormError('Сумма к оплате должна быть числом не меньше 0');
@@ -308,9 +312,8 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
       setFormError('Оплачено должно быть числом не меньше 0');
       return;
     }
-    const newPayment: Payment = {
-      id: genId(),
-      invoiceNumber: genInvoice(existing),
+    const newPayment: Omit<Payment, 'id'> = {
+      invoiceNumber: form.invoiceNumber.trim(),
       rentalId: form.rentalId || undefined,
       counterpartyId: form.counterpartyId,
       clientId: form.clientId || undefined,
@@ -357,6 +360,19 @@ function AddPaymentModal({ open, onClose, onSave, existing, rentals, clients, co
               {formError}
             </div>
           )}
+          <div>
+            <label htmlFor="new-payment-invoice" className="mb-1.5 block text-sm font-medium text-foreground">
+              Номер счёта <span className="text-red-500">*</span>
+            </label>
+            <Input
+              id="new-payment-invoice"
+              required
+              value={form.invoiceNumber}
+              onChange={event => set('invoiceNumber', event.target.value)}
+              placeholder="Например, INV-26-000001"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">Это ссылка на счёт, а не самостоятельный номер платежа.</p>
+          </div>
           {/* Rental link */}
           <div>
             <label htmlFor="new-payment-rental" className="mb-1.5 block text-sm font-medium text-foreground">
@@ -1029,7 +1045,7 @@ export default function Payments() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedPaymentId, setSelectedPaymentId] = useState('');
   const { data: documents = [] } = useDocumentsList({
-    enabled: Boolean(selectedPaymentId),
+    enabled: showAddModal || Boolean(selectedPaymentId),
   });
   const createPayment = useCreatePayment();
   const updatePayment = useUpdatePayment();
@@ -1094,11 +1110,8 @@ export default function Payments() {
     }
   }, [clients, clientsById, hasQuickClientContext, quickActionContext.clientId, quickActionContext.clientName, setPaginationFilters]);
 
-  const handleAddPayment = (p: Payment) => {
-    // id is already pre-generated in the modal; pass it through
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { id: _id, ...data } = p;
-    createPayment.mutate(data as Omit<Payment, 'id'>, {
+  const handleAddPayment = (data: Omit<Payment, 'id'>) => {
+    createPayment.mutate(data, {
       onSuccess: closeAddPaymentModal,
     });
   };
@@ -1190,8 +1203,8 @@ export default function Payments() {
         open={showAddModal}
         onClose={closeAddPaymentModal}
         onSave={handleAddPayment}
-        existing={allPaymentsForAllocation}
         rentals={ganttRentals as GanttRentalData[]}
+        documents={documents}
         clients={clients}
         counterparties={counterparties}
         allPayments={allPaymentsForAllocation}

@@ -80,6 +80,7 @@ export const mockServiceRequests = mockServiceTickets;
 
 export interface GanttRentalData {
   id: string;
+  number?: string;
   rentalId?: string;
   sourceRentalId?: string;
   originalRentalId?: string;

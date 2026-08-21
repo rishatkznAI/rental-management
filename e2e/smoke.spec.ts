@@ -146,7 +146,7 @@ test.describe('production smoke', () => {
     expect(rental.id).toBeTruthy();
 
     await navigateInApp(page, `/rentals/${rental.id}`);
-    await expect(page.getByRole('heading', { name: rental.id })).toBeVisible();
+    await expect(page.getByRole('heading', { name: rental.number })).toBeVisible();
     await expect(page.getByText(company).first()).toBeVisible();
     await expect(page.getByText(inventoryNumber).first()).toBeVisible();
 
@@ -327,7 +327,7 @@ test.describe('production smoke', () => {
     await expect(visibleDocumentRegistryEntry(page, seed.signed.number)).toHaveCount(0);
 
     await navigateInApp(page, `/rentals/${seed.rental.id}`);
-    await expect(page.getByRole('heading', { name: seed.rental.id })).toBeVisible();
+    await expect(page.getByRole('heading', { name: seed.rental.number })).toBeVisible();
     await expect(page.getByText('Документы по аренде')).toBeVisible();
     await expect(page.getByText(seed.unsigned.number).first()).toBeVisible();
 

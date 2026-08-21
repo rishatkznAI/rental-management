@@ -44,12 +44,14 @@ type EquipmentRecord = {
 
 type RentalRecord = {
   id: string;
+  number: string;
   client: string;
   status: string;
 };
 
 type ServiceTicketRecord = {
   id: string;
+  number: string;
   reason: string;
   equipmentId?: string;
   status?: string;
@@ -215,7 +217,6 @@ export async function createClientRentalRelations(
       clientId,
       objectId: object.id,
       objectIds: [object.id],
-      number: `E2E-CONTRACT-${suffix}`.slice(0, 40),
       date: '2026-05-14',
       title: 'E2E договор аренды',
       status: 'active',

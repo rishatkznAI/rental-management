@@ -94,8 +94,10 @@ import { normalizeUserRole } from '../lib/userStorage';
 import { useServerPagination } from '../hooks/useServerPagination';
 import { PaginationControls } from '../components/common/PaginationControls';
 import { usePaginatedDeliveries } from '../hooks/useDeliveries';
+import { useClientContractsList } from '../hooks/useClientRelations';
 import type {
   Client,
+  ClientContract,
   Counterparty,
   Document as Doc,
   DocumentContractKind,
@@ -108,6 +110,7 @@ import type {
   Rental,
   ServiceTicket,
   ServiceVehicle,
+  VehicleTrip,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
 
@@ -160,11 +163,13 @@ type DocumentWizardState = {
   counterpartyId: string;
   clientId: string;
   rentalId: string;
+  contractId: string;
   equipmentId: string;
   serviceTicketId: string;
   deliveryId: string;
   mechanicId: string;
   serviceCarId: string;
+  vehicleTripId: string;
   parentDocumentId: string;
   specificationId: string;
   dueDate: string;
@@ -217,11 +222,13 @@ const EMPTY_WIZARD: DocumentWizardState = {
   counterpartyId: '',
   clientId: '',
   rentalId: '',
+  contractId: '',
   equipmentId: '',
   serviceTicketId: '',
   deliveryId: '',
   mechanicId: '',
   serviceCarId: '',
+  vehicleTripId: '',
   parentDocumentId: '',
   specificationId: '',
   dueDate: '',
@@ -534,18 +541,6 @@ function rentalDailyRate(rental: Rental | undefined) {
   return displayText((rental as unknown as Record<string, unknown>).dailyRate || rental.rate, '');
 }
 
-function nextContractNumber(documents: Doc[], kind: DocumentContractKind, date: string) {
-  const year = (date || new Date().toISOString().slice(0, 10)).slice(0, 4);
-  const prefix = kind === 'rental' ? 'ДА' : 'ДП';
-  const nextIndex = documents.filter(doc =>
-    doc.type === 'contract'
-    && doc.contractKind === kind
-    && String(doc.date || '').slice(0, 4) === year,
-  ).length + 1;
-
-  return `${prefix}-${year}-${String(nextIndex).padStart(4, '0')}`;
-}
-
 function buildContractDraftHtml(params: {
   kind: DocumentContractKind;
   number: string;
@@ -815,6 +810,7 @@ export default function Documents() {
     enabled: referenceLoadEnabled,
   });
   const { data: rentalsReference } = usePaginatedRentals({ page: 1, pageSize: 100, sortBy: 'startDate', sortDir: 'desc' }, { enabled: referenceLoadEnabled });
+  const { data: clientContracts = [] } = useClientContractsList({ enabled: referenceLoadEnabled });
   const { data: equipmentReference } = usePaginatedEquipment({ page: 1, pageSize: 100, sortBy: 'inventoryNumber', sortDir: 'asc' }, { enabled: referenceLoadEnabled });
   const { data: serviceTicketsReference } = usePaginatedServiceTickets({ page: 1, pageSize: 100, sortBy: 'createdAt', sortDir: 'desc' }, { enabled: referenceLoadEnabled });
   const { data: deliveriesReference } = usePaginatedDeliveries({ page: 1, pageSize: 100, sortBy: 'date', sortDir: 'desc' }, { enabled: referenceLoadEnabled, scope: 'documents' });
@@ -827,6 +823,11 @@ export default function Documents() {
     queryKey: ['service-vehicles', 'documents'],
     queryFn: serviceVehiclesService.getAll,
     enabled: canReadMechanics,
+  });
+  const { data: vehicleTrips = [] } = useQuery<VehicleTrip[]>({
+    queryKey: ['vehicle-trips', 'documents'],
+    queryFn: serviceVehiclesService.getAllTrips,
+    enabled: canReadMechanics && referenceLoadEnabled,
   });
   const createDocument = useCreateDocument();
   const generateDocument = useGenerateDocument();
@@ -1028,6 +1029,14 @@ export default function Documents() {
     () => new Map((serviceVehicles as ServiceVehicle[]).map(item => [item.id, item])),
     [serviceVehicles],
   );
+  const clientContractsById = React.useMemo(
+    () => new Map((clientContracts as ClientContract[]).map(item => [item.id, item])),
+    [clientContracts],
+  );
+  const vehicleTripsById = React.useMemo(
+    () => new Map((vehicleTrips as VehicleTrip[]).map(item => [item.id, item])),
+    [vehicleTrips],
+  );
   const quickActionClient = React.useMemo(() => {
     if (quickActionContext.clientId) {
       return clientsById.get(quickActionContext.clientId);
@@ -1171,6 +1180,7 @@ export default function Documents() {
         counterpartyId: quickActionRental?.counterpartyId || quickActionClient?.counterpartyId || quickActionContext.counterpartyId,
         clientId: quickActionClient?.id || quickActionRental?.clientId || quickActionContext.clientId,
         rentalId: quickActionRental?.id || quickActionContext.rentalId,
+        contractId: quickActionRental?.contractId || quickActionContext.contractId,
         equipmentId: quickActionEquipment?.id || quickActionContext.equipmentId,
         parentDocumentId: quickActionContext.parentDocumentId,
         specificationId: quickActionContext.specificationId,
@@ -1391,10 +1401,6 @@ export default function Documents() {
     [mechanicDocuments, selectedMechanicId],
   );
 
-  const generatedContractNumber = React.useMemo(
-    () => nextContractNumber(referenceDocuments, createContractKind, contractForm.date),
-    [createContractKind, contractForm.date, referenceDocuments],
-  );
   const wizardTypeMeta = getDocumentRegistryItem(wizardForm.type) || DOCUMENT_WORKSPACE_TYPES[0];
   const wizardRental = wizardForm.rentalId ? rentalsById.get(wizardForm.rentalId) : undefined;
   const wizardGanttRental = wizardForm.rentalId ? ganttByRentalId.get(wizardForm.rentalId) : undefined;
@@ -1409,6 +1415,16 @@ export default function Documents() {
   const wizardDelivery = wizardForm.deliveryId ? deliveriesById.get(wizardForm.deliveryId) : undefined;
   const wizardMechanic = wizardForm.mechanicId ? mechanicsById.get(wizardForm.mechanicId) : undefined;
   const wizardServiceVehicle = wizardForm.serviceCarId ? serviceVehiclesById.get(wizardForm.serviceCarId) : undefined;
+  const wizardContract = wizardForm.contractId ? clientContractsById.get(wizardForm.contractId) : undefined;
+  const wizardVehicleTrip = wizardForm.vehicleTripId ? vehicleTripsById.get(wizardForm.vehicleTripId) : undefined;
+  const wizardContractOptions = (clientContracts as ClientContract[]).filter(contract => {
+    if (wizardResolvedCounterpartyId && contract.counterpartyId === wizardResolvedCounterpartyId) return true;
+    if (wizardResolvedClientId && contract.clientId === wizardResolvedClientId) return true;
+    return !wizardResolvedCounterpartyId && !wizardResolvedClientId;
+  });
+  const wizardVehicleTripOptions = (vehicleTrips as VehicleTrip[]).filter(trip => (
+    !wizardForm.serviceCarId || trip.vehicleId === wizardForm.serviceCarId
+  ));
   const wizardMissingFields = React.useMemo(() => {
     const labels: Record<string, string> = {
       clientId: 'Выберите клиента',
@@ -1417,7 +1433,9 @@ export default function Documents() {
       serviceTicketId: 'Сервисная заявка',
       deliveryId: 'Доставка',
       mechanicId: 'Механик',
+      contractId: 'Договор клиента',
       serviceCarId: 'Служебный автомобиль',
+      vehicleTripId: 'Поездка / путевой лист',
       parentDocumentId: 'Родительский документ',
       signerName: 'Укажите подписанта',
       signerPosition: 'Укажите должность подписанта',
@@ -1440,8 +1458,9 @@ export default function Documents() {
   const wizardPreviewRows = React.useMemo(() => ([
     ['Тип', wizardTypeMeta.label],
     ['Дата', wizardForm.type === 'rental_contract' ? 'Будет установлена автоматически' : new Date().toISOString().slice(0, 10)],
-    ['Номер', 'Будет сгенерирован автоматически'],
+    ['Номер', 'Будет присвоен после создания'],
     ['Клиент', wizardCounterparty?.shortName || wizardCounterparty?.legalName || (wizardClient ? clientLabel(wizardClient) : wizardRental?.client || wizardGanttRental?.client || '—')],
+    ['Договор клиента', wizardContract?.number || wizardContract?.id || '—'],
     ['Договор', wizardParentDocument ? `${getDocumentNumber(wizardParentDocument)} от ${formatDate(getDocumentDate(wizardParentDocument))}` : '—'],
     ['Спецификация', wizardSpecification ? `${getDocumentNumber(wizardSpecification)} от ${formatDate(getDocumentDate(wizardSpecification))}` : '—'],
     ...(wizardForm.type === 'rental_contract' ? [
@@ -1465,13 +1484,14 @@ export default function Documents() {
     ['Доставка', wizardDelivery?.id || '—'],
     ['Механик', wizardMechanic?.name || '—'],
     ['Служебная машина', wizardServiceVehicle ? [wizardServiceVehicle.make, wizardServiceVehicle.model, wizardServiceVehicle.plateNumber].filter(Boolean).join(' ') : '—'],
+    ['Поездка', wizardVehicleTrip ? `${wizardVehicleTrip.number || wizardVehicleTrip.sheetNumber || wizardVehicleTrip.id} · ${formatDate(wizardVehicleTrip.date)}` : '—'],
     ['Статус', 'Черновик'],
     ['Сумма', wizardRental?.amount || wizardRental?.price || wizardGanttRental?.amount ? formatCurrency(Number(wizardRental?.amount || wizardRental?.price || wizardGanttRental?.amount)) : '—'],
   ]).filter(([label]) => {
-    if (wizardForm.type === 'rental_contract') return !['Договор', 'Спецификация', 'Техника', 'Аренда', 'Период', 'Ставка', 'Количество дней', 'Сервис', 'Доставка', 'Механик', 'Служебная машина', 'Сумма'].includes(label);
+    if (wizardForm.type === 'rental_contract') return !['Договор', 'Спецификация', 'Техника', 'Аренда', 'Период', 'Ставка', 'Количество дней', 'Сервис', 'Доставка', 'Механик', 'Служебная машина', 'Поездка', 'Сумма'].includes(label);
     if (wizardForm.type !== 'rental_specification') return label !== 'Ставка' && label !== 'Количество дней';
     return label !== 'Спецификация';
-  }), [wizardClient, wizardCounterparty, wizardDelivery, wizardEquipment, wizardForm, wizardGanttRental, wizardMechanic, wizardParentDocument, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardSpecification, wizardTypeMeta]);
+  }), [wizardClient, wizardContract, wizardCounterparty, wizardDelivery, wizardEquipment, wizardForm, wizardGanttRental, wizardMechanic, wizardParentDocument, wizardRental, wizardServiceTicket, wizardServiceVehicle, wizardSpecification, wizardTypeMeta, wizardVehicleTrip]);
 
   const persistMechanicDocuments = React.useCallback(async (next: MechanicDocument[]) => {
     setMechanicDocuments(next);
@@ -1585,6 +1605,7 @@ export default function Documents() {
     setWizardForm(current => ({
       ...current,
       rentalId: value === 'none' ? '' : value,
+      contractId: rental?.contractId || gantt?.contractId || current.contractId || '',
       counterpartyId: rental?.counterpartyId || gantt?.counterpartyId || current.counterpartyId || '',
       clientId: rental?.clientId || gantt?.clientId || current.clientId || '',
       equipmentId: current.equipmentId || rentalEquipment?.id || gantt?.equipmentId || '',
@@ -1593,6 +1614,33 @@ export default function Documents() {
       dailyRate: current.dailyRate || rate || String(gantt?.rate || ''),
       quantityDays: current.quantityDays || quantityDays,
       amount: current.amount || String((rental as unknown as Record<string, unknown> | undefined)?.amount || rental?.price || gantt?.amount || gantt?.price || ''),
+    }));
+  }
+
+  function applyClientContractToWizard(value: string) {
+    const contract = value === 'none' ? undefined : clientContractsById.get(value);
+    setWizardForm(current => ({
+      ...current,
+      contractId: value === 'none' ? '' : value,
+      counterpartyId: contract?.counterpartyId || current.counterpartyId,
+      clientId: contract?.clientId || current.clientId,
+    }));
+  }
+
+  function applyVehicleTripToWizard(value: string) {
+    const trip = value === 'none' ? undefined : vehicleTripsById.get(value);
+    setWizardForm(current => ({
+      ...current,
+      vehicleTripId: value === 'none' ? '' : value,
+      serviceCarId: trip?.vehicleId || current.serviceCarId,
+      mechanicId: trip?.mechanicId || current.mechanicId,
+      serviceTicketId: trip?.serviceTicketId || trip?.serviceRequestId || current.serviceTicketId,
+      tripDate: trip?.date || current.tripDate,
+      routeFrom: trip?.routeFrom || current.routeFrom,
+      routeTo: trip?.routeTo || current.routeTo,
+      purpose: trip?.purpose || current.purpose,
+      startMileage: trip ? String(trip.odometerStart ?? trip.startMileage ?? '') : current.startMileage,
+      endMileage: trip ? String(trip.odometerEnd ?? trip.endMileage ?? '') : current.endMileage,
     }));
   }
 
@@ -1633,6 +1681,7 @@ export default function Documents() {
       counterpartyId: source.counterpartyId || '',
       clientId: source.clientId || '',
       rentalId: source.rentalId || '',
+      contractId: source.contractId || '',
       equipmentId: source.equipmentId || '',
       rentalStartDate: source.rentalStartDate || '',
       rentalEndDate: source.rentalEndDate || '',
@@ -1665,6 +1714,7 @@ export default function Documents() {
         clientId: wizardResolvedClientId || undefined,
         client: wizardCounterparty?.shortName || wizardCounterparty?.legalName || (wizardClient ? clientLabel(wizardClient) : wizardRental?.client || wizardGanttRental?.client || ''),
         rentalId: wizardForm.rentalId || undefined,
+        vehicleTripId: wizardForm.vehicleTripId || undefined,
         equipmentId: wizardForm.equipmentId || undefined,
         deliveryId: wizardForm.deliveryId || undefined,
         serviceTicketId: wizardForm.serviceTicketId || undefined,
@@ -1673,7 +1723,7 @@ export default function Documents() {
         parentDocumentId: wizardForm.parentDocumentId || undefined,
         specificationId: wizardForm.specificationId || undefined,
         objectId: wizardRental?.objectId || wizardGanttRental?.objectId,
-        contractId: wizardRental?.contractId || wizardGanttRental?.contractId,
+        contractId: wizardForm.contractId || wizardRental?.contractId || wizardGanttRental?.contractId,
         dueDate: wizardForm.dueDate || undefined,
         signerName: wizardForm.signerName.trim() || undefined,
         signerPosition: wizardForm.signerPosition.trim() || undefined,
@@ -2801,13 +2851,16 @@ export default function Documents() {
                           counterpartyId={wizardResolvedCounterpartyId}
                           clientId={wizardResolvedClientId}
                           onChange={(value) => {
-                            if (!value) setWizardForm(current => fillWizardCustomerFields(current, null, null));
+                            if (!value) setWizardForm(current => ({ ...fillWizardCustomerFields(current, null, null), contractId: '' }));
                           }}
-                          onSelect={(selection) => setWizardForm(current => fillWizardCustomerFields(
-                            current,
-                            selection?.client || null,
-                            selection?.counterparty || null,
-                          ))}
+                          onSelect={(selection) => setWizardForm(current => ({
+                            ...fillWizardCustomerFields(
+                              current,
+                              selection?.client || null,
+                              selection?.counterparty || null,
+                            ),
+                            contractId: '',
+                          }))}
                           placeholder={customerCounterparties.length > 0 ? 'Выберите клиента-контрагента' : 'Активные клиенты-контрагенты не найдены'}
                         />
                         {customerCounterparties.length === 0 ? (
@@ -2816,6 +2869,21 @@ export default function Documents() {
                         {wizardClient && !wizardForm.clientInn && !wizardForm.clientLegalAddress ? (
                           <p className="text-xs text-amber-700 dark:text-amber-300">Реквизиты клиента не заполнены. Можно создать черновик и дозаполнить позже.</p>
                         ) : null}
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <div className="text-sm font-medium text-foreground">Master-договор клиента</div>
+                        <Select value={wizardForm.contractId || 'none'} onValueChange={applyClientContractToWizard}>
+                          <SelectTrigger><SelectValue placeholder="Выберите договор клиента" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Не выбран</SelectItem>
+                            {wizardContractOptions.map(contract => (
+                              <SelectItem key={contract.id} value={contract.id}>
+                                {contract.number || contract.id} · {contract.title || 'Договор'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">Документ использует номер выбранного ClientContract и не создаёт вторую sequence.</p>
                       </div>
                       <div className="space-y-2">
                         <div className="text-sm font-medium text-foreground">Юридическое название клиента</div>
@@ -3044,13 +3112,28 @@ export default function Documents() {
                       <>
                         <div className="space-y-2">
                           <div className="text-sm font-medium text-foreground">Служебная машина</div>
-                          <Select value={wizardForm.serviceCarId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceCarId: value === 'none' ? '' : value }))}>
+                          <Select value={wizardForm.serviceCarId || 'none'} onValueChange={(value) => setWizardForm(current => ({ ...current, serviceCarId: value === 'none' ? '' : value, vehicleTripId: '' }))}>
                             <SelectTrigger><SelectValue placeholder="Выберите машину" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">Не выбрана</SelectItem>
                               {(serviceVehicles as ServiceVehicle[]).map(vehicle => <SelectItem key={vehicle.id} value={vehicle.id}>{[vehicle.make, vehicle.model, vehicle.plateNumber].filter(Boolean).join(' ')}</SelectItem>)}
                             </SelectContent>
                           </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium text-foreground">Поездка / путевой лист</div>
+                          <Select value={wizardForm.vehicleTripId || 'none'} onValueChange={applyVehicleTripToWizard}>
+                            <SelectTrigger><SelectValue placeholder="Выберите поездку" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Не выбрана</SelectItem>
+                              {wizardVehicleTripOptions.map(trip => (
+                                <SelectItem key={trip.id} value={trip.id}>
+                                  {trip.number || trip.sheetNumber || trip.id} · {formatDate(trip.date)} · {trip.route || [trip.routeFrom, trip.routeTo].filter(Boolean).join(' — ')}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">Документ использует номер выбранного VehicleTrip.</p>
                         </div>
                         <div className="space-y-2">
                           <div className="text-sm font-medium text-foreground">Водитель/механик</div>
@@ -3206,7 +3289,7 @@ export default function Documents() {
               <div className="grid gap-4 py-2">
                 <div className="rounded-xl border border-dashed border-border/70 bg-background/40 px-4 py-3">
                   <div className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Номер договора</div>
-                  <div className="mt-1 text-lg font-semibold text-foreground">{generatedContractNumber}</div>
+                  <div className="mt-1 text-sm font-medium text-muted-foreground">Номер будет присвоен после создания</div>
                 </div>
 
                 <div className="space-y-2">

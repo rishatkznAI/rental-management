@@ -151,7 +151,7 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
   await expect(page).toHaveURL(/#\/service$/);
 
   await navigateInApp(page, `/rentals/${seed.rental.id}`);
-  await expect(page.getByRole('heading', { name: seed.rental.id })).toBeVisible();
+  await expect(page.getByRole('heading', { name: seed.rental.number })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Быстрые действия' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Продлить аренду' })).toBeVisible();
   const openDocumentsButton = page.getByRole('button', { name: 'Открыть документы' }).first();
@@ -170,7 +170,7 @@ test('admin sees quick actions on client, equipment, rental and service cards', 
   await expect(page).toHaveURL(/#\/service\/.+/);
 
   const ticket = await withAdminApi((api) => findServiceTicketByReason(api, serviceReason));
-  await expect(page.getByRole('heading', { name: ticket.id })).toBeVisible();
+  await expect(page.getByRole('heading', { name: ticket.number })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Быстрые действия' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Открыть технику' }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Очередь сервиса' }).first()).toBeVisible();

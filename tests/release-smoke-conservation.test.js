@@ -31,43 +31,28 @@ const productionDashboardVisualSmokeSource = readFileSync(new URL('../e2e/produc
 const productionDashboardVisualSmokeWorkflowSource = readFileSync(new URL('../.github/workflows/production-dashboard-visual-smoke.yml', import.meta.url), 'utf8');
 const financeEquipmentDiscoverySource = readFileSync(new URL('../scripts/finance-smoke-equipment-discovery.mjs', import.meta.url), 'utf8');
 
-function workflowRegex(variableName) {
-  const match = deployWorkflowSource.match(new RegExp(`^\\s*${variableName}='([^']+)'$`, 'm'));
-  assert.ok(match, `workflow regex not found: ${variableName}`);
-  return new RegExp(match[1]);
-}
-
 test('workflow classifier and preflight conserve deploy-tooling scope for root Node tests', () => {
   const changedFiles = [
     'e2e/staging-smoke.spec.ts',
     'tests/dashboard-attention.test.js',
   ];
-  const workflowDeployToolingAllowed = workflowRegex('deploy_tooling_allowed');
-
-  for (const file of changedFiles) {
-    assert.equal(workflowDeployToolingAllowed.test(file), true, `${file} must stay allowed by workflow deploy-tooling scope`);
-  }
-
+  assert.match(deployWorkflowSource, /node scripts\/release-classifier\.mjs/);
   const classified = classifyReleaseChangedFiles(changedFiles);
   assert.equal(classified.releaseType, 'deploy-tooling');
   assert.equal(classified.hasFrontendRuntime, false);
   assert.doesNotThrow(() => assertDeployToolingReleaseScope({ releaseType: classified.releaseType, changedFiles }));
 });
 
-test('workflow classifier and preflight allow dashboard UI coverage in frontend deploys', () => {
+test('workflow classifier keeps ordinary dashboard E2E coverage frontend-only', () => {
   const changedFiles = [
     'src/app/pages/Dashboard.tsx',
     'e2e/dashboard-layout.spec.ts',
     'e2e/stage-ui-a.spec.ts',
   ];
-  const workflowDeployToolingAllowed = workflowRegex('deploy_tooling_allowed');
-
-  for (const file of changedFiles.slice(1)) {
-    assert.equal(workflowDeployToolingAllowed.test(file), true, `${file} must stay allowed by workflow deploy-tooling scope`);
-  }
-
   const classified = classifyReleaseChangedFiles(changedFiles);
-  assert.equal(classified.releaseType, 'frontend-deploy-tooling');
+  assert.equal(classified.releaseType, 'frontend-only');
+  assert.equal(classified.hasFrontendTests, true);
+  assert.equal(classified.requiresBackendDeploy, false);
   assert.deepEqual(classified.blockedFiles, []);
 });
 
@@ -191,6 +176,25 @@ test('production UI selector smoke passes frontend marker release type into rele
   assert.match(productionUiSelectorSmokeSource, /safeSmokeLog\('equipmentReadinessVisible', \{ mode: 'kpi-strip' \}\)/);
   assert.match(productionUiSelectorSmokeSource, /fleet readiness KPI/);
   assert.match(productionUiSelectorSmokeSource, /if \(actionRowCount > 0\)/);
+});
+
+test('production UI selector smoke validates client KPIs without pinning production business state', () => {
+  assert.match(productionUiSelectorSmokeSource, /function finiteLocalizedNumber\(text: string\)/);
+  assert.match(productionUiSelectorSmokeSource, /Number\.isFinite\(value\)/);
+  assert.match(productionUiSelectorSmokeSource, /async function expectValidKpiValue/);
+  assert.match(productionUiSelectorSmokeSource, /async function expectValidKpiCaption/);
+  for (const testId of [
+    'clients-kpi-total-value',
+    'clients-kpi-rental-value',
+    'clients-kpi-sale-value',
+    'clients-kpi-turnover-value',
+    'clients-kpi-new-value',
+  ]) {
+    assert.match(productionUiSelectorSmokeSource, new RegExp(testId));
+  }
+  assert.match(productionUiSelectorSmokeSource, /\\bNaN\\b/);
+  assert.doesNotMatch(productionUiSelectorSmokeSource, /clientCount\s*===\s*0/);
+  assert.doesNotMatch(productionUiSelectorSmokeSource, /clients-kpi-(?:total|turnover|new)-(?:value|caption)'\)\.toHaveText\('0/);
 });
 
 const expectedReleaseCommit = 'ae9d8a8a286307f5d6e701585750af94d631edc1';
@@ -675,7 +679,7 @@ test('deploy workflow embeds release_type into frontend build metadata', () => {
   assert.match(deployWorkflowSource, /release_type: \$\{\{ steps\.classify\.outputs\.release_type \}\}/);
   assert.match(deployWorkflowSource, /VITE_GIT_COMMIT_SHA: \$\{\{ github\.sha \}\}/);
   assert.match(deployWorkflowSource, /VITE_RELEASE_TYPE: \$\{\{ needs\.classify-release\.outputs\.release_type \}\}/);
-  assert.match(deployWorkflowSource, /scripts\/finance-smoke-equipment-discovery\\\.mjs/);
+  assert.match(deployWorkflowSource, /node scripts\/release-classifier\.mjs/);
 });
 
 test('deploy workflow writes backend release marker metadata', () => {

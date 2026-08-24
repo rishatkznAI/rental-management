@@ -8,6 +8,7 @@ const {
 } = require('./service-counterparty-relations');
 const { assertProductionSmokeFixtureMutationAllowed } = require('./protected-fixtures');
 const { linkedRentalIds } = require('./gantt-rental-link-guard');
+const { assertClientContractAvailableForNewLink } = require('./client-contract-lifecycle');
 const {
   reconcileEquipmentRentalProjection,
 } = require('./rental-lifecycle');
@@ -67,6 +68,11 @@ function createServiceCore(deps) {
   function applyServiceTicketCreationEffects(ticket, author = 'Система', options = {}) {
     if (!ticket) return;
     const previous = readServiceTickets().find(item => String(item?.id || '') === String(ticket?.id || '')) || null;
+    if (ticket?.contractId) {
+      assertClientContractAvailableForNewLink(readData, ticket.contractId, {
+        allowArchivedContractId: previous?.contractId,
+      });
+    }
     ticket = canonicalizeServiceTicketCounterpartyRelation(ticket, { readData }, { existing: previous });
     const requestedServiceTickets = Array.isArray(options.serviceTickets)
       ? options.serviceTickets.map(item => String(item?.id || '') === String(ticket.id || '') ? ticket : item)
@@ -231,6 +237,11 @@ function createServiceCore(deps) {
       isCreate: !previous,
       nowIso,
     });
+    if (normalizedForWrite?.contractId) {
+      assertClientContractAvailableForNewLink(readData, normalizedForWrite.contractId, {
+        allowArchivedContractId: previous?.contractId,
+      });
+    }
     const normalized = canonicalizeServiceTicketCounterpartyRelation(
       normalizedForWrite,
       { readData },

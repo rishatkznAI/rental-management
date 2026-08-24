@@ -719,6 +719,93 @@ function registerCrudRoutes(deps) {
       .filter(Boolean);
   }
 
+  const CLIENT_CONTRACT_PATCH_FIELDS = new Set(['date', 'title', 'objectId', 'objectIds', 'notes', 'status']);
+  const CLIENT_CONTRACT_IMMUTABLE_FIELDS = new Set([
+    'id',
+    'number',
+    'businessNumber',
+    'createdAt',
+    'updatedAt',
+    'clientId',
+    'counterpartyId',
+    'companyId',
+    'tenantId',
+  ]);
+  const CLIENT_CONTRACT_ACTIVITY_FIELDS = ['date', 'title', 'objectId', 'objectIds', 'notes', 'status'];
+
+  function scopedValue(value) {
+    return String(value || '').trim();
+  }
+
+  function assertClientContractUpdateScope(req, contract) {
+    const ownerClient = (readData('clients') || [])
+      .find(client => scopedValue(client?.id) === scopedValue(contract?.clientId)) || null;
+    const ownerCounterparty = (readData('counterparties') || [])
+      .find(counterparty => scopedValue(counterparty?.id) === scopedValue(contract?.counterpartyId)) || null;
+    for (const field of ['companyId', 'tenantId']) {
+      const entityScope = scopedValue(contract?.[field] || ownerClient?.[field] || ownerCounterparty?.[field]);
+      if (!entityScope) continue;
+      const actorScope = scopedValue(req.user?.[field]);
+      if (actorScope !== entityScope) {
+        const error = new Error('Договор не принадлежит компании или tenant текущего пользователя.');
+        error.status = 403;
+        error.code = 'CLIENT_CONTRACT_SCOPE_FORBIDDEN';
+        throw error;
+      }
+    }
+  }
+
+  function assertScopedClientContractPatch(req, contract) {
+    assertClientContractUpdateScope(req, contract);
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+    const immutableField = Object.keys(body).find(field => CLIENT_CONTRACT_IMMUTABLE_FIELDS.has(field));
+    if (immutableField) {
+      const error = new Error(`Поле ${immutableField} договора нельзя изменять.`);
+      error.status = 409;
+      error.code = 'CLIENT_CONTRACT_FIELD_IMMUTABLE';
+      throw error;
+    }
+    const unsupportedField = Object.keys(body).find(field => !CLIENT_CONTRACT_PATCH_FIELDS.has(field));
+    if (unsupportedField) {
+      const error = new Error(`Поле ${unsupportedField} не поддерживается формой редактирования договора.`);
+      error.status = 400;
+      error.code = 'CLIENT_CONTRACT_PATCH_FIELD_UNSUPPORTED';
+      throw error;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'status') && !['active', 'archived'].includes(body.status)) {
+      const error = new Error('Статус договора должен быть active или archived.');
+      error.status = 400;
+      error.code = 'CLIENT_CONTRACT_STATUS_INVALID';
+      throw error;
+    }
+  }
+
+  function clientContractChanged(previous, next) {
+    return CLIENT_CONTRACT_ACTIVITY_FIELDS.some(field => stableJson(previous?.[field]) !== stableJson(next?.[field]));
+  }
+
+  function appendClientContractActivity(clients, contract, actor) {
+    const clientId = scopedValue(contract?.clientId);
+    if (!clientId) return clients;
+    const index = clients.findIndex(client => scopedValue(client?.id) === clientId);
+    if (index === -1) return clients;
+    const next = [...clients];
+    const current = next[index];
+    next[index] = {
+      ...current,
+      history: [
+        ...(Array.isArray(current?.history) ? current.history : []),
+        {
+          date: nowIso(),
+          text: `Договор изменён: ${contract.number}`,
+          author: actor?.userName || actor?.name || 'Система',
+          type: 'system',
+        },
+      ],
+    };
+    return next;
+  }
+
   function sendEquipmentValidationError(res, error) {
     return res.status(error?.status || 400).json({
       ok: false,
@@ -2129,6 +2216,9 @@ function registerCrudRoutes(deps) {
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
+        if (collection === 'client_contracts') {
+          assertScopedClientContractPatch(req, data[idx]);
+        }
         accessControl.assertCanUpdateEntity(collection, data[idx], req.user);
         if (collection === 'equipment') {
           assertNoRawProductionSmokeFixturePatch(data[idx], req.body);
@@ -2347,10 +2437,18 @@ function registerCrudRoutes(deps) {
             { name: 'payment_allocations', value: data },
           ], { readData });
         }
+        const contractActivityClients = collection === 'client_contracts' && clientContractChanged(previousItem, data[idx])
+          ? appendClientContractActivity(readData('clients') || [], data[idx], req.user)
+          : null;
         if (collection === 'service' && typeof persistServiceTicketUpdate === 'function') {
           data[idx] = persistServiceTicketUpdate(data[idx], req.user.userName);
         } else if (collection === 'clients') {
           persistDataBatch(clientCompatibilityWrite.entries);
+        } else if (contractActivityClients) {
+          persistDataBatch([
+            { name: 'client_contracts', value: data },
+            { name: 'clients', value: contractActivityClients },
+          ]);
         } else {
           writeData(collection, data);
         }
@@ -2460,6 +2558,9 @@ function registerCrudRoutes(deps) {
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
+        if (collection === 'client_contracts') {
+          assertClientContractUpdateScope(req, data[idx]);
+        }
         accessControl.assertCanDeleteEntity(collection, data[idx], req.user);
       } catch (error) {
         return sendAccessError(res, error);

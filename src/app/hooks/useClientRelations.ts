@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clientObjectsService } from '../services/client-objects.service';
-import { clientContractsService, type ClientContractCreateInput } from '../services/client-contracts.service';
+import {
+  clientContractsService,
+  type ClientContractCreateInput,
+  type ClientContractUpdateInput,
+} from '../services/client-contracts.service';
 import type { ClientContract, ClientObject, ClientObjectCreateInput } from '../types';
+import { CLIENT_KEYS } from './useClients';
 
 export const CLIENT_OBJECT_KEYS = {
   all: ['client_objects'] as const,
@@ -71,9 +76,14 @@ export function useCreateClientContract() {
 export function useUpdateClientContract() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Partial<ClientContract> }) =>
+    mutationFn: ({ id, data }: { id: string; data: ClientContractUpdateInput }) =>
       clientContractsService.update(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: CLIENT_CONTRACT_KEYS.all }),
+    onSuccess: (updated) => {
+      qc.setQueryData<ClientContract[]>(CLIENT_CONTRACT_KEYS.all, current =>
+        (current || []).map(item => item.id === updated.id ? updated : item));
+      qc.invalidateQueries({ queryKey: CLIENT_CONTRACT_KEYS.all });
+      if (updated.clientId) qc.invalidateQueries({ queryKey: CLIENT_KEYS.detail(updated.clientId) });
+    },
   });
 }
 
@@ -82,7 +92,11 @@ export function useDeleteClientContract() {
   return useMutation({
     mutationFn: ({ id, clientId, counterpartyId }: { id: string; clientId?: string; counterpartyId?: string }) =>
       clientContractsService.delete(id, { clientId, counterpartyId }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: CLIENT_CONTRACT_KEYS.all }),
+    onSuccess: (_result, { id }) => {
+      qc.setQueryData<ClientContract[]>(CLIENT_CONTRACT_KEYS.all, current =>
+        (current || []).filter(item => item.id !== id));
+      qc.invalidateQueries({ queryKey: CLIENT_CONTRACT_KEYS.all });
+    },
   });
 }
 

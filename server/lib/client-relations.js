@@ -293,6 +293,17 @@ function normalizeClientContractRecord(record, existing = null, deps = {}) {
     throw error;
   }
   const status = normalizeStatus(record?.status ?? existing?.status);
+  const date = text(record?.date);
+  const title = text(record?.title);
+  const notes = text(record?.notes);
+  if ((!existing || date !== text(existing?.date)) && date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const error = new Error('Дата договора должна быть в формате ГГГГ-ММ-ДД');
+    error.status = 400;
+    error.code = 'CLIENT_CONTRACT_DATE_INVALID';
+    throw error;
+  }
+  if (!existing || title !== text(existing?.title)) assertTextLength(title, 500, 'Название договора');
+  if (!existing || notes !== text(existing?.notes)) assertTextLength(notes, 2000, 'Примечание к договору');
   const normalized = {
     ...existing,
     ...record,
@@ -301,10 +312,10 @@ function normalizeClientContractRecord(record, existing = null, deps = {}) {
     objectId: objectId || undefined,
     objectIds,
     number,
-    date: text(record?.date) || undefined,
-    title: text(record?.title) || number,
+    date: date || undefined,
+    title: title || number,
     status,
-    notes: text(record?.notes) || undefined,
+    notes: notes || undefined,
     createdAt: existing?.createdAt || record?.createdAt || nowIso(),
     updatedAt: nowIso(),
   };

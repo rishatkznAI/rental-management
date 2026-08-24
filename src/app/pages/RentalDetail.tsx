@@ -369,6 +369,9 @@ export default function RentalDetail() {
   const currentContractId = (isEditing ? formState?.contractId : rental?.contractId) || '';
   const activeClientObjects = clientObjects.filter(object => object.clientId === selectedClient?.id && object.status !== 'archived');
   const selectedRentalObject = clientObjects.find(object => object.id === currentObjectId);
+  const selectedRentalObjectLabel = selectedRentalObject
+    ? [selectedRentalObject.name, selectedRentalObject.address].filter(Boolean).join(' · ')
+    : [rental?.objectName, rental?.objectAddress].filter(Boolean).join(' · ');
   const objectOptions = selectedRentalObject && !activeClientObjects.some(object => object.id === selectedRentalObject.id)
     ? [selectedRentalObject, ...activeClientObjects]
     : activeClientObjects;
@@ -724,7 +727,9 @@ export default function RentalDetail() {
     try {
       const rentalPatch = {
         clientId: formState.clientId,
-        objectId: formState.objectId || undefined,
+        // Keep the empty string in PATCH so JSON serialization can explicitly
+        // clear a previously selected optional ClientObject.
+        objectId: formState.objectId,
         contractId: formState.contractId || undefined,
         client: formState.client.trim(),
         contact: formState.contact.trim(),
@@ -1225,16 +1230,14 @@ export default function RentalDetail() {
                           <SelectItem value="none">Без объекта</SelectItem>
                           {objectOptions.map(object => (
                             <SelectItem key={object.id} value={object.id}>
-                              {object.name} · {object.address}{object.status === 'archived' ? ' · архив' : ''}
+                              {[object.name, object.address].filter(Boolean).join(' · ')}{object.status === 'archived' ? ' · архив' : ''}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     ) : (
                       <p className="mt-0.5 font-medium text-gray-900 dark:text-white">
-                        {selectedRentalObject
-                          ? `${selectedRentalObject.name} · ${selectedRentalObject.address}`
-                          : rental.objectName || rental.objectAddress || (rental.objectId ? 'Объект привязан' : 'Без объекта')}
+                        {selectedRentalObjectLabel || (rental.objectId ? 'Объект привязан' : 'Без объекта')}
                       </p>
                     )}
                   </div>

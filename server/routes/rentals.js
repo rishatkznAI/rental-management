@@ -90,6 +90,23 @@ const RENTAL_PLANNER_SYNC_FIELDS = new Set([
   'updDate',
   'comments',
 ]);
+const RENTAL_RELATION_MUTATION_FIELDS = new Set([
+  'counterpartyId',
+  'clientId',
+  'objectId',
+  'contractId',
+]);
+const RENTAL_NORMALIZED_RELATION_FIELDS = [
+  'counterpartyId',
+  'clientId',
+  'objectId',
+  'objectName',
+  'objectAddress',
+  'objectContactName',
+  'objectContactPhone',
+  'contractId',
+  'contractNumber',
+];
 const RENTAL_AUDIT_FINANCE_FIELDS = new Set([
   'amount',
   'paidAmount',
@@ -2169,6 +2186,16 @@ function registerRentalRoutes(deps) {
                 || Object.prototype.hasOwnProperty.call(immediatePatch, 'managerId'),
             });
             const normalizedFields = new Set(Object.keys(immediatePatch));
+            if ([...RENTAL_RELATION_MUTATION_FIELDS].some(field => normalizedFields.has(field))) {
+              RENTAL_NORMALIZED_RELATION_FIELDS.forEach(field => {
+                if (
+                  JSON.stringify(previousRental?.[field] ?? null)
+                  !== JSON.stringify(normalizedItem?.[field] ?? null)
+                ) {
+                  normalizedFields.add(field);
+                }
+              });
+            }
             if (normalizedFields.has('manager') || normalizedFields.has('managerId')) {
               normalizedFields.add('manager');
               normalizedFields.add('managerId');

@@ -208,6 +208,9 @@ export default function RentalNew() {
   const [showObjectCreator, setShowObjectCreator] = useState(false);
   const [newObjectName, setNewObjectName] = useState('');
   const [newObjectAddress, setNewObjectAddress] = useState('');
+  const [newObjectContactName, setNewObjectContactName] = useState('');
+  const [newObjectContactPhone, setNewObjectContactPhone] = useState('');
+  const [newObjectComment, setNewObjectComment] = useState('');
   const [showContractCreator, setShowContractCreator] = useState(false);
   const [newContractDate, setNewContractDate] = useState(today);
   const [newContractTitle, setNewContractTitle] = useState('');
@@ -245,6 +248,9 @@ export default function RentalNew() {
     setShowContractCreator(false);
     setNewObjectName('');
     setNewObjectAddress('');
+    setNewObjectContactName('');
+    setNewObjectContactPhone('');
+    setNewObjectComment('');
     setNewContractDate(today);
     setNewContractTitle('');
     setRelationError('');
@@ -423,14 +429,6 @@ export default function RentalNew() {
     setContractId('');
   }, [clientRouteResolution.status, objectId, objectOptions, routeRequest.legacyObjectId]);
   useEffect(() => {
-    if (selectedClientObjects.length === 1 && !objectId) {
-      objectContextVersionRef.current += 1;
-      contractContextVersionRef.current += 1;
-      rentalContextVersionRef.current += 1;
-      setObjectId(selectId(selectedClientObjects[0].id));
-    }
-  }, [objectId, selectedClientObjects]);
-  useEffect(() => {
     if (!routeRequest.legacyContractId || clientRouteResolution.status !== 'valid') return;
     const requestedContract = contractOptions.find(option => option.id === routeRequest.legacyContractId);
     if (requestedContract && contractId !== requestedContract.id) {
@@ -532,15 +530,18 @@ export default function RentalNew() {
     if (objectCreateInFlightRef.current) return;
     setRelationError('');
     setRelationRefreshWarning('');
-    if (!selectedClient || !newObjectName.trim() || !newObjectAddress.trim()) {
-      setRelationError('Для нового объекта укажите название и адрес.');
+    if (!selectedClient || !newObjectName.trim()) {
+      setRelationError('Для нового объекта укажите название.');
       return;
     }
     const payload = {
       counterpartyId: selectedClient.counterpartyId,
       clientId: selectId(selectedClient.id),
       name: newObjectName.trim(),
-      address: newObjectAddress.trim(),
+      address: newObjectAddress.trim() || undefined,
+      contactName: newObjectContactName.trim() || undefined,
+      contactPhone: newObjectContactPhone.trim() || undefined,
+      comment: newObjectComment.trim() || undefined,
       status: 'active' as const,
     };
     const attempt = idempotencyKeyForAttempt('client-object', payload, objectAttemptsRef.current);
@@ -573,6 +574,9 @@ export default function RentalNew() {
       setContractId('');
       setNewObjectName('');
       setNewObjectAddress('');
+      setNewObjectContactName('');
+      setNewObjectContactPhone('');
+      setNewObjectComment('');
       setShowObjectCreator(false);
       void refreshClientRelationCache(qc, CLIENT_OBJECT_KEYS.all).catch(() => {
         if (
@@ -602,13 +606,13 @@ export default function RentalNew() {
     if (contractCreateInFlightRef.current) return;
     setRelationError('');
     setRelationRefreshWarning('');
-    if (!selectedClient || !objectId) {
-      setRelationError('Для нового договора выберите объект.');
+    if (!selectedClient) {
+      setRelationError('Для нового договора выберите клиента.');
       return;
     }
     const payload = {
       clientId: selectId(selectedClient.id),
-      objectId,
+      objectId: objectId || undefined,
       date: newContractDate || undefined,
       title: newContractTitle.trim() || undefined,
       status: 'active' as const,
@@ -631,7 +635,7 @@ export default function RentalNew() {
         && objectContextVersionRef.current === objectContextVersion
         && contractContextVersionRef.current === contractContextVersion
         && clientId === payload.clientId
-        && objectId === payload.objectId;
+        && objectId === selectId(payload.objectId);
       if (!stillOwnsRelationContext) return;
       const createdContractRecord = { ...created, id: createdContractId };
       setLocallyCreatedContracts(current => [
@@ -652,7 +656,7 @@ export default function RentalNew() {
           && objectContextVersionRef.current === objectContextVersion
           && contractContextVersionRef.current === selectedContractContextVersion
           && clientId === payload.clientId
-          && objectId === payload.objectId
+          && objectId === selectId(payload.objectId)
         ) {
           setRelationRefreshWarning('Договор создан и выбран. Не удалось обновить список с сервера; можно продолжить заполнение.');
         }
@@ -664,7 +668,7 @@ export default function RentalNew() {
         && objectContextVersionRef.current === objectContextVersion
         && contractContextVersionRef.current === contractContextVersion
         && clientId === payload.clientId
-        && objectId === payload.objectId
+        && objectId === selectId(payload.objectId)
       ) {
         setRelationError(error instanceof Error ? error.message : 'Не удалось создать договор клиента.');
       }
@@ -691,8 +695,8 @@ export default function RentalNew() {
       setFormError('Укажите даты начала и окончания аренды.');
       return;
     }
-    if (!objectId || !contractId) {
-      setFormError('Для аренды укажите объект клиента и договор.');
+    if (!contractId) {
+      setFormError('Для аренды укажите договор.');
       return;
     }
     if (requiresCreditRiskAcknowledgement && !creditRiskAcknowledged) {
@@ -917,65 +921,67 @@ export default function RentalNew() {
             {selectedClient && (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Объект клиента <span className="text-red-500">*</span></label>
-                  {selectedClientObjects.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700">
-                      У клиента нет активных объектов. Добавьте первый объект прямо здесь.
-                    </p>
-                  ) : (
-                    <select
-                      data-testid="rental-object-select"
-                      className={relationSelectClass}
-                      value={objectId}
-                      onChange={(event) => {
-                        if (objectId !== event.target.value) {
-                          objectContextVersionRef.current += 1;
-                          contractContextVersionRef.current += 1;
-                          rentalContextVersionRef.current += 1;
-                        }
-                        setObjectId(event.target.value);
-                        setContractId('');
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Объект клиента <span className="font-normal text-gray-500">(необязательно)</span></label>
+                  <select
+                    data-testid="rental-object-select"
+                    className={relationSelectClass}
+                    value={objectId}
+                    onChange={(event) => {
+                      const nextObjectId = event.target.value;
+                      if (nextObjectId === '__create__') {
+                        setShowObjectCreator(true);
                         setRelationError('');
-                        setRelationRefreshWarning('');
-                        setSubmitNotice('');
-                      }}
-                    >
-                      <option value="">Без объекта</option>
-                      {objectOptions.map(option => (
-                        <option key={option.id} value={option.id}>{option.label}</option>
-                      ))}
-                    </select>
-                  )}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="self-start"
-                    onClick={() => {
-                      setShowObjectCreator(value => !value);
+                        return;
+                      }
+                      if (objectId !== nextObjectId) {
+                        objectContextVersionRef.current += 1;
+                        contractContextVersionRef.current += 1;
+                        rentalContextVersionRef.current += 1;
+                      }
+                      setObjectId(nextObjectId);
+                      setContractId('');
                       setRelationError('');
+                      setRelationRefreshWarning('');
+                      setSubmitNotice('');
                     }}
                   >
-                    {showObjectCreator ? 'Скрыть добавление' : 'Добавить объект'}
-                  </Button>
+                    <option value="">Без объекта</option>
+                    {objectOptions.map(option => (
+                      <option key={option.id} value={option.id}>{option.label}</option>
+                    ))}
+                    <option value="__create__">+ Добавить новый объект</option>
+                  </select>
+                  {selectedClientObjects.length === 0 && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      У клиента пока нет объектов. Можно продолжить без объекта или добавить площадку.
+                    </p>
+                  )}
                   {showObjectCreator && (
                     <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                       <Input
-                        placeholder="Название объекта"
+                        placeholder="Например, ЖК Южный парк"
                         value={newObjectName}
                         onChange={(event) => setNewObjectName(event.target.value)}
                       />
                       <Input
-                        placeholder="Адрес объекта"
+                        placeholder="Казань, ул. ..."
                         value={newObjectAddress}
                         onChange={(event) => setNewObjectAddress(event.target.value)}
                       />
-                      <Button
-                        type="button"
-                        onClick={handleCreateObject}
-                        disabled={createClientObject.isPending}
-                      >
-                        {createClientObject.isPending ? 'Добавление…' : 'Сохранить объект'}
-                      </Button>
+                      <Input placeholder="Иван Петров" value={newObjectContactName} onChange={(event) => setNewObjectContactName(event.target.value)} />
+                      <Input type="tel" placeholder="+7 ..." value={newObjectContactPhone} onChange={(event) => setNewObjectContactPhone(event.target.value)} />
+                      <textarea
+                        className={`${relationSelectClass} min-h-20 py-2`}
+                        placeholder="КПП №2, въезд со стороны..."
+                        value={newObjectComment}
+                        onChange={(event) => setNewObjectComment(event.target.value)}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" onClick={handleCreateObject} disabled={createClientObject.isPending}>
+                          {createClientObject.isPending ? 'Добавление…' : 'Сохранить объект'}
+                        </Button>
+                        <Button type="button" variant="secondary" onClick={() => setShowObjectCreator(false)}>Отмена</Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -983,7 +989,7 @@ export default function RentalNew() {
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Договор <span className="text-red-500">*</span></label>
                   {contractOptions.length === 0 ? (
                     <p className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700">
-                      Для выбранного клиента и объекта нет активных договоров. Добавьте договор прямо здесь.
+                      Для выбранного клиента{objectId ? ' и объекта' : ''} нет активных договоров. Добавьте договор прямо здесь.
                     </p>
                   ) : (
                     <select
@@ -1009,7 +1015,6 @@ export default function RentalNew() {
                     type="button"
                     variant="secondary"
                     className="self-start"
-                    disabled={!objectId}
                     onClick={() => {
                       setShowContractCreator(value => !value);
                       setRelationError('');
@@ -1017,7 +1022,7 @@ export default function RentalNew() {
                   >
                     {showContractCreator ? 'Скрыть добавление' : 'Добавить договор'}
                   </Button>
-                  {showContractCreator && objectId && (
+                  {showContractCreator && (
                     <div className="space-y-2 rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                       <div className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
                         Номер договора будет присвоен после создания
@@ -1275,7 +1280,7 @@ export default function RentalNew() {
             )}
 
             <div className="flex gap-3 pt-4">
-              <Button data-testid="rental-submit" type="submit" disabled={isSubmitting || !client || !objectId || !contractId || !equipmentId || !startDate || !endDate || conflictWarn || (requiresCreditRiskAcknowledgement && !creditRiskAcknowledged)}>
+              <Button data-testid="rental-submit" type="submit" disabled={isSubmitting || !client || !contractId || !equipmentId || !startDate || !endDate || conflictWarn || (requiresCreditRiskAcknowledgement && !creditRiskAcknowledged)}>
                 {isSubmitting ? 'Создание…' : 'Создать аренду'}
               </Button>
               <Button

@@ -943,6 +943,133 @@ test('object and contract snapshots are derived from authoritative ids on POST a
   });
 });
 
+test('office manager clearing Rental object clears every object snapshot after reload', async () => {
+  const { app, state } = createApp();
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+    assert.equal(created.body.objectId, 'CO-1');
+    assert.equal(created.body.objectName, 'Канонический объект');
+    assert.equal(created.body.objectAddress, 'Канонический адрес');
+    assert.equal(created.body.objectContactName, 'Канонический контакт');
+    assert.equal(created.body.objectContactPhone, '+7 900 000-00-01');
+
+    const linkedGanttRental = state.gantt_rentals.find(item => item.rentalId === created.body.id);
+    assert.ok(linkedGanttRental);
+    const cleared = await request(
+      baseUrl,
+      'PATCH',
+      `/api/rentals/${created.body.id}`,
+      {
+        objectId: '',
+        rentalId: created.body.id,
+        __rentalId: created.body.id,
+        __linkedGanttRentalId: linkedGanttRental.id,
+        __ganttRentalId: linkedGanttRental.id,
+        __sourceRentalId: linkedGanttRental.id,
+        entityType: 'rental',
+        actionType: 'rental_detail_update',
+      },
+      'office-token',
+    );
+    assert.equal(cleared.status, 200);
+    assert.equal(cleared.body.objectId, undefined);
+
+    const reloaded = await request(baseUrl, 'GET', `/api/rentals/${created.body.id}`);
+    assert.equal(reloaded.status, 200);
+    assert.equal(reloaded.body.objectId, undefined);
+    assert.equal(reloaded.body.objectName, null);
+    assert.equal(reloaded.body.objectAddress, null);
+    assert.equal(reloaded.body.objectContactName, null);
+    assert.equal(reloaded.body.objectContactPhone, null);
+    const storedRental = state.rentals.find(item => item.id === created.body.id);
+    assert.equal(storedRental.objectId, undefined);
+    assert.equal(storedRental.objectName, null);
+    assert.equal(storedRental.objectAddress, null);
+    assert.equal(storedRental.objectContactName, null);
+    assert.equal(storedRental.objectContactPhone, null);
+    const storedGanttRental = state.gantt_rentals.find(item => item.rentalId === created.body.id);
+    assert.equal(storedGanttRental.objectId, undefined);
+    assert.equal(storedGanttRental.objectName, undefined);
+    assert.equal(storedGanttRental.objectAddress, undefined);
+    assert.equal(storedGanttRental.objectContactName, undefined);
+    assert.equal(storedGanttRental.objectContactPhone, undefined);
+  });
+});
+
+test('office manager add and replace Rental object refreshes every object snapshot', async () => {
+  const { app, state } = createApp();
+  state.client_objects.push({
+    id: 'CO-2',
+    clientId: 'C-1',
+    name: 'Второй объект',
+    address: 'Второй адрес',
+    contactName: 'Второй контакт',
+    contactPhone: '+7 900 000-00-02',
+    status: 'active',
+  });
+  state.clients.push({ id: 'C-2', company: 'Другой клиент', manager: 'Аренда', managerId: 'U-rental' });
+  state.client_objects.push({
+    id: 'CO-foreign',
+    clientId: 'C-2',
+    name: 'Чужой объект',
+    address: 'Чужой адрес',
+    contactName: 'Чужой контакт',
+    contactPhone: '+7 900 000-00-03',
+    status: 'active',
+  });
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({ objectId: undefined }));
+    assert.equal(created.status, 201);
+    assert.equal(created.body.objectId, undefined);
+    const linkedGanttRental = state.gantt_rentals.find(item => item.rentalId === created.body.id);
+    assert.ok(linkedGanttRental);
+
+    const officePatch = objectId => request(
+      baseUrl,
+      'PATCH',
+      `/api/rentals/${created.body.id}`,
+      {
+        objectId,
+        rentalId: created.body.id,
+        __rentalId: created.body.id,
+        __linkedGanttRentalId: linkedGanttRental.id,
+        __ganttRentalId: linkedGanttRental.id,
+        __sourceRentalId: linkedGanttRental.id,
+        entityType: 'rental',
+        actionType: 'rental_detail_update',
+      },
+      'office-token',
+    );
+
+    const added = await officePatch('CO-1');
+    assert.equal(added.status, 200);
+    const afterAdd = await request(baseUrl, 'GET', `/api/rentals/${created.body.id}`);
+    assert.equal(afterAdd.body.objectId, 'CO-1');
+    assert.equal(afterAdd.body.objectName, 'Канонический объект');
+    assert.equal(afterAdd.body.objectAddress, 'Канонический адрес');
+    assert.equal(afterAdd.body.objectContactName, 'Канонический контакт');
+    assert.equal(afterAdd.body.objectContactPhone, '+7 900 000-00-01');
+
+    const replaced = await officePatch('CO-2');
+    assert.equal(replaced.status, 200);
+    const afterReplace = await request(baseUrl, 'GET', `/api/rentals/${created.body.id}`);
+    assert.equal(afterReplace.body.objectId, 'CO-2');
+    assert.equal(afterReplace.body.objectName, 'Второй объект');
+    assert.equal(afterReplace.body.objectAddress, 'Второй адрес');
+    assert.equal(afterReplace.body.objectContactName, 'Второй контакт');
+    assert.equal(afterReplace.body.objectContactPhone, '+7 900 000-00-02');
+    assert.notEqual(afterReplace.body.objectName, 'Канонический объект');
+
+    const foreign = await officePatch('CO-foreign');
+    assert.equal(foreign.status, 400);
+    const afterRejectedForeignObject = await request(baseUrl, 'GET', `/api/rentals/${created.body.id}`);
+    assert.equal(afterRejectedForeignObject.body.objectId, 'CO-2');
+    assert.equal(afterRejectedForeignObject.body.objectName, 'Второй объект');
+  });
+});
+
 test('server-side approval workflow cannot persist a forged relation snapshot', async () => {
   const { app, state } = createApp();
   await withServer(app, async baseUrl => {

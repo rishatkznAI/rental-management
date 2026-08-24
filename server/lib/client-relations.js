@@ -6,16 +6,23 @@ const {
 } = require('./document-counterparty-relations');
 const { counterpartyError } = require('./counterparty');
 
-const OBJECT_REQUIRED_ERROR = 'Для объекта укажите clientId или counterpartyId, название и адрес';
+const OBJECT_REQUIRED_ERROR = 'Для объекта укажите clientId или counterpartyId и название';
 const CONTRACT_REQUIRED_ERROR = 'Для договора клиента укажите Counterparty/Client и номер договора';
 const ORPHAN_CLIENT_ERROR = 'Клиент для записи не найден';
 const ORPHAN_OBJECT_ERROR = 'Объект клиента не найден или не принадлежит клиенту';
 const ORPHAN_CONTRACT_ERROR = 'Договор клиента не найден или не принадлежит клиенту';
 const ARCHIVED_OBJECT_ERROR = 'Архивный объект нельзя выбрать для новой записи';
-const REQUIRED_RENTAL_RELATIONS_ERROR = 'Для аренды укажите клиента, объект и договор';
+const REQUIRED_RENTAL_RELATIONS_ERROR = 'Для аренды укажите клиента и договор';
 
 function text(value) {
   return String(value ?? '').trim();
+}
+
+function assertTextLength(value, maxLength, label) {
+  if (value.length <= maxLength) return;
+  const error = new Error(`${label}: максимум ${maxLength} символов`);
+  error.status = 400;
+  throw error;
 }
 
 function normalizeStatus(value) {
@@ -104,7 +111,7 @@ function normalizeClientRelationLinks(payload, clientId, options = {}) {
   const resolvedClientId = text(clientId || payload?.clientId);
   const objectId = text(payload?.objectId);
   const contractId = text(payload?.contractId);
-  if (options.requireRentalRelations && (!resolvedClientId || !objectId || !contractId)) {
+  if (options.requireRentalRelations && (!resolvedClientId || !contractId)) {
     const error = new Error(REQUIRED_RENTAL_RELATIONS_ERROR);
     error.status = 400;
     throw error;
@@ -133,12 +140,21 @@ function normalizeClientRelationLinks(payload, clientId, options = {}) {
     clientId: resolvedClientId || payload?.clientId,
     objectId: objectId || undefined,
     contractId: contractId || undefined,
-    ...(object && options.includeObjectSnapshot ? {
-      objectName: object.name || null,
-      objectAddress: object.address || null,
-      objectContactName: object.contactName || null,
-      objectContactPhone: object.contactPhone || null,
-    } : {}),
+    ...(options.includeObjectSnapshot
+      ? object
+        ? {
+            objectName: object.name || null,
+            objectAddress: object.address || null,
+            objectContactName: object.contactName || null,
+            objectContactPhone: object.contactPhone || null,
+          }
+        : {
+            objectName: null,
+            objectAddress: null,
+            objectContactName: null,
+            objectContactPhone: null,
+          }
+      : {}),
     ...(contract && options.includeContractSnapshot ? {
       contractNumber: contract.number || null,
     } : {}),
@@ -159,12 +175,36 @@ function normalizeClientObjectRecord(record, existing = null, deps = {}) {
   );
   const name = text(record?.name);
   const address = text(record?.address);
+  const contactName = text(record?.contactName);
+  const contactPhone = text(record?.contactPhone);
+  // `notes` is kept as a compatibility projection for records and consumers
+  // created before ClientObject received the canonical `comment` field.
+  const recordComment = text(record?.comment);
+  const recordNotes = text(record?.notes);
+  const commentChanged = Boolean(existing)
+    && Object.prototype.hasOwnProperty.call(record || {}, 'comment')
+    && recordComment !== text(existing?.comment);
+  const legacyNotesChanged = Boolean(existing)
+    && Object.prototype.hasOwnProperty.call(record || {}, 'notes')
+    && recordNotes !== text(existing?.notes);
+  const comment = commentChanged
+    ? recordComment
+    : legacyNotesChanged
+      ? recordNotes
+      : Object.prototype.hasOwnProperty.call(record || {}, 'comment')
+        ? recordComment
+        : recordNotes || text(existing?.comment ?? existing?.notes);
   const status = normalizeStatus(record?.status ?? existing?.status);
-  if ((!clientId && !counterpartyId) || !name || !address) {
+  if ((!clientId && !counterpartyId) || !name) {
     const error = new Error(OBJECT_REQUIRED_ERROR);
     error.status = 400;
     throw error;
   }
+  assertTextLength(name, 160, 'Название объекта');
+  assertTextLength(address, 500, 'Адрес объекта');
+  assertTextLength(contactName, 160, 'Контактное лицо');
+  assertTextLength(contactPhone, 64, 'Телефон');
+  assertTextLength(comment, 2000, 'Комментарий');
   let relation = null;
   if (typeof deps.readData === 'function') {
     relation = resolveDomainCounterpartyRelation(
@@ -199,12 +239,13 @@ function normalizeClientObjectRecord(record, existing = null, deps = {}) {
     clientId: clientId || undefined,
     counterpartyId: relation?.counterpartyId || counterpartyId,
     name,
-    address,
-    contactName: text(record?.contactName),
-    contactPhone: text(record?.contactPhone),
+    address: address || undefined,
+    contactName: contactName || undefined,
+    contactPhone: contactPhone || undefined,
     contractId: text(record?.contractId) || undefined,
     contractNumber: text(record?.contractNumber) || undefined,
-    notes: text(record?.notes) || undefined,
+    comment: comment || undefined,
+    notes: comment || undefined,
     status,
     createdAt: existing?.createdAt || record?.createdAt || nowIso(),
     updatedAt: nowIso(),

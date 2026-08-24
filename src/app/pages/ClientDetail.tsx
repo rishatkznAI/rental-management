@@ -31,7 +31,7 @@ import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
 import { useCrmActivities } from '../hooks/useCrmActivities';
 import { useClientContractsList, useClientObjectsList, useCreateClientContract, useCreateClientObject, useUpdateClientObject } from '../hooks/useClientRelations';
-import type { Client, ClientStatus } from '../types';
+import type { Client, ClientObject, ClientStatus } from '../types';
 import { ApiError } from '../lib/api';
 import { isCrmEnabled } from '../lib/features';
 import { usePermissions } from '../lib/permissions';
@@ -50,6 +50,7 @@ import { buildClient360Summary } from '../lib/client360.js';
 import { buildClientQuickActions } from '../lib/quickActions.js';
 import { resolveRentalNavigationId } from '../lib/rentalNavigation.js';
 import { buildRentalNewRoute } from '../lib/rental-new-route.js';
+import { buildClientObjectRentalAggregates } from '../lib/clientObjectAggregates.js';
 import {
   debtCollectionActionLabel,
   debtCollectionPriorityLabel,
@@ -134,6 +135,15 @@ function rentalStatusVariant(status: string): BadgeVariant {
   return RENTAL_STATUS_LABELS[status]?.variant ?? 'default';
 }
 
+function activeRentalCountLabel(count: number) {
+  const lastTwo = count % 100;
+  const last = count % 10;
+  if (lastTwo >= 11 && lastTwo <= 14) return `${count} активных аренд`;
+  if (last === 1) return `${count} активная аренда`;
+  if (last >= 2 && last <= 4) return `${count} активные аренды`;
+  return `${count} активных аренд`;
+}
+
 function getDuplicateClient(error: unknown): { id?: string; company?: string } | null {
   if (!(error instanceof ApiError)) return null;
   const body = error.body as { code?: string; conflictClient?: { id?: string; company?: string } } | undefined;
@@ -170,6 +180,14 @@ type ClientFileDraft = {
   file: File | null;
 };
 
+type ClientObjectDraft = {
+  name: string;
+  address: string;
+  contactName: string;
+  contactPhone: string;
+  comment: string;
+};
+
 const emptyContactDraft: ClientContactDraft = {
   name: '',
   role: '',
@@ -183,6 +201,24 @@ const emptyFileDraft: ClientFileDraft = {
   comment: '',
   file: null,
 };
+
+const emptyClientObjectDraft: ClientObjectDraft = {
+  name: '',
+  address: '',
+  contactName: '',
+  contactPhone: '',
+  comment: '',
+};
+
+function validateClientObjectDraft(draft: ClientObjectDraft) {
+  if (!draft.name.trim()) return 'Укажите название объекта.';
+  if (draft.name.trim().length > 160) return 'Название объекта: максимум 160 символов.';
+  if (draft.address.trim().length > 500) return 'Адрес объекта: максимум 500 символов.';
+  if (draft.contactName.trim().length > 160) return 'Контактное лицо: максимум 160 символов.';
+  if (draft.contactPhone.trim().length > 64) return 'Телефон: максимум 64 символа.';
+  if (draft.comment.trim().length > 2000) return 'Комментарий: максимум 2000 символов.';
+  return '';
+}
 
 function getClientDeleteConflict(error: unknown): { message: string; rentals: ClientDeleteBlockedRental[] } | null {
   if (!(error instanceof ApiError)) return null;
@@ -206,6 +242,15 @@ function getClientHistoryConflict(error: unknown): { message: string; links: Cli
 
 function Divider() {
   return <hr className="border-gray-100 dark:border-gray-800" />;
+}
+
+function ObjectFormInput({ label, ...props }: React.ComponentProps<typeof Input> & { label: string }) {
+  return (
+    <label className="space-y-1.5">
+      <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">{label}</span>
+      <Input {...props} />
+    </label>
+  );
 }
 
 async function fileToDataUrl(file: File): Promise<string> {
@@ -449,9 +494,13 @@ export default function ClientDetail() {
   const [innError, setInnError] = useState('');
   const [deleteBlockedRentals, setDeleteBlockedRentals] = useState<ClientDeleteBlockedRental[]>([]);
   const [deleteHistoryLinks, setDeleteHistoryLinks] = useState<ClientDeleteHistoryLink[]>([]);
-  const [objectForm, setObjectForm] = useState({ name: '', address: '', contactName: '', contactPhone: '', notes: '' });
+  const [objectForm, setObjectForm] = useState<ClientObjectDraft>(emptyClientObjectDraft);
+  const [objectDialogOpen, setObjectDialogOpen] = useState(false);
+  const [openedObjectId, setOpenedObjectId] = useState('');
+  const [objectFormError, setObjectFormError] = useState('');
   const [editingObjectId, setEditingObjectId] = useState('');
-  const [editObjectForm, setEditObjectForm] = useState({ name: '', address: '', contactName: '', contactPhone: '', notes: '' });
+  const [editObjectForm, setEditObjectForm] = useState<ClientObjectDraft>(emptyClientObjectDraft);
+  const [editObjectError, setEditObjectError] = useState('');
   const [contractForm, setContractForm] = useState({ date: '', title: '', objectId: '', notes: '' });
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
   const [contactDraft, setContactDraft] = useState<ClientContactDraft>(emptyContactDraft);
@@ -513,7 +562,10 @@ export default function ClientDetail() {
 
   const { data: allDocs = [] } = useDocumentsList({ enabled: canViewDocuments });
   const clientObjects = useMemo(
-    () => clientObjectsAll.filter(item => client && item.clientId === client.id),
+    () => clientObjectsAll.filter(item => client && (
+      item.clientId === client.id
+      || (!item.clientId && Boolean(client.counterpartyId) && item.counterpartyId === client.counterpartyId)
+    )),
     [client, clientObjectsAll],
   );
   const clientContracts = useMemo(
@@ -531,6 +583,15 @@ export default function ClientDetail() {
     contracts: clientContractsAll,
     crmActivities,
   }), [allDocs, client, clientContractsAll, crmActivities, ganttRentals, paymentAllocations, payments, rentals]);
+  const objectRentalAggregates = useMemo(
+    () => buildClientObjectRentalAggregates(ganttRentals, {
+      clientId: client?.id,
+      counterpartyId: client?.counterpartyId,
+    }),
+    [client?.counterpartyId, client?.id, ganttRentals],
+  );
+  const openedObject = clientObjects.find(item => item.id === openedObjectId) || null;
+  const openedObjectRentals = activeRentals.filter(rental => rental.objectId === openedObjectId);
 
   const clientFinancial = React.useMemo(() => {
     if (!client) return null;
@@ -1046,20 +1107,31 @@ export default function ClientDetail() {
 
   function handleCreateObject() {
     if (!client || !canEdit) return;
+    const validationError = validateClientObjectDraft(objectForm);
+    if (validationError) {
+      setObjectFormError(validationError);
+      return;
+    }
+    setObjectFormError('');
     createClientObject.mutate({
       clientId: client.id,
-      name: objectForm.name,
-      address: objectForm.address,
-      contactName: objectForm.contactName || undefined,
-      contactPhone: objectForm.contactPhone || undefined,
-      notes: objectForm.notes || undefined,
+      name: objectForm.name.trim(),
+      address: objectForm.address.trim() || undefined,
+      contactName: objectForm.contactName.trim() || undefined,
+      contactPhone: objectForm.contactPhone.trim() || undefined,
+      comment: objectForm.comment.trim() || undefined,
       status: 'active',
     }, {
       onSuccess: () => {
-        setObjectForm({ name: '', address: '', contactName: '', contactPhone: '', notes: '' });
+        setObjectForm(emptyClientObjectDraft);
+        setObjectDialogOpen(false);
         toast.success('Объект клиента добавлен.');
       },
-      onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось сохранить объект.'),
+      onError: error => {
+        const message = error instanceof Error ? error.message : 'Не удалось сохранить объект.';
+        setObjectFormError(`${message} Проверьте данные и повторите попытку.`);
+        toast.error(message);
+      },
     });
   }
 
@@ -1070,24 +1142,44 @@ export default function ClientDetail() {
     });
   }
 
-  function startEditObject(object: { id: string; name: string; address: string; contactName?: string; contactPhone?: string; notes?: string }) {
+  function startEditObject(object: ClientObject) {
     setEditingObjectId(object.id);
+    setEditObjectError('');
     setEditObjectForm({
       name: object.name || '',
       address: object.address || '',
       contactName: object.contactName || '',
       contactPhone: object.contactPhone || '',
-      notes: object.notes || '',
+      comment: object.comment || object.notes || '',
     });
   }
 
   function handleSaveObject(objectId: string) {
-    updateClientObject.mutate({ id: objectId, data: editObjectForm }, {
+    const validationError = validateClientObjectDraft(editObjectForm);
+    if (validationError) {
+      setEditObjectError(validationError);
+      return;
+    }
+    setEditObjectError('');
+    updateClientObject.mutate({
+      id: objectId,
+      data: {
+        name: editObjectForm.name.trim(),
+        address: editObjectForm.address.trim(),
+        contactName: editObjectForm.contactName.trim(),
+        contactPhone: editObjectForm.contactPhone.trim(),
+        comment: editObjectForm.comment.trim(),
+      },
+    }, {
       onSuccess: () => {
         setEditingObjectId('');
         toast.success('Объект обновлён.');
       },
-      onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось обновить объект.'),
+      onError: error => {
+        const message = error instanceof Error ? error.message : 'Не удалось обновить объект.';
+        setEditObjectError(`${message} Обновите страницу и повторите попытку.`);
+        toast.error(message);
+      },
     });
   }
 
@@ -1981,34 +2073,79 @@ export default function ClientDetail() {
       <>
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
             <CardTitle className="flex items-center gap-2 text-base">
               <MapPin className="h-4 w-4" />
-              Объекты
+              Объекты клиента
             </CardTitle>
+            {canEdit && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setObjectForm(emptyClientObjectDraft);
+                  setObjectFormError('');
+                  setObjectDialogOpen(true);
+                }}
+              >
+                <Plus className="h-4 w-4" />
+                Добавить объект
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             {clientObjects.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">Объекты клиента пока не заведены.</p>
+              <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-5 text-center dark:border-gray-800 dark:bg-gray-900/40">
+                <MapPinned className="mx-auto h-8 w-8 text-gray-400" />
+                <p className="mt-3 text-sm font-medium text-gray-900 dark:text-white">Объекты пока не добавлены</p>
+                <p className="mx-auto mt-1 max-w-lg text-sm text-gray-500 dark:text-gray-400">
+                  Добавьте площадку, куда клиенту доставляется техника. Объект можно будет выбирать при создании аренды и доставки.
+                </p>
+                {canEdit && (
+                  <Button
+                    className="mt-4"
+                    onClick={() => {
+                      setObjectForm(emptyClientObjectDraft);
+                      setObjectFormError('');
+                      setObjectDialogOpen(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Добавить объект
+                  </Button>
+                )}
+              </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {clientObjects.map(object => {
                   const contract = object.contractId ? clientContracts.find(item => item.id === object.contractId) : null;
                   const isObjectEditing = editingObjectId === object.id;
+                  const aggregate = objectRentalAggregates[object.id];
                   return (
-                    <div key={object.id} className="rounded-md border border-gray-200 p-3 text-sm dark:border-gray-800">
+                    <div key={object.id} className="rounded-2xl border border-gray-200 p-4 text-sm dark:border-gray-800">
                       {isObjectEditing ? (
                         <div className="grid gap-3 md:grid-cols-2">
-                          <Input label="Название объекта" value={editObjectForm.name} onChange={e => setEditObjectForm({ ...editObjectForm, name: e.target.value })} />
-                          <Input label="Адрес объекта" value={editObjectForm.address} onChange={e => setEditObjectForm({ ...editObjectForm, address: e.target.value })} />
-                          <Input label="Контакт" value={editObjectForm.contactName} onChange={e => setEditObjectForm({ ...editObjectForm, contactName: e.target.value })} />
-                          <Input label="Телефон" value={editObjectForm.contactPhone} onChange={e => setEditObjectForm({ ...editObjectForm, contactPhone: e.target.value })} />
-                          <div className="flex gap-2 md:col-span-2">
-                            <Button size="sm" onClick={() => handleSaveObject(object.id)} disabled={!editObjectForm.name.trim() || !editObjectForm.address.trim()}>
+                          <ObjectFormInput label="Название объекта *" placeholder="Например, ЖК Южный парк" value={editObjectForm.name} onChange={e => setEditObjectForm({ ...editObjectForm, name: e.target.value })} />
+                          <ObjectFormInput label="Адрес" placeholder="Казань, ул. ..." value={editObjectForm.address} onChange={e => setEditObjectForm({ ...editObjectForm, address: e.target.value })} />
+                          <ObjectFormInput label="Контакт на объекте" placeholder="Иван Петров" value={editObjectForm.contactName} onChange={e => setEditObjectForm({ ...editObjectForm, contactName: e.target.value })} />
+                          <ObjectFormInput label="Телефон" type="tel" placeholder="+7 ..." value={editObjectForm.contactPhone} onChange={e => setEditObjectForm({ ...editObjectForm, contactPhone: e.target.value })} />
+                          <label className="space-y-1.5 md:col-span-2">
+                            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Комментарий</span>
+                            <Textarea
+                              className="min-h-24"
+                              placeholder="КПП №2, въезд со стороны..."
+                              value={editObjectForm.comment}
+                              onChange={e => setEditObjectForm({ ...editObjectForm, comment: e.target.value })}
+                            />
+                          </label>
+                          {editObjectError && (
+                            <p className="text-sm text-red-600 dark:text-red-300 md:col-span-2">{editObjectError}</p>
+                          )}
+                          <div className="flex flex-wrap gap-2 md:col-span-2">
+                            <Button size="sm" onClick={() => handleSaveObject(object.id)} disabled={updateClientObject.isPending}>
                               <Save className="h-4 w-4" />
-                              Сохранить
+                              {updateClientObject.isPending ? 'Сохранение…' : 'Сохранить'}
                             </Button>
-                            <Button size="sm" variant="secondary" onClick={() => setEditingObjectId('')}>
+                            <Button size="sm" variant="secondary" onClick={() => { setEditingObjectId(''); setEditObjectError(''); }}>
                               <X className="h-4 w-4" />
                               Отмена
                             </Button>
@@ -2017,50 +2154,53 @@ export default function ClientDetail() {
                       ) : (
                         <>
                           <div className="flex items-start justify-between gap-3">
-                            <div>
+                            <div className="min-w-0">
                               <p className="font-semibold text-gray-900 dark:text-white">{object.name}</p>
-                              <p className="text-gray-500 dark:text-gray-400">{object.address}</p>
-                              <p className="mt-1 text-xs text-gray-500">
-                                {[object.contactName, object.contactPhone].filter(Boolean).join(' · ') || 'Контакт не указан'}
-                              </p>
-                              <p className="mt-1 text-xs text-gray-500">
-                                Договор: {contract?.number || object.contractNumber || 'не привязан'}
-                              </p>
+                              {object.address && <p className="mt-1 text-gray-500 dark:text-gray-400">{object.address}</p>}
+                              {(object.contactName || object.contactPhone) && (
+                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                  {[object.contactName, object.contactPhone].filter(Boolean).join(' · ')}
+                                </p>
+                              )}
+                              {contract?.number || object.contractNumber ? (
+                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                  Договор: {contract?.number || object.contractNumber}
+                                </p>
+                              ) : null}
+                              {aggregate && (aggregate.activeRentals > 0 || aggregate.equipmentCount > 0) && (
+                                <p className="mt-2 text-xs font-medium text-primary-content">
+                                  {activeRentalCountLabel(aggregate.activeRentals)} · {aggregate.equipmentCount} ед. техники
+                                </p>
+                              )}
+                              {(object.comment || object.notes) && (
+                                <p className="mt-2 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">{object.comment || object.notes}</p>
+                              )}
                             </div>
                             <Badge variant={object.status === 'archived' ? 'default' : 'success'}>
                               {object.status === 'archived' ? 'Архив' : 'Активен'}
                             </Badge>
                           </div>
-                          {canEdit && object.status !== 'archived' && (
-                            <div className="mt-3 flex gap-2">
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <Button variant="secondary" size="sm" onClick={() => setOpenedObjectId(object.id)}>
+                              Открыть
+                            </Button>
+                            {canEdit && (
                               <Button variant="secondary" size="sm" onClick={() => startEditObject(object)}>
                                 <Edit className="h-4 w-4" />
                                 Изменить
                               </Button>
+                            )}
+                            {canEdit && object.status !== 'archived' && (
                               <Button variant="secondary" size="sm" onClick={() => handleArchiveObject(object.id)}>
                                 Архивировать
                               </Button>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </>
                       )}
                     </div>
                   );
                 })}
-              </div>
-            )}
-            {canEdit && (
-              <div className="grid gap-3 border-t border-gray-100 pt-4 dark:border-gray-800 md:grid-cols-2">
-                <Input label="Название объекта" value={objectForm.name} onChange={e => setObjectForm({ ...objectForm, name: e.target.value })} />
-                <Input label="Адрес объекта" value={objectForm.address} onChange={e => setObjectForm({ ...objectForm, address: e.target.value })} />
-                <Input label="Контакт" value={objectForm.contactName} onChange={e => setObjectForm({ ...objectForm, contactName: e.target.value })} />
-                <Input label="Телефон" value={objectForm.contactPhone} onChange={e => setObjectForm({ ...objectForm, contactPhone: e.target.value })} />
-                <div className="md:col-span-2">
-                  <Button onClick={handleCreateObject} disabled={createClientObject.isPending || !objectForm.name.trim() || !objectForm.address.trim()}>
-                    <Plus className="h-4 w-4" />
-                    Добавить объект
-                  </Button>
-                </div>
               </div>
             )}
           </CardContent>
@@ -2985,6 +3125,134 @@ export default function ClientDetail() {
           <Button onClick={saveOpeningReceivable} disabled={!openingArDraft.confirmed || updateOpeningReceivable.isPending}>
             {updateOpeningReceivable.isPending ? 'Сохранение…' : 'Сохранить остаток'}
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      open={objectDialogOpen}
+      onOpenChange={open => {
+        setObjectDialogOpen(open);
+        if (!open) setObjectFormError('');
+      }}
+    >
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl rounded-2xl bg-white p-5 dark:bg-gray-950 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>Добавить объект</DialogTitle>
+          <DialogDescription>Площадка клиента для аренды, доставки и сервисных работ.</DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[65vh] space-y-4 overflow-y-auto py-4 pr-1">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ObjectFormInput
+              label="Название объекта *"
+              placeholder="Например, ЖК Южный парк"
+              value={objectForm.name}
+              onChange={event => {
+                setObjectForm(current => ({ ...current, name: event.target.value }));
+                if (objectFormError) setObjectFormError('');
+              }}
+            />
+            <ObjectFormInput
+              label="Адрес"
+              placeholder="Казань, ул. ..."
+              value={objectForm.address}
+              onChange={event => setObjectForm(current => ({ ...current, address: event.target.value }))}
+            />
+            <ObjectFormInput
+              label="Контакт на объекте"
+              placeholder="Иван Петров"
+              value={objectForm.contactName}
+              onChange={event => setObjectForm(current => ({ ...current, contactName: event.target.value }))}
+            />
+            <ObjectFormInput
+              label="Телефон"
+              type="tel"
+              placeholder="+7 ..."
+              value={objectForm.contactPhone}
+              onChange={event => setObjectForm(current => ({ ...current, contactPhone: event.target.value }))}
+            />
+          </div>
+          <label className="space-y-1.5">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Комментарий</span>
+            <Textarea
+              className="min-h-28"
+              placeholder="КПП №2, въезд со стороны..."
+              value={objectForm.comment}
+              onChange={event => setObjectForm(current => ({ ...current, comment: event.target.value }))}
+            />
+          </label>
+          {objectFormError && (
+            <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+              {objectFormError}
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setObjectDialogOpen(false)}>Отмена</Button>
+          <Button onClick={handleCreateObject} disabled={createClientObject.isPending}>
+            {createClientObject.isPending ? 'Сохранение…' : 'Сохранить'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={Boolean(openedObject)} onOpenChange={open => { if (!open) setOpenedObjectId(''); }}>
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl rounded-2xl bg-white p-5 dark:bg-gray-950 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>{openedObject?.name || 'Объект клиента'}</DialogTitle>
+          <DialogDescription>Операционные данные и активные аренды площадки.</DialogDescription>
+        </DialogHeader>
+        {openedObject && (
+          <div className="max-h-[65vh] space-y-4 overflow-y-auto py-4 pr-1">
+            <div className="grid gap-3 rounded-2xl border border-gray-200 p-4 text-sm dark:border-gray-800 sm:grid-cols-2">
+              <Field label="Адрес" value={openedObject.address || 'Не указан'} />
+              <Field label="Статус" value={openedObject.status === 'archived' ? 'Архив' : 'Активен'} />
+              <Field label="Контакт" value={openedObject.contactName || 'Не указан'} />
+              <Field label="Телефон" value={openedObject.contactPhone || 'Не указан'} />
+              {(openedObject.comment || openedObject.notes) && (
+                <div className="sm:col-span-2">
+                  <Field label="Комментарий" value={openedObject.comment || openedObject.notes || ''} />
+                </div>
+              )}
+            </div>
+            {objectRentalAggregates[openedObject.id] && (
+              <p className="text-sm font-medium text-primary-content">
+                {activeRentalCountLabel(objectRentalAggregates[openedObject.id].activeRentals)} · {objectRentalAggregates[openedObject.id].equipmentCount} ед. техники
+              </p>
+            )}
+            {openedObjectRentals.length > 0 && canViewRentals && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Активные аренды</p>
+                {openedObjectRentals.map(rental => {
+                  const navigationId = resolveRentalNavigationId(rental, rentals, ganttRentals);
+                  return navigationId ? (
+                    <Link
+                      key={rental.id}
+                      to={`/rentals/${navigationId}`}
+                      className="block rounded-xl border border-gray-200 px-3 py-2 text-sm hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-900"
+                    >
+                      {rental.id} · {rental.equipmentInv || 'Техника не указана'}
+                    </Link>
+                  ) : null;
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          {openedObject && canEdit && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                startEditObject(openedObject);
+                setOpenedObjectId('');
+              }}
+            >
+              <Edit className="h-4 w-4" />
+              Изменить
+            </Button>
+          )}
+          <Button onClick={() => setOpenedObjectId('')}>Закрыть</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

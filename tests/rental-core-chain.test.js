@@ -19,7 +19,10 @@ const { createBusinessNumberingService } = require('../server/lib/business-numbe
 
 function createState() {
   return {
-    users: [{ id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' }],
+    users: [
+      { id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' },
+      { id: 'U-office', name: 'Офис', role: 'Офис-менеджер', status: 'Активен' },
+    ],
     counterparties: [
       { id: 'CP-C-1', legalName: 'ООО Ромашка', shortName: 'ООО Ромашка', status: 'active', roles: ['customer'] },
       { id: 'CP-C-2', legalName: 'ООО Ромашка Плюс', shortName: 'ООО Ромашка Плюс', status: 'active', roles: ['customer'] },
@@ -107,8 +110,13 @@ function createApp(state = createState(), options = {}) {
 
   function requireAuth(req, res, next) {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    if (token !== 'admin-token') return res.status(401).json({ ok: false, error: 'Unauthorized' });
-    req.user = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' };
+    const actor = token === 'admin-token'
+      ? { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' }
+      : token === 'office-token'
+        ? { userId: 'U-office', userName: 'Офис', userRole: 'Офис-менеджер' }
+        : null;
+    if (!actor) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    req.user = actor;
     return next();
   }
 
@@ -548,6 +556,17 @@ test('creating and patching rental preserves object and contract in linked plann
     assert.equal(patchedLinks.body.contractId, 'CC-3');
     assert.equal(updatedGantt.objectId, 'CO-3');
     assert.equal(updatedGantt.contractId, 'CC-3');
+
+    const clearedObject = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      objectId: '',
+    });
+    assert.equal(clearedObject.status, 200);
+    assert.equal(clearedObject.body.objectId, undefined);
+    assert.equal(clearedObject.body.objectName, null);
+    assert.equal(clearedObject.body.objectAddress, null);
+    const clearedGantt = state.gantt_rentals.find(item => item.rentalId === created.body.id);
+    assert.equal(clearedGantt.objectId, undefined);
+    assert.equal(clearedGantt.objectName, undefined);
   });
 });
 
@@ -564,6 +583,36 @@ test('rental accepts same client contract on another client object', async () =>
     assert.equal(created.status, 201);
     assert.equal(created.body.objectId, 'CO-3');
     assert.equal(created.body.contractId, 'CC-1');
+  });
+});
+
+test('rental can be created without ClientObject while keeping Client and Contract links', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({ objectId: undefined }));
+
+    assert.equal(created.status, 201);
+    assert.equal(created.body.clientId, 'C-1');
+    assert.equal(created.body.objectId, undefined);
+    assert.equal(created.body.contractId, 'CC-1');
+    const projection = state.gantt_rentals.find(item => item.rentalId === created.body.id);
+    assert.equal(projection.objectId, undefined);
+    assert.equal(projection.contractId, 'CC-1');
+  });
+});
+
+test('rental creation still requires a Client contract when ClientObject is omitted', async () => {
+  const { app } = createApp();
+
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
+      objectId: undefined,
+      contractId: undefined,
+    }));
+
+    assert.equal(response.status, 400);
+    assert.match(response.body.error, /клиента и договор/i);
   });
 });
 
@@ -885,6 +934,64 @@ test('delivery created from rental stores rentalId equipmentId and clientId from
     });
     assert.equal(forgedPatch.status, 400);
     assert.equal(forgedPatch.body.code, 'BUSINESS_NUMBER_SERVER_OWNED');
+  });
+});
+
+test('delivery created after office manager clears Rental object uses only manual operational fields', async () => {
+  const { app, state } = createApp();
+  state.client_objects[0] = {
+    ...state.client_objects[0],
+    contactName: 'Контакт старого объекта',
+    contactPhone: '+7 900 111-22-33',
+  };
+  const clientObjectBefore = structuredClone(state.client_objects[0]);
+
+  await withServer(app, async baseUrl => {
+    const rental = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(rental.status, 201);
+    const linkedGanttRental = state.gantt_rentals.find(item => item.rentalId === rental.body.id);
+    assert.ok(linkedGanttRental);
+
+    const cleared = await request(baseUrl, 'PATCH', `/api/rentals/${rental.body.id}`, {
+      objectId: '',
+      rentalId: rental.body.id,
+      __rentalId: rental.body.id,
+      __linkedGanttRentalId: linkedGanttRental.id,
+      __ganttRentalId: linkedGanttRental.id,
+      __sourceRentalId: linkedGanttRental.id,
+      entityType: 'rental',
+      actionType: 'rental_detail_update',
+    }, { authorization: 'Bearer office-token' });
+    assert.equal(cleared.status, 200);
+
+    const reloadedRental = await request(baseUrl, 'GET', `/api/rentals/${rental.body.id}`);
+    assert.equal(reloadedRental.body.objectId, undefined);
+    assert.equal(reloadedRental.body.objectName, null);
+    assert.equal(reloadedRental.body.objectAddress, null);
+    assert.equal(reloadedRental.body.objectContactName, null);
+    assert.equal(reloadedRental.body.objectContactPhone, null);
+
+    const delivery = await request(baseUrl, 'POST', '/api/deliveries', {
+      type: 'shipping',
+      rentalId: rental.body.id,
+      transportDate: '2026-05-10',
+      origin: 'Склад',
+      destination: 'Ручной адрес доставки',
+      cargo: 'Подъемник',
+      contactName: 'Ручной контакт',
+      contactPhone: '+7 900 999-88-77',
+    });
+
+    assert.equal(delivery.status, 201);
+    assert.equal(delivery.body.objectId, null);
+    assert.equal(delivery.body.objectName, null);
+    assert.equal(delivery.body.objectAddress, null);
+    assert.equal(delivery.body.objectContactName, null);
+    assert.equal(delivery.body.objectContactPhone, null);
+    assert.equal(delivery.body.destination, 'Ручной адрес доставки');
+    assert.equal(delivery.body.contactName, 'Ручной контакт');
+    assert.equal(delivery.body.contactPhone, '+7 900 999-88-77');
+    assert.deepEqual(state.client_objects[0], clientObjectBefore);
   });
 });
 

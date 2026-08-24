@@ -399,12 +399,48 @@ test('client objects and contracts are client-scoped and validated', async () =>
     const firstObject = await request(baseUrl, 'POST', '/api/client_objects', {
       clientId: 'C-1',
       name: 'Склад',
-      address: 'Казань, Промзона',
       contactName: 'Ильдар',
       contactPhone: '+7',
+      comment: 'КПП №2',
     });
     assert.equal(firstObject.status, 201);
     assert.equal(firstObject.body.status, 'active');
+    assert.equal(firstObject.body.address, undefined);
+    assert.equal(firstObject.body.comment, 'КПП №2');
+
+    const reloadedObject = await request(baseUrl, 'GET', `/api/client_objects/${firstObject.body.id}`);
+    assert.equal(reloadedObject.status, 200);
+    assert.equal(reloadedObject.body.name, 'Склад');
+    assert.equal(reloadedObject.body.comment, 'КПП №2');
+
+    const editedObject = await request(baseUrl, 'PATCH', `/api/client_objects/${firstObject.body.id}`, {
+      name: 'Склад № 1',
+      address: 'Казань, Промзона',
+      contactName: 'Ильдар Сафин',
+      contactPhone: '+7 900 000-00-00',
+      comment: 'Въезд со стороны КПП №3',
+    });
+    assert.equal(editedObject.status, 200);
+    assert.equal(editedObject.body.address, 'Казань, Промзона');
+    assert.equal(editedObject.body.comment, 'Въезд со стороны КПП №3');
+    assert.equal(editedObject.body.notes, 'Въезд со стороны КПП №3');
+
+    const clearedOptionalFields = await request(baseUrl, 'PATCH', `/api/client_objects/${firstObject.body.id}`, {
+      address: '',
+      contactName: '',
+      contactPhone: '',
+      comment: '',
+    });
+    assert.equal(clearedOptionalFields.status, 200);
+    assert.equal(clearedOptionalFields.body.address, undefined);
+    assert.equal(clearedOptionalFields.body.comment, undefined);
+
+    const legacyNotesUpdate = await request(baseUrl, 'PATCH', `/api/client_objects/${firstObject.body.id}`, {
+      notes: 'Legacy consumer comment',
+    });
+    assert.equal(legacyNotesUpdate.status, 200);
+    assert.equal(legacyNotesUpdate.body.comment, 'Legacy consumer comment');
+    assert.equal(legacyNotesUpdate.body.notes, 'Legacy consumer comment');
 
     const secondObject = await request(baseUrl, 'POST', '/api/client_objects', {
       clientId: 'C-1',
@@ -444,6 +480,32 @@ test('client objects and contracts are client-scoped and validated', async () =>
     });
     assert.equal(secondContract.status, 201);
     assert.equal(state.client_contracts.length, 3);
+  });
+});
+
+test('referenced ClientObject can be archived but cannot be hard-deleted', async () => {
+  const { app, state } = makeCrudApp({
+    clients: [{ id: 'C-1', company: 'Клиент', inn: '7707083893', innNormalized: '7707083893' }],
+    client_objects: [{ id: 'CO-1', clientId: 'C-1', name: 'Площадка', status: 'active' }],
+    client_contracts: [{ id: 'CC-1', clientId: 'C-1', objectId: 'CO-1', number: 'Д-1', status: 'active' }],
+    rentals: [{ id: 'R-1', clientId: 'C-1', objectId: 'CO-1', contractId: 'CC-1' }],
+  });
+
+  await withServer(app, async baseUrl => {
+    const deleted = await request(baseUrl, 'DELETE', '/api/client_objects/CO-1');
+    assert.equal(deleted.status, 409);
+    assert.equal(deleted.body.code, 'CLIENT_OBJECT_HAS_HISTORY');
+    assert.deepEqual(deleted.body.links, [
+      { collection: 'rentals', count: 1 },
+      { collection: 'client_contracts', count: 1 },
+    ]);
+    assert.equal(state.client_objects.length, 1);
+
+    const archived = await request(baseUrl, 'PATCH', '/api/client_objects/CO-1', { status: 'archived' });
+    assert.equal(archived.status, 200);
+    assert.equal(archived.body.status, 'archived');
+    assert.equal(state.rentals[0].objectId, 'CO-1');
+    assert.equal(state.client_contracts[0].objectId, 'CO-1');
   });
 });
 

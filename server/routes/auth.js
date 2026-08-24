@@ -9,6 +9,7 @@ function registerAuthRoutes(app, deps) {
     hashPassword,
     needsPasswordRehash,
     createSession,
+    resolveActorScope = () => null,
     requireAuth,
     destroySession,
     deleteSessionsForUserIds,
@@ -66,7 +67,7 @@ function registerAuthRoutes(app, deps) {
     return res.status(status).json({ ok: false, error: 'Неверный логин или пароль' });
   }
 
-  function buildSessionUser(user) {
+  function buildSessionUser(user, actorScope = null) {
     const rawRole = user.role;
     const normalizedRole = normalizeRole(rawRole);
     return {
@@ -81,6 +82,10 @@ function registerAuthRoutes(app, deps) {
       ownerId: user.ownerId || undefined,
       ownerName: user.ownerName || undefined,
       ...(user.carrierId ? { carrierId: user.carrierId } : {}),
+      ...(actorScope ? {
+        companyId: actorScope.companyId,
+        tenantId: actorScope.tenantId,
+      } : {}),
     };
   }
 
@@ -154,9 +159,10 @@ function registerAuthRoutes(app, deps) {
         }
       }
 
-      const token = createSession(user);
+      const actorScope = resolveActorScope(user.id);
+      const token = createSession(user, actorScope);
       console.log(`[AUTH] Вход: ${user.name} (${user.role})`);
-      auditLog?.({ ...req, user: buildSessionUser(user) }, {
+      auditLog?.({ ...req, actorScope, user: buildSessionUser(user, actorScope) }, {
         action: 'login.success',
         entityType: 'auth',
         entityId: user.id,
@@ -178,6 +184,10 @@ function registerAuthRoutes(app, deps) {
           ownerId: user.ownerId || undefined,
           ownerName: user.ownerName || undefined,
           ...(user.carrierId ? { carrierId: user.carrierId } : {}),
+          ...(actorScope ? {
+            companyId: actorScope.companyId,
+            tenantId: actorScope.tenantId,
+          } : {}),
         },
       });
     } catch (err) {
@@ -196,7 +206,7 @@ function registerAuthRoutes(app, deps) {
       }
       return res.status(401).json({ ok: false, error: 'Аккаунт отключён или удалён' });
     }
-    res.json({ ok: true, user: buildSessionUser(user) });
+    res.json({ ok: true, user: buildSessionUser(user, req.actorScope) });
   });
 
   app.patch('/api/auth/profile', requireAuth, (req, res) => {
@@ -224,7 +234,7 @@ function registerAuthRoutes(app, deps) {
       profilePhoto,
     };
     writeData('users', users);
-    return res.json({ ok: true, user: buildSessionUser(users[idx]) });
+    return res.json({ ok: true, user: buildSessionUser(users[idx], req.actorScope) });
   });
 
   app.post('/api/auth/change-password', requireAuth, (req, res) => {

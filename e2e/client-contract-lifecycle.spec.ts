@@ -55,6 +55,7 @@ test('unused Client Contract can be archived, disappears from new Rental, and is
     const contracts = await contractsResponse.json() as Array<{ id: string }>;
     expect(contracts.some(item => item.id === contract.id)).toBe(false);
     const deleteClientResponse = await api.delete(`/api/clients/${client.id}`);
-    expect(deleteClientResponse.ok()).toBeTruthy();
+    expect(deleteClientResponse.status()).toBe(409);
+    expect(await deleteClientResponse.json()).toMatchObject({ code: 'CLIENT_HAS_HISTORY' });
   });
 });

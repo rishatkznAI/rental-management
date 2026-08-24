@@ -206,10 +206,25 @@ function actorId(actor) {
   return relationId(actor?.userId || actor?.id || actor?.userName || actor) || 'system';
 }
 
-function createSupplierProfile(counterpartyId, timestamp) {
+function ownerScope(counterparty) {
+  const companyId = relationId(counterparty?.companyId);
+  const tenantId = relationId(counterparty?.tenantId);
+  if (!companyId || !tenantId) {
+    throw counterpartyError(
+      'COUNTERPARTY_SCOPE_UNKNOWN',
+      'Counterparty scope must be known before role/profile creation.',
+      409,
+      { counterpartyId: relationId(counterparty?.id) || null },
+    );
+  }
+  return { companyId, tenantId };
+}
+
+function createSupplierProfile(counterpartyId, timestamp, scope) {
   return {
     id: deterministicRoleProfileId('supplier', counterpartyId),
     counterpartyId,
+    ...scope,
     status: 'active',
     categories: [],
     settlementTerms: null,
@@ -223,10 +238,11 @@ function createSupplierProfile(counterpartyId, timestamp) {
   };
 }
 
-function createContractorProfile(counterpartyId, timestamp) {
+function createContractorProfile(counterpartyId, timestamp, scope) {
   return {
     id: deterministicRoleProfileId('contractor', counterpartyId),
     counterpartyId,
+    ...scope,
     status: 'active',
     serviceCategories: [],
     geographicScope: null,
@@ -240,7 +256,7 @@ function createContractorProfile(counterpartyId, timestamp) {
   };
 }
 
-function activateProfile(state, counterpartyId, roleCode, timestamp) {
+function activateProfile(state, counterpartyId, roleCode, timestamp, scope) {
   if (roleCode === 'customer') {
     const profile = findUniqueByCounterparty(
       state.clients,
@@ -266,8 +282,8 @@ function activateProfile(state, counterpartyId, roleCode, timestamp) {
   const profile = findUniqueByCounterparty(profiles, counterpartyId, entity);
   if (!profile) {
     profiles.push(roleCode === 'supplier'
-      ? createSupplierProfile(counterpartyId, timestamp)
-      : createContractorProfile(counterpartyId, timestamp));
+      ? createSupplierProfile(counterpartyId, timestamp, scope)
+      : createContractorProfile(counterpartyId, timestamp, scope));
     return true;
   }
   if (isActiveProfile(profile)) return false;
@@ -343,6 +359,7 @@ function activateCounterpartyRole({
   }
 
   const timestamp = nowIso();
+  const scope = ownerScope(counterparty);
   const assignments = state[ROLE_ASSIGNMENTS_COLLECTION];
   const existing = findUniqueAssignment(assignments, id, role);
   let assignment = existing;
@@ -350,6 +367,7 @@ function activateCounterpartyRole({
     assignment = {
       id: deterministicRoleAssignmentId(id, role),
       counterpartyId: id,
+      ...scope,
       roleCode: role,
       status: 'active',
       validFrom: timestamp,
@@ -377,7 +395,7 @@ function activateCounterpartyRole({
     changed = true;
   }
 
-  if (activateProfile(state, id, role, timestamp)) changed = true;
+  if (activateProfile(state, id, role, timestamp, scope)) changed = true;
   if (projectActiveRolesToCounterparty(state, id, timestamp)) changed = true;
   return { state, assignment, counterparty: state.counterparties[counterpartyIndex], changed };
 }

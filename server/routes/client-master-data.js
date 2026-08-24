@@ -1,4 +1,5 @@
 const express = require('express');
+const { actorWithScope } = require('../lib/trusted-actor-scope');
 
 function sendLifecycleError(res, error) {
   const details = error?.details;
@@ -23,7 +24,7 @@ function registerClientMasterDataRoutes({
 
   router.delete('/clients/:id', requireAuth, requireWrite('clients'), (req, res) => {
     try {
-      return res.json(lifecycle.deleteClient({ id: req.params.id, actor: req.user }));
+      return res.json(lifecycle.deleteClient({ id: req.params.id, actor: actorWithScope(req) }));
     } catch (error) {
       return sendLifecycleError(res, error);
     }
@@ -35,7 +36,7 @@ function registerClientMasterDataRoutes({
     requireRead('client_objects'),
     (req, res) => {
       try {
-        return res.json(lifecycle.getClientObjectLifecycle({ id: req.params.id, actor: req.user }));
+        return res.json(lifecycle.getClientObjectLifecycle({ id: req.params.id, actor: actorWithScope(req) }));
       } catch (error) {
         return sendLifecycleError(res, error);
       }
@@ -48,7 +49,7 @@ function registerClientMasterDataRoutes({
     requireWrite('client_objects'),
     (req, res) => {
       try {
-        return res.json(lifecycle.archiveClientObject({ id: req.params.id, actor: req.user }));
+        return res.json(lifecycle.archiveClientObject({ id: req.params.id, actor: actorWithScope(req) }));
       } catch (error) {
         return sendLifecycleError(res, error);
       }
@@ -61,7 +62,7 @@ function registerClientMasterDataRoutes({
     requireWrite('client_objects'),
     (req, res) => {
       try {
-        return res.json(lifecycle.deleteClientObject({ id: req.params.id, actor: req.user }));
+        return res.json(lifecycle.deleteClientObject({ id: req.params.id, actor: actorWithScope(req) }));
       } catch (error) {
         return sendLifecycleError(res, error);
       }

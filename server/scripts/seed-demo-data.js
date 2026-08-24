@@ -7,6 +7,11 @@ const STRONG_HASH_PREFIX = 'h2:scrypt:';
 const SCRYPT_KEY_LENGTH = 64;
 const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1 };
 const DEMO_PREFIX = 'DEMO-';
+const DEMO_COMPANY_ID = 'DEMO-COMPANY-001';
+const DEMO_SCOPE = Object.freeze({
+  companyId: DEMO_COMPANY_ID,
+  tenantId: DEMO_COMPANY_ID,
+});
 const DEMO_USER_EMAILS = [
   'demo-admin@skytech.local',
   'demo-manager@skytech.local',
@@ -137,6 +142,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
     ['005', 'Монтаж Демо Групп', 'DEMO-INN-0000000005', 'Нина Контурова', 'client-005@example.test', 250000],
   ].map(([suffix, company, inn, contactPerson, email, creditLimit], index) => ({
     id: `DEMO-CLIENT-${suffix}`,
+    ...DEMO_SCOPE,
     counterpartyId: `DEMO-COUNTERPARTY-${suffix}`,
     name: company,
     company,
@@ -157,6 +163,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
 
   const counterparties = clients.map(client => ({
     id: client.counterpartyId,
+    ...DEMO_SCOPE,
     type: 'legal_entity',
     legalName: client.company,
     shortName: client.company,
@@ -179,6 +186,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
   }));
   const contractorCounterparty = {
     id: 'DEMO-CP-CONTRACTOR-001',
+    ...DEMO_SCOPE,
     type: 'legal_entity',
     legalName: 'ООО «Демо Карьер»',
     shortName: 'Demo Carrier',
@@ -203,6 +211,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
 
   const counterparty_role_assignments = clients.map((client, index) => ({
     id: `DEMO-ROLE-CUSTOMER-${String(index + 1).padStart(3, '0')}`,
+    ...DEMO_SCOPE,
     counterpartyId: client.counterpartyId,
     roleCode: 'customer',
     status: 'active',
@@ -217,6 +226,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
   }));
   counterparty_role_assignments.push({
     id: 'DEMO-ROLE-CONTRACTOR-001',
+    ...DEMO_SCOPE,
     counterpartyId: contractorCounterparty.id,
     roleCode: 'contractor',
     status: 'active',
@@ -232,6 +242,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
 
   const client_objects = clients.map((client, index) => ({
     id: `DEMO-OBJECT-${String(index + 1).padStart(3, '0')}`,
+    ...DEMO_SCOPE,
     clientId: client.id,
     counterpartyId: client.counterpartyId,
     name: `Демо-объект ${index + 1}`,
@@ -246,6 +257,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
 
   const client_contracts = clients.map((client, index) => ({
     id: `DEMO-CONTRACT-${String(index + 1).padStart(3, '0')}`,
+    ...DEMO_SCOPE,
     clientId: client.id,
     objectId: client_objects[index].id,
     number: `DEMO-АР-${now.getUTCFullYear()}-${String(index + 1).padStart(3, '0')}`,
@@ -647,6 +659,7 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
     supplier_profiles: [],
     contractor_profiles: [{
       id: 'DEMO-CONT-001',
+      ...DEMO_SCOPE,
       counterpartyId: contractorCounterparty.id,
       status: 'active',
       serviceCategories: ['delivery'],
@@ -694,12 +707,88 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
   };
 }
 
+function ensureDemoAuthority() {
+  const { ensureDb, getData } = require('../db');
+  const {
+    createPlatformIdentityRepository,
+    createTrustedUserActorContext,
+  } = require('../lib/platform-identity-repository');
+  const db = ensureDb();
+  const repository = createPlatformIdentityRepository(db, {
+    readUsers: () => getData('users') || [],
+  });
+  const actorContext = createTrustedUserActorContext({
+    principalId: 'DEMO-USER-ADMIN',
+    correlationId: 'demo-seed-authority',
+  });
+  const templateKey = 'demo-application-role';
+
+  if (!repository.getCompany(DEMO_COMPANY_ID)) {
+    repository.createCompanyAuthority({
+      company: {
+        id: DEMO_COMPANY_ID,
+        displayName: 'Skytech Demo Company',
+        receivablesTimezone: 'Europe/Moscow',
+      },
+      branches: [{
+        id: 'DEMO-BRANCH-HO-001',
+        displayName: 'Demo Head Office',
+        isHeadOffice: true,
+      }],
+      actorContext,
+      reason: 'demo_seed_authority',
+    });
+  }
+  if (!repository.getRoleTemplate(DEMO_COMPANY_ID, templateKey, 1)) {
+    repository.createRoleTemplate({
+      companyId: DEMO_COMPANY_ID,
+      templateKey,
+      templateVersion: 1,
+      displayName: 'Demo application user',
+      capabilities: [],
+      actorContext,
+      reason: 'demo_seed_authority',
+    });
+  }
+
+  for (const principalId of [
+    'DEMO-USER-ADMIN',
+    'DEMO-USER-MANAGER',
+    'DEMO-USER-SERVICE',
+    'DEMO-USER-VIEWER',
+  ]) {
+    const membershipId = `DEMO-MEMBERSHIP-${principalId.slice('DEMO-USER-'.length)}`;
+    const membership = repository.getMembership(membershipId);
+    if (!membership) {
+      repository.createMembership({
+        id: membershipId,
+        companyId: DEMO_COMPANY_ID,
+        principalId,
+        status: 'active',
+        roleTemplateKey: templateKey,
+        roleTemplateVersion: 1,
+        companyWideBranchAuthority: true,
+        branchIds: [],
+        actorContext,
+        reason: 'demo_seed_authority',
+      });
+    } else if (
+      membership.companyId !== DEMO_COMPANY_ID
+      || membership.principalId !== principalId
+      || membership.status !== 'active'
+    ) {
+      throw new Error(`Demo membership ${membershipId} conflicts with demo actor scope.`);
+    }
+  }
+}
+
 function seedDemoData({ logger = console, env = process.env, now = new Date() } = {}) {
   const { DB_PATH } = require('../db');
   assertDemoSeedAllowed({ env, dbPath: DB_PATH });
 
   const data = buildDemoData({ now, env });
   const results = Object.entries(data).map(([collection, fixtures]) => replaceDemoRecords(collection, fixtures));
+  ensureDemoAuthority();
 
   logger.log(`[demo] Seeded demo records: collections=${results.length}`);
   logger.log(`[demo] Demo users: ${DEMO_USER_EMAILS.join(', ')}`);
@@ -727,7 +816,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  DEMO_COMPANY_ID,
   DEMO_PREFIX,
+  DEMO_SCOPE,
   DEMO_USER_EMAILS,
   assertDemoSeedAllowed,
   buildDemoData,

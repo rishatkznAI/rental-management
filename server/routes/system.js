@@ -74,6 +74,13 @@ const {
   getBotDisabledConfig,
   getGsmDisabledConfig,
 } = require('../lib/feature-flags');
+const {
+  assertCompleteActorScope,
+  assertRecordMatchesActorScope,
+  assignTrustedScope,
+  isScopedMasterDataCollection,
+  requireRequestActorScope,
+} = require('../lib/trusted-actor-scope');
 const dns = require('dns');
 const fs = require('fs');
 const http = require('http');
@@ -1037,7 +1044,102 @@ function buildSystemDataExport(readData) {
   };
 }
 
-function analyzeSystemDataImport(payload, readData) {
+function scopeImportedRecords(collection, list, readData, actorScope) {
+  const scope = assertCompleteActorScope(actorScope);
+  const existingById = new Map((readData(collection) || [])
+    .map(item => [String(item?.id || '').trim(), item])
+    .filter(([id]) => id));
+  return list.map(item => {
+    const previous = existingById.get(String(item?.id || '').trim());
+    if (previous) {
+      assertRecordMatchesActorScope(previous, scope);
+      for (const field of ['companyId', 'tenantId']) {
+        if (
+          Object.prototype.hasOwnProperty.call(item || {}, field)
+          && String(item?.[field] || '').trim() !== String(previous?.[field] || '').trim()
+        ) {
+          const error = new Error('System import cannot change existing master-data scope.');
+          error.status = 409;
+          error.code = 'MASTER_DATA_SCOPE_IMMUTABLE';
+          throw error;
+        }
+      }
+      return { ...item, companyId: previous.companyId, tenantId: previous.tenantId };
+    }
+    for (const field of ['companyId', 'tenantId']) {
+      if (
+        Object.prototype.hasOwnProperty.call(item || {}, field)
+        && String(item?.[field] || '').trim() !== scope[field]
+      ) {
+        const error = new Error('System import ownership must match trusted actor scope.');
+        error.status = 409;
+        error.code = 'MASTER_DATA_SCOPE_CLIENT_SUPPLIED';
+        throw error;
+      }
+    }
+    return assignTrustedScope(item, scope);
+  });
+}
+
+function assertImportedMasterDataOwnership(sanitizedCollections, readData, actorScope) {
+  const scope = assertCompleteActorScope(actorScope);
+  const staged = name => (
+    Array.isArray(sanitizedCollections[name])
+      ? sanitizedCollections[name]
+      : (readData(name) || [])
+  );
+  const byId = name => new Map(staged(name)
+    .map(item => [String(item?.id || '').trim(), item])
+    .filter(([id]) => id));
+  const counterparties = byId('counterparties');
+  const clients = byId('clients');
+
+  function requireOwnedParent(map, id, entityType, record) {
+    const parentId = String(id || '').trim();
+    const parent = parentId ? map.get(parentId) : null;
+    if (!parent) {
+      const error = new Error(`${entityType} scoped owner не найден.`);
+      error.status = 409;
+      error.code = 'MASTER_DATA_SCOPE_OWNER_UNKNOWN';
+      error.details = { entityId: record?.id || null, parentId: parentId || null };
+      throw error;
+    }
+    assertRecordMatchesActorScope(parent, scope);
+    return parent;
+  }
+
+  for (const collection of [
+    'counterparties',
+    'counterparty_role_assignments',
+    'supplier_profiles',
+    'contractor_profiles',
+    'clients',
+    'client_objects',
+    'client_contracts',
+  ]) {
+    if (!Array.isArray(sanitizedCollections[collection])) continue;
+    for (const record of sanitizedCollections[collection]) {
+      assertRecordMatchesActorScope(record, scope);
+      if ([
+        'counterparty_role_assignments',
+        'supplier_profiles',
+        'contractor_profiles',
+        'clients',
+      ].includes(collection)) {
+        requireOwnedParent(counterparties, record?.counterpartyId, 'Counterparty', record);
+      }
+      if (collection === 'client_objects' || collection === 'client_contracts') {
+        const ownerClient = record?.clientId
+          ? requireOwnedParent(clients, record.clientId, 'Client', record)
+          : null;
+        const counterpartyId = record?.counterpartyId || ownerClient?.counterpartyId;
+        requireOwnedParent(counterparties, counterpartyId, 'Counterparty', record);
+      }
+    }
+  }
+}
+
+function analyzeSystemDataImport(payload, readData, { actorScope = null } = {}) {
   const rawCollections = normalizeSystemImportPayload(payload);
   const unknownCollections = Object.keys(rawCollections).filter(name => !SYSTEM_DATA_COLLECTION_SET.has(name));
   const stats = { strippedSensitiveFields: 0, skippedSensitiveSettings: 0 };
@@ -1069,6 +1171,14 @@ function analyzeSystemDataImport(payload, readData) {
       }
       if (collection === 'rentals') {
         for (const field of rentalServerOwnedAuditFields(item)) blocked.add(field);
+      }
+    }
+    if (isScopedMasterDataCollection(collection)) {
+      try {
+        sanitized = scopeImportedRecords(collection, sanitized, readData, actorScope);
+      } catch (error) {
+        invalidCollections.push(`${collection}:${error.code || error.message}`);
+        sanitized = [];
       }
     }
     sanitizedCollections[collection] = sanitized;
@@ -1319,6 +1429,14 @@ function analyzeSystemDataImport(payload, readData) {
         .map(payment => canonicalizePaymentCounterpartyRelation(payment, stagedData));
     } catch (error) {
       integrityErrors.push(`${error.code || 'COUNTERPARTY_RELATION_REPAIR_FAILED'}: ${error.message}`);
+    }
+  }
+
+  if (Object.keys(sanitizedCollections).some(isScopedMasterDataCollection)) {
+    try {
+      assertImportedMasterDataOwnership(sanitizedCollections, readData, actorScope);
+    } catch (error) {
+      integrityErrors.push(`${error.code || 'MASTER_DATA_SCOPE_FAILED'}: ${error.message}`);
     }
   }
 
@@ -1621,6 +1739,18 @@ function registerSystemRoutes(app, deps) {
         mechanic_documents,
         shipping_photos,
       } = req.body;
+      let actorScope = null;
+      if (Array.isArray(clients) || Array.isArray(client_contracts)) {
+        try {
+          actorScope = requireRequestActorScope(req);
+        } catch (error) {
+          return res.status(error.status || 403).json({
+            ok: false,
+            code: error.code || 'ACTOR_SCOPE_INCOMPLETE',
+            error: error.message,
+          });
+        }
+      }
       if (Array.isArray(rentals) || Array.isArray(gantt_rentals)) {
         return res.status(409).json({
           ok: false,
@@ -1676,7 +1806,9 @@ function registerSystemRoutes(app, deps) {
         }
       }
       const now = Date.now();
-      let normalizedClients = Array.isArray(clients) ? clients.map(normalizeClientInnFields) : clients;
+      let normalizedClients = Array.isArray(clients)
+        ? scopeImportedRecords('clients', clients, readData, actorScope).map(normalizeClientInnFields)
+        : clients;
       let normalizedCounterparties = null;
       let clientRoleBoundaryEntries = null;
       if (Array.isArray(normalizedClients)) {
@@ -1726,15 +1858,22 @@ function registerSystemRoutes(app, deps) {
         if (name === 'documents' && Array.isArray(documents)) return documents;
         return readData(name) || [];
       };
-      let normalizedClientContracts = client_contracts;
+      let normalizedClientContracts = Array.isArray(client_contracts)
+        ? scopeImportedRecords('client_contracts', client_contracts, readData, actorScope)
+        : client_contracts;
       if (Array.isArray(client_contracts)) {
         const existingById = new Map((readData('client_contracts') || [])
           .map(contract => [String(contract?.id || ''), contract]));
-        normalizedClientContracts = client_contracts.map(contract => normalizeClientContractRecord(
+        normalizedClientContracts = normalizedClientContracts.map(contract => normalizeClientContractRecord(
           contract,
           existingById.get(String(contract?.id || '')) || null,
           { readData: stagedBoundaryReadData, nowIso: () => new Date().toISOString() },
         ));
+        assertImportedMasterDataOwnership(
+          { client_contracts: normalizedClientContracts },
+          stagedBoundaryReadData,
+          actorScope,
+        );
       }
       let normalizedDocuments = documents;
       if (Array.isArray(documents)) {
@@ -2282,7 +2421,20 @@ function registerSystemRoutes(app, deps) {
       }
     }
 
-    const analysis = analyzeSystemDataImport(req.body, readData);
+    let actorScope = null;
+    const requestedCollections = req.body?.collections || req.body || {};
+    if (Object.keys(requestedCollections).some(isScopedMasterDataCollection)) {
+      try {
+        actorScope = requireRequestActorScope(req);
+      } catch (error) {
+        return res.status(error.status || 403).json({
+          ok: false,
+          code: error.code || 'ACTOR_SCOPE_INCOMPLETE',
+          error: error.message,
+        });
+      }
+    }
+    const analysis = analyzeSystemDataImport(req.body, readData, { actorScope });
     const { sanitizedCollections, ...publicAnalysis } = analysis;
     return res.status(analysis.ok ? 200 : 400).json(publicAnalysis);
   });
@@ -2308,7 +2460,20 @@ function registerSystemRoutes(app, deps) {
       }
     }
 
-    const analysis = analyzeSystemDataImport(req.body, readData);
+    let actorScope = null;
+    const requestedCollections = req.body?.collections || req.body || {};
+    if (Object.keys(requestedCollections).some(isScopedMasterDataCollection)) {
+      try {
+        actorScope = requireRequestActorScope(req);
+      } catch (error) {
+        return res.status(error.status || 403).json({
+          ok: false,
+          code: error.code || 'ACTOR_SCOPE_INCOMPLETE',
+          error: error.message,
+        });
+      }
+    }
+    const analysis = analyzeSystemDataImport(req.body, readData, { actorScope });
     if (!analysis.ok) {
       const { sanitizedCollections, ...publicAnalysis } = analysis;
       return res.status(400).json(publicAnalysis);

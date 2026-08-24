@@ -72,6 +72,13 @@ function makeCrudApp(initial = {}) {
       companyId: req.get('x-company-id') || 'COMPANY-A',
       tenantId: req.get('x-tenant-id') || 'TENANT-A',
     };
+    req.actorScope = {
+      companyId: req.user.companyId,
+      tenantId: req.user.tenantId,
+      membershipId: `MEMBERSHIP-${req.user.companyId}-${req.user.tenantId}`,
+      principalId: req.user.userId,
+      source: 'test_active_company_membership',
+    };
     next();
   };
   const requirePass = () => (_req, _res, next) => next();

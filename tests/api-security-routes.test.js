@@ -218,6 +218,13 @@ function createSecurityApp(state = createState()) {
       tokenVersion: Number(user.tokenVersion) || 0,
       passwordChangedAt: user.passwordChangedAt || null,
     };
+    req.actorScope = {
+      companyId: user.companyId,
+      tenantId: user.tenantId,
+      membershipId: `MEMBERSHIP-${user.id}`,
+      principalId: user.id,
+      source: 'test_active_company_membership',
+    };
     return next();
   }
 
@@ -546,11 +553,20 @@ test('/api/clients creates clients with normalized INN and rejects duplicate INN
     }));
     assert.equal(created.status, 201);
     assert.equal(created.body.innNormalized, '1655123456');
+    assert.equal(created.body.companyId, 'COMPANY-A');
+    assert.equal(created.body.tenantId, 'TENANT-A');
     assert.ok(created.body.counterpartyId);
     assert.equal(state.counterparties.length, initialCounterpartyCount + 1);
     const createdCounterparty = state.counterparties.find(item => item.id === created.body.counterpartyId);
     assert.ok(createdCounterparty);
     assert.deepEqual(createdCounterparty.roles, ['customer']);
+    assert.equal(createdCounterparty.companyId, 'COMPANY-A');
+    assert.equal(createdCounterparty.tenantId, 'TENANT-A');
+    const customerAssignment = state.counterparty_role_assignments.find(item => (
+      item.counterpartyId === created.body.counterpartyId && item.roleCode === 'customer'
+    ));
+    assert.equal(customerAssignment.companyId, 'COMPANY-A');
+    assert.equal(customerAssignment.tenantId, 'TENANT-A');
 
     const duplicate = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
       company: 'ООО Бета',
@@ -565,6 +581,89 @@ test('/api/clients creates clients with normalized INN and rejects duplicate INN
 
   assert.equal(state.clients.length, 1);
   assert.equal(state.counterparties.length, initialCounterpartyCount + 1);
+});
+
+test('generic scoped create assigns trusted scope and rejects ownership fields before persistence', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async baseUrl => {
+    for (const ownership of [
+      { companyId: 'COMPANY-FOREIGN' },
+      { tenantId: 'TENANT-FOREIGN' },
+    ]) {
+      const before = state.clients.length;
+      const rejected = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+        inn: ownership.companyId ? '7707083893' : '7707083894',
+        ...ownership,
+      }));
+      assert.equal(rejected.status, 409);
+      assert.equal(rejected.body.code, 'MASTER_DATA_SCOPE_CLIENT_SUPPLIED');
+      assert.equal(state.clients.length, before);
+    }
+
+    const client = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Scope Boundary',
+      inn: '7707083895',
+    }));
+    assert.equal(client.status, 201, JSON.stringify(client.body));
+
+    const object = await request(baseUrl, 'POST', '/api/client_objects', 'admin-token', {
+      clientId: client.body.id,
+      name: 'Scope объект',
+      address: 'Казань',
+      status: 'active',
+    });
+    assert.equal(object.status, 201, JSON.stringify(object.body));
+
+    const contract = await request(baseUrl, 'POST', '/api/client_contracts', 'admin-token', {
+      clientId: client.body.id,
+      objectId: object.body.id,
+      number: 'SCOPE-1',
+      status: 'active',
+    });
+    assert.equal(contract.status, 201, JSON.stringify(contract.body));
+
+    for (const record of [client.body, object.body, contract.body]) {
+      assert.equal(record.companyId, 'COMPANY-A');
+      assert.equal(record.tenantId, 'TENANT-A');
+    }
+
+    const objectCount = state.client_objects.length;
+    const foreignObject = await request(baseUrl, 'POST', '/api/client_objects', 'admin-token', {
+      clientId: client.body.id,
+      name: 'Foreign object',
+      address: 'Москва',
+      companyId: 'COMPANY-FOREIGN',
+    });
+    assert.equal(foreignObject.status, 409);
+    assert.equal(foreignObject.body.code, 'MASTER_DATA_SCOPE_CLIENT_SUPPLIED');
+    assert.equal(state.client_objects.length, objectCount);
+  });
+});
+
+test('generic bulk creation cannot persist an unscoped Client or Contract', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async baseUrl => {
+    const clients = await request(baseUrl, 'PUT', '/api/clients', 'admin-token', [clientPayload({
+      id: 'C-bulk-scope',
+      company: 'ООО Bulk Scope',
+      inn: '7707083896',
+    })]);
+    assert.equal(clients.status, 200, JSON.stringify(clients.body));
+    assert.equal(state.clients[0].companyId, 'COMPANY-A');
+    assert.equal(state.clients[0].tenantId, 'TENANT-A');
+
+    const contracts = await request(baseUrl, 'PUT', '/api/client_contracts', 'admin-token', [{
+      id: 'CC-bulk-scope',
+      clientId: 'C-bulk-scope',
+      number: 'BULK-SCOPE-1',
+      status: 'active',
+    }]);
+    assert.equal(contracts.status, 200, JSON.stringify(contracts.body));
+    assert.equal(state.client_contracts[0].companyId, 'COMPANY-A');
+    assert.equal(state.client_contracts[0].tenantId, 'TENANT-A');
+  });
 });
 
 test('/api/clients allows editing own INN and rejects changing to another client INN', async () => {

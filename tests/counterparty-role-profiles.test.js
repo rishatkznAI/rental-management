@@ -22,6 +22,8 @@ const NOW = '2026-08-11T12:00:00.000Z';
 function counterparty(id, roles) {
   return {
     id,
+    companyId: 'COMPANY-A',
+    tenantId: 'TENANT-A',
     type: 'legal_entity',
     legalName: `ООО ${id}`,
     shortName: id,

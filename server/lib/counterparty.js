@@ -489,6 +489,35 @@ function withCustomerRole(counterparty, nowIso) {
   return addCounterpartyRole(counterparty, 'customer', nowIso).counterparty;
 }
 
+function requiredMasterDataScope(record, entityType) {
+  const companyId = String(record?.companyId || '').trim();
+  const tenantId = String(record?.tenantId || '').trim();
+  if (!companyId || !tenantId) {
+    throw counterpartyError(
+      'ACTOR_SCOPE_INCOMPLETE',
+      `${entityType} requires trusted companyId and tenantId before persistence.`,
+      403,
+      { entityId: record?.id || null },
+    );
+  }
+  return { companyId, tenantId };
+}
+
+function assertSameMasterDataScope(left, right) {
+  const leftScope = requiredMasterDataScope(left, 'Client');
+  const rightScope = requiredMasterDataScope(right, 'Counterparty');
+  for (const field of ['companyId', 'tenantId']) {
+    if (leftScope[field] !== rightScope[field]) {
+      throw counterpartyError(
+        'COUNTERPARTY_SCOPE_FORBIDDEN',
+        'Client и Counterparty принадлежат разным company/tenant.',
+        403,
+        { field },
+      );
+    }
+  }
+}
+
 function prepareClientCompatibilityCreate({
   client,
   clients = [],
@@ -496,6 +525,7 @@ function prepareClientCompatibilityCreate({
   generateId,
   nowIso = () => new Date().toISOString(),
 }) {
+  requiredMasterDataScope(client, 'Client');
   const explicitCounterpartyId = String(client?.counterpartyId || '').trim();
   let counterparty;
   let nextCounterparties = [...counterparties];
@@ -505,6 +535,7 @@ function prepareClientCompatibilityCreate({
     const index = nextCounterparties.findIndex(item => String(item?.id || '') === explicitCounterpartyId);
     counterparty = index === -1 ? null : nextCounterparties[index];
     assertCounterpartyAvailableForClient(counterparty, clients, client?.id);
+    assertSameMasterDataScope(client, counterparty);
     assertExplicitClientIdentityCompatible(client, counterparty);
     counterparty = withCustomerRole(counterparty, nowIso);
     nextCounterparties[index] = counterparty;
@@ -566,6 +597,7 @@ function prepareClientCompatibilityUpdate({
   counterparties = [],
   nowIso = () => new Date().toISOString(),
 }) {
+  requiredMasterDataScope(nextClient, 'Client');
   const previousCounterpartyId = String(previousClient?.counterpartyId || '').trim();
   const requestedCounterpartyId = String(nextClient?.counterpartyId || '').trim();
   if (previousCounterpartyId && requestedCounterpartyId !== previousCounterpartyId) {
@@ -586,6 +618,7 @@ function prepareClientCompatibilityUpdate({
     index = nextCounterparties.findIndex(item => String(item?.id || '') === requestedCounterpartyId);
     counterparty = index === -1 ? null : nextCounterparties[index];
     assertCounterpartyAvailableForClient(counterparty, clients, previousClient?.id);
+    assertSameMasterDataScope(nextClient, counterparty);
     if (!previousCounterpartyId) assertExplicitClientIdentityCompatible(nextClient, counterparty);
   } else {
     const migrationId = deterministicCounterpartyId(previousClient?.id);
@@ -603,6 +636,8 @@ function prepareClientCompatibilityUpdate({
       index = nextCounterparties.length - 1;
     }
   }
+
+  assertSameMasterDataScope(nextClient, counterparty);
 
   assertCounterpartyAvailableForClient(counterparty, clients, previousClient?.id);
   counterparty = withCustomerRole(counterparty, nowIso);
@@ -697,6 +732,7 @@ function ensureClientCounterpartyFoundation({
   for (let index = 0; index < nextClients.length; index += 1) {
     const client = nextClients[index];
     try {
+      requiredMasterDataScope(client, 'Client');
       const explicitId = String(client?.counterpartyId || '').trim();
       if (explicitId) {
         const linkedIndex = nextCounterparties.findIndex(item => String(item?.id || '') === explicitId);
@@ -710,6 +746,7 @@ function ensureClientCounterpartyFoundation({
           );
         }
         assertCounterpartyAvailableForClient(linkedCounterparty, nextClients, client?.id);
+        assertSameMasterDataScope(client, linkedCounterparty);
         const roleResult = addCounterpartyRole(linkedCounterparty, 'customer', nowIso);
         if (roleResult.changed) {
           nextCounterparties[linkedIndex] = roleResult.counterparty;

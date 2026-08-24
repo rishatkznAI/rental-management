@@ -24,6 +24,12 @@ const {
   assertEntityOwnerScope,
   createClientMasterDataLifecycleService,
 } = require('../lib/client-master-data-lifecycle');
+const {
+  actorWithScope,
+  assertOwnershipFieldsNotClientSupplied,
+  assignTrustedScope,
+  requireRequestActorScope,
+} = require('../lib/trusted-actor-scope');
 
 const COUNTERPARTY_WRITE_FIELDS = new Set([
   'type',
@@ -270,13 +276,13 @@ function registerCounterpartyRoutes(router, deps) {
       const state = readRoleProfileState();
       const previous = state.counterparties.find(item => String(item?.id || '') === id);
       if (previous) {
-        assertEntityOwnerScope({ actor: req.user, entityType: 'counterparty', entity: previous, readData });
+        assertEntityOwnerScope({ actor: actorWithScope(req), entityType: 'counterparty', entity: previous, readData });
       }
       const result = activateCounterpartyRole({
         state,
         counterpartyId: id,
         roleCode: input.role,
-        actor: req.user,
+        actor: actorWithScope(req),
         reason: input.reason,
         source: input.source || 'role_api',
         nowIso,
@@ -308,12 +314,12 @@ function registerCounterpartyRoutes(router, deps) {
       const scopedCounterparty = (readData('counterparties') || [])
         .find(item => String(item?.id || '') === id);
       if (scopedCounterparty) {
-        assertEntityOwnerScope({ actor: req.user, entityType: 'counterparty', entity: scopedCounterparty, readData });
+        assertEntityOwnerScope({ actor: actorWithScope(req), entityType: 'counterparty', entity: scopedCounterparty, readData });
       }
       if (input.role === 'customer') {
         return res.json(lifecycle.deactivateCustomerRole({
           id,
-          actor: req.user,
+          actor: actorWithScope(req),
           reason: input.reason,
           source: input.source || 'role_api',
         }));
@@ -325,7 +331,7 @@ function registerCounterpartyRoutes(router, deps) {
         data: { readData },
         counterpartyId: id,
         roleCode: input.role,
-        actor: req.user,
+        actor: actorWithScope(req),
         reason: input.reason,
         source: input.source || 'role_api',
         nowIso,
@@ -348,6 +354,8 @@ function registerCounterpartyRoutes(router, deps) {
 
   router.post('/counterparties', requireAuth, requireWrite('counterparties'), (req, res) => {
     try {
+      const actorScope = requireRequestActorScope(req);
+      assertOwnershipFieldsNotClientSupplied(req.body);
       const input = sanitizeCounterpartyInput(req.body);
       if (input.status === 'archived') {
         throw counterpartyError(
@@ -358,11 +366,7 @@ function registerCounterpartyRoutes(router, deps) {
         );
       }
       const counterparties = Array.isArray(readData('counterparties')) ? readData('counterparties') : [];
-      const item = normalizeCounterpartyRecord({
-        ...input,
-        ...(req.user?.companyId ? { companyId: req.user.companyId } : {}),
-        ...(req.user?.tenantId ? { tenantId: req.user.tenantId } : {}),
-      }, {
+      const item = normalizeCounterpartyRecord(assignTrustedScope(input, actorScope), {
         id: generateId('CP'),
         nowIso,
       });
@@ -375,7 +379,7 @@ function registerCounterpartyRoutes(router, deps) {
           state,
           counterpartyId: item.id,
           roleCode,
-          actor: req.user,
+          actor: actorWithScope(req),
           source: 'counterparty_create',
           nowIso,
           initializeProjection: false,
@@ -404,7 +408,7 @@ function registerCounterpartyRoutes(router, deps) {
         throw counterpartyError('COUNTERPARTY_NOT_FOUND', 'Контрагент не найден.', 404, { id });
       }
       assertEntityOwnerScope({
-        actor: req.user,
+        actor: actorWithScope(req),
         entityType: 'counterparty',
         entity: counterparties[index],
         readData,
@@ -476,7 +480,7 @@ function registerCounterpartyRoutes(router, deps) {
   router.delete('/counterparties/:id', requireAuth, requireWrite('counterparties'), (req, res) => {
     try {
       const id = assertCounterpartyId(req.params.id);
-      return res.json(lifecycle.archiveCounterparty({ id, actor: req.user }));
+      return res.json(lifecycle.archiveCounterparty({ id, actor: actorWithScope(req) }));
     } catch (error) {
       return sendCounterpartyError(res, error);
     }

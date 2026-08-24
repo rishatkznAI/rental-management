@@ -124,6 +124,13 @@ const {
   clientContractStatus,
   findClientContractHistoryLinks,
 } = require('../lib/client-contract-lifecycle');
+const {
+  assertOwnershipFieldsNotClientSupplied,
+  assertRecordMatchesActorScope,
+  assignTrustedScope,
+  isScopedMasterDataCollection,
+  requireRequestActorScope,
+} = require('../lib/trusted-actor-scope');
 
 const INLINE_RELATION_IDEMPOTENCY_COLLECTION = 'inline_relation_idempotency';
 const INLINE_RELATION_IDEMPOTENCY_SCOPES = new Set(['client_objects', 'client_contracts']);
@@ -609,18 +616,34 @@ function registerCrudRoutes(deps) {
   }
 
   function assertClientContractUpdateScope(req, contract) {
+    const actorScope = requireRequestActorScope(req);
     const ownerClient = (readData('clients') || [])
       .find(client => scopedValue(client?.id) === scopedValue(contract?.clientId)) || null;
     const ownerCounterparty = (readData('counterparties') || [])
       .find(counterparty => scopedValue(counterparty?.id) === scopedValue(contract?.counterpartyId)) || null;
     for (const field of ['companyId', 'tenantId']) {
-      const entityScope = scopedValue(contract?.[field] || ownerClient?.[field] || ownerCounterparty?.[field]);
-      if (!entityScope) continue;
-      const actorScope = scopedValue(req.user?.[field]);
-      if (actorScope !== entityScope) {
+      const values = [...new Set([contract, ownerClient, ownerCounterparty]
+        .map(record => scopedValue(record?.[field]))
+        .filter(Boolean))];
+      if (values.length === 0) {
+        const error = new Error(`Legacy scope договора нельзя определить по ${field}.`);
+        error.status = 409;
+        error.code = 'CLIENT_CONTRACT_SCOPE_UNKNOWN';
+        error.details = { field };
+        throw error;
+      }
+      if (values.length > 1) {
+        const error = new Error('Scope договора конфликтует с canonical owner scope.');
+        error.status = 409;
+        error.code = 'CLIENT_CONTRACT_SCOPE_CONFLICT';
+        error.details = { field, values };
+        throw error;
+      }
+      if (values[0] !== actorScope[field]) {
         const error = new Error('Договор не принадлежит компании или tenant текущего пользователя.');
         error.status = 403;
         error.code = 'CLIENT_CONTRACT_SCOPE_FORBIDDEN';
+        error.details = { field };
         throw error;
       }
     }
@@ -1785,18 +1808,16 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: knowledgeModuleForbiddenReason });
       }
       try {
+        const actorScope = isScopedMasterDataCollection(collection)
+          ? requireRequestActorScope(req)
+          : null;
+        if (actorScope) assertOwnershipFieldsNotClientSupplied(req.body);
         if (businessNumbering && ['service', 'warranty_claims', 'client_contracts'].includes(collection)) {
           assertBusinessNumberNotProvided(req.body);
         }
         accessControl.assertCanCreateCollection(collection, req.user, req.body);
         let input = accessControl.sanitizeCreateInput(collection, req.body, req.user);
-        if (collection === 'clients' || collection === 'client_objects') {
-          input = {
-            ...input,
-            ...(req.user?.companyId ? { companyId: req.user.companyId } : {}),
-            ...(req.user?.tenantId ? { tenantId: req.user.tenantId } : {}),
-          };
-        }
+        if (actorScope) input = assignTrustedScope(input, actorScope);
         const idempotencyKey = readInlineRelationIdempotencyKey(req, collection);
         const idempotencyFingerprint = idempotencyKey
           ? inlineRelationFingerprint(collection, input)
@@ -1873,6 +1894,17 @@ function registerCrudRoutes(deps) {
           businessNumbering.assignNewRecord('client_contracts', newItem);
         }
         newItem = normalizeClientDomainRecord(collection, newItem);
+        if (collection === 'client_objects') {
+          assertEntityOwnerScope({
+            actor: { ...req.user, ...actorScope },
+            entityType: 'client_object',
+            entity: newItem,
+            readData,
+          });
+        }
+        if (collection === 'client_contracts') {
+          assertClientContractUpdateScope(req, newItem);
+        }
         if (AR_WORKFLOW_COLLECTIONS.has(collection)) {
           newItem = assertCanonicalArWorkflowWrite(collection, newItem, { readData }, {
             recordId: newItem.id,
@@ -2062,13 +2094,17 @@ function registerCrudRoutes(deps) {
 
     router.patch(`/${collection}/:id`, ...writeMiddlewares(collection), (req, res) => {
       if (
-        (collection === 'clients' || collection === 'client_objects')
+        isScopedMasterDataCollection(collection)
         && ['companyId', 'tenantId'].some(field => Object.prototype.hasOwnProperty.call(req.body || {}, field))
       ) {
         return res.status(409).json({
           ok: false,
-          code: 'MASTER_DATA_SCOPE_IMMUTABLE',
-          error: 'Scope master-data нельзя менять через generic PATCH.',
+          code: collection === 'client_contracts'
+            ? 'CLIENT_CONTRACT_FIELD_IMMUTABLE'
+            : 'MASTER_DATA_SCOPE_IMMUTABLE',
+          error: collection === 'client_contracts'
+            ? 'Поле companyId/tenantId договора нельзя изменять.'
+            : 'Scope master-data нельзя менять через generic PATCH.',
         });
       }
       if (
@@ -2114,6 +2150,7 @@ function registerCrudRoutes(deps) {
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
+        if (isScopedMasterDataCollection(collection)) requireRequestActorScope(req);
         if (collection === 'client_contracts') {
           assertScopedClientContractPatch(req, data[idx]);
         }
@@ -2471,6 +2508,7 @@ function registerCrudRoutes(deps) {
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
+        if (isScopedMasterDataCollection(collection)) requireRequestActorScope(req);
         if (collection === 'client_contracts') {
           assertClientContractUpdateScope(req, data[idx]);
         }
@@ -2743,6 +2781,60 @@ function registerCrudRoutes(deps) {
         return sendAccessError(res, error);
       }
 
+      let trustedBulkScope = null;
+      if (isScopedMasterDataCollection(collection)) {
+        try {
+          trustedBulkScope = requireRequestActorScope(req);
+        } catch (error) {
+          return sendAccessError(res, error);
+        }
+      }
+
+      if (trustedBulkScope) {
+        const existing = readData(collection) || [];
+        const existingById = new Map(existing
+          .map(item => [String(item?.id || '').trim(), item])
+          .filter(([id]) => id));
+        try {
+          list = list.map(item => {
+            const previous = existingById.get(String(item?.id || '').trim());
+            if (previous) {
+              assertRecordMatchesActorScope(previous, trustedBulkScope);
+              for (const field of ['companyId', 'tenantId']) {
+                if (
+                  Object.prototype.hasOwnProperty.call(item || {}, field)
+                  && scopedValue(item?.[field]) !== scopedValue(previous?.[field])
+                ) {
+                  const error = new Error('Scope existing master-data нельзя менять через bulk replace.');
+                  error.status = 409;
+                  error.code = 'MASTER_DATA_SCOPE_IMMUTABLE';
+                  throw error;
+                }
+              }
+              return {
+                ...item,
+                companyId: previous.companyId,
+                tenantId: previous.tenantId,
+              };
+            }
+            for (const field of ['companyId', 'tenantId']) {
+              if (
+                Object.prototype.hasOwnProperty.call(item || {}, field)
+                && scopedValue(item?.[field]) !== trustedBulkScope[field]
+              ) {
+                const error = new Error('New master-data scope не совпадает с trusted actor scope.');
+                error.status = 409;
+                error.code = 'MASTER_DATA_SCOPE_CLIENT_SUPPLIED';
+                throw error;
+              }
+            }
+            return assignTrustedScope(item, trustedBulkScope);
+          });
+        } catch (error) {
+          return sendAccessError(res, error);
+        }
+      }
+
       if (collection === 'clients' || collection === 'client_objects') {
         const existing = readData(collection) || [];
         const incomingIds = new Set(list.map(item => String(item?.id || '').trim()).filter(Boolean));
@@ -2761,7 +2853,7 @@ function registerCrudRoutes(deps) {
         for (const item of existing) {
           try {
             assertEntityOwnerScope({
-              actor: req.user,
+              actor: { ...req.user, ...trustedBulkScope },
               entityType: collection === 'clients' ? 'client' : 'client_object',
               entity: item,
               readData,
@@ -2787,12 +2879,8 @@ function registerCrudRoutes(deps) {
           const previous = existingById.get(String(item?.id || '').trim());
           return {
             ...item,
-            ...(previous?.companyId || req.user?.companyId
-              ? { companyId: previous?.companyId || req.user.companyId }
-              : {}),
-            ...(previous?.tenantId || req.user?.tenantId
-              ? { tenantId: previous?.tenantId || req.user.tenantId }
-              : {}),
+            companyId: previous?.companyId || trustedBulkScope.companyId,
+            tenantId: previous?.tenantId || trustedBulkScope.tenantId,
           };
         });
       }
@@ -2846,6 +2934,19 @@ function registerCrudRoutes(deps) {
             existingById.get(String(item?.id || '')) || null,
             stagedReadData,
           ));
+          if (collection === 'client_objects') {
+            for (const item of list) {
+              assertEntityOwnerScope({
+                actor: { ...req.user, ...trustedBulkScope },
+                entityType: 'client_object',
+                entity: item,
+                readData: stagedReadData,
+              });
+            }
+          }
+          if (collection === 'client_contracts') {
+            for (const item of list) assertClientContractUpdateScope(req, item);
+          }
         }
         if (collection === 'delivery_carriers') {
           const existing = readData('delivery_carriers') || [];

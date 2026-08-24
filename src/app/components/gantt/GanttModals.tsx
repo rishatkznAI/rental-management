@@ -560,7 +560,7 @@ interface NewRentalModalProps {
   onConfirm: (data: {
     clientId: string;
     client: string;
-    objectId: string;
+    objectId?: string;
     contractId: string;
     equipmentId: string;
     equipmentInv: string;
@@ -705,10 +705,6 @@ export function NewRentalModal({
     setObjectId('');
     setContractId('');
   }, [clientId, open]);
-  React.useEffect(() => {
-    if (!open) return;
-    if (selectedClientObjects.length === 1 && !objectId) setObjectId(selectedClientObjects[0].id);
-  }, [objectId, open, selectedClientObjects]);
   const uniqueInventoryNumbers = useMemo(() => {
     const counts = new Map<string, number>();
     (equipmentListProp ?? fetchedEquipment).forEach(item => {
@@ -816,8 +812,8 @@ export function NewRentalModal({
       setSubmitError('Укажите даты начала и окончания аренды.');
       return;
     }
-    if (!objectId || !contractId) {
-      setSubmitError('Для аренды укажите объект клиента и договор.');
+    if (!contractId) {
+      setSubmitError('Для аренды укажите договор.');
       return;
     }
     if (new Date(startDate).getTime() > new Date(endDate).getTime()) {
@@ -833,7 +829,7 @@ export function NewRentalModal({
       await onConfirm({
         clientId: selectedClient.id,
         client: selectedClient.company,
-        objectId,
+        objectId: objectId || undefined,
         contractId,
         equipmentId: selectedEquipment.id,
         equipmentInv: selectedEquipment.inventoryNumber,
@@ -925,26 +921,23 @@ export function NewRentalModal({
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Объект <span className="text-red-500">*</span>
+                  Объект <span className="font-normal text-gray-500">(необязательно)</span>
                 </label>
-                {selectedClientObjects.length === 0 ? (
-                  <p className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-xs text-gray-400 dark:border-gray-600">
-                    У клиента нет активных объектов
-                  </p>
-                ) : (
-                  <select
-                    value={objectId}
-                    onChange={event => {
-                      setObjectId(event.target.value);
-                      setContractId('');
-                    }}
-                    className={selectClass}
-                  >
-                    <option value="">Выберите</option>
-                    {selectedClientObjects.map(object => (
-                      <option key={object.id} value={object.id}>{object.name}</option>
-                    ))}
-                  </select>
+                <select
+                  value={objectId}
+                  onChange={event => {
+                    setObjectId(event.target.value);
+                    setContractId('');
+                  }}
+                  className={selectClass}
+                >
+                  <option value="">Без объекта</option>
+                  {selectedClientObjects.map(object => (
+                    <option key={object.id} value={object.id}>{object.name}</option>
+                  ))}
+                </select>
+                {selectedClientObjects.length === 0 && (
+                  <p className="text-xs text-gray-400">У клиента нет активных объектов — можно продолжить без объекта.</p>
                 )}
               </div>
               <div className="flex flex-col gap-1.5">
@@ -1082,7 +1075,7 @@ export function NewRentalModal({
           <Button variant="secondary" onClick={onClose}>Отмена</Button>
           <Button
             onClick={() => { void submit(); }}
-            disabled={isSubmitting || !selectedClient || !objectId || !contractId || !selectedEquipment || !startDate || !endDate || conflictWarn}
+            disabled={isSubmitting || !selectedClient || !contractId || !selectedEquipment || !startDate || !endDate || conflictWarn}
           >
             {isSubmitting ? 'Создание…' : 'Создать аренду'}
           </Button>

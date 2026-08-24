@@ -678,6 +678,34 @@ function registerCrudRoutes(deps) {
     return null;
   }
 
+  function findClientObjectHistoryLinks(clientObject) {
+    const objectId = String(clientObject?.id || '').trim();
+    if (!objectId) return [];
+    const linkSpecs = [
+      'rentals',
+      'gantt_rentals',
+      'deliveries',
+      'service',
+      'warranty_claims',
+      'documents',
+      'client_contracts',
+      'payments',
+      'payment_allocations',
+      'debt_collection_plans',
+    ];
+    return linkSpecs
+      .map(collectionName => {
+        const matches = (readData(collectionName) || []).filter(record => (
+          [record?.objectId, record?.clientObjectId, record?.siteId]
+            .some(value => String(value || '').trim() === objectId)
+          || (Array.isArray(record?.objectIds)
+            && record.objectIds.some(value => String(value || '').trim() === objectId))
+        ));
+        return matches.length > 0 ? { collection: collectionName, count: matches.length } : null;
+      })
+      .filter(Boolean);
+  }
+
   function sendEquipmentValidationError(res, error) {
     return res.status(error?.status || 400).json({
       ok: false,
@@ -2451,6 +2479,17 @@ function registerCrudRoutes(deps) {
         const historyLinks = findClientHistoryLinks(removedItem);
         if (historyLinks.length > 0) {
           return sendClientHasHistoryError(res, historyLinks);
+        }
+      }
+      if (collection === 'client_objects') {
+        const historyLinks = findClientObjectHistoryLinks(removedItem);
+        if (historyLinks.length > 0) {
+          return res.status(409).json({
+            ok: false,
+            code: 'CLIENT_OBJECT_HAS_HISTORY',
+            error: 'Объект нельзя удалить: существуют связанные записи. Архивируйте объект, чтобы сохранить историю.',
+            links: historyLinks,
+          });
         }
       }
       if (collection === 'equipment') {

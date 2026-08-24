@@ -1345,11 +1345,13 @@ export interface ClientObject {
   clientId?: string;
   counterpartyId?: string;
   name: string;
-  address: string;
+  address?: string;
   contactName?: string;
   contactPhone?: string;
+  comment?: string;
   contractId?: string;
   contractNumber?: string;
+  /** @deprecated Compatibility alias for legacy ClientObject records. */
   notes?: string;
   status: 'active' | 'archived';
   createdAt?: string;

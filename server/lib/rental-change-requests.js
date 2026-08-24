@@ -1471,7 +1471,9 @@ function ensureGanttRentalLink(ganttRental, rental, equipmentList = []) {
     next.managerInitials = managerInitials(rental.manager);
   }
   if (rental.managerId !== undefined) next.managerId = rental.managerId || '';
-  if (rental.objectId !== undefined) next.objectId = rental.objectId || undefined;
+  if (Object.prototype.hasOwnProperty.call(rental, 'objectId')) {
+    next.objectId = rental.objectId || undefined;
+  }
   if (rental.objectName !== undefined) next.objectName = rental.objectName || undefined;
   if (rental.objectAddress !== undefined) next.objectAddress = rental.objectAddress || undefined;
   if (rental.objectContactName !== undefined) next.objectContactName = rental.objectContactName || undefined;

@@ -38,6 +38,12 @@ test('rental detail does not directly update linked planner rows', () => {
   assert.match(restoreBlock, /setSaveError\(error instanceof Error \? error\.message : 'Не удалось восстановить аренду\.'\)/);
 });
 
+test('rental detail can explicitly clear an optional ClientObject and hides a missing address', () => {
+  assert.match(rentalDetailSource, /objectId: formState\.objectId,/);
+  assert.match(rentalDetailSource, /\[selectedRentalObject\.name, selectedRentalObject\.address\]\.filter\(Boolean\)\.join\(' · '\)/);
+  assert.doesNotMatch(rentalDetailSource, /`\$\{selectedRentalObject\.name\} · \$\{selectedRentalObject\.address\}`/);
+});
+
 test('rental creation keeps stable equipment and manager links in the classic rental payload', () => {
   const handleSubmit = extract(rentalNewSource, 'const handleSubmit = async', 'return (');
   const rentalNewSubmit = extract(handleSubmit, 'const payload = {', 'const attempt = idempotencyKeyForAttempt(');
@@ -68,12 +74,12 @@ test('standalone rental creation does not patch equipment status through the gen
 test('rental creation surfaces validation and API errors instead of only logging them', () => {
   assert.match(rentalNewSource, /const \[formError, setFormError\] = useState\(''\)/);
   assert.match(rentalNewSource, /setFormError\('Дата окончания аренды не может быть раньше даты начала\.'\)/);
-  assert.match(rentalNewSource, /setFormError\('Для аренды укажите объект клиента и договор\.'\)/);
+  assert.match(rentalNewSource, /setFormError\('Для аренды укажите договор\.'\)/);
   assert.match(rentalNewSource, /setFormError\('Техника занята на выбранный период\. Выберите другие даты или другую технику\.'\)/);
   assert.match(rentalNewSource, /setFormError\(error instanceof Error \? error\.message : 'Не удалось создать аренду\.'\)/);
   assert.match(rentalNewSource, /\{formError && \(/);
   assert.match(ganttModalsSource, /const \[submitError,\s+setSubmitError\]\s+= useState\(''\)/);
-  assert.match(ganttModalsSource, /setSubmitError\('Для аренды укажите объект клиента и договор\.'\)/);
+  assert.match(ganttModalsSource, /setSubmitError\('Для аренды укажите договор\.'\)/);
   assert.match(ganttModalsSource, /setSubmitError\(error instanceof Error \? error\.message : 'Не удалось создать аренду\.'\)/);
 });
 
@@ -83,7 +89,7 @@ test('rental creation modal does not close itself before async save succeeds', (
 
   assert.match(submitBlock, /await onConfirm\(/);
   assert.doesNotMatch(submitBlock, /onClose\(\)/);
-  assert.match(buttonBlock, /disabled=\{isSubmitting \|\| !selectedClient \|\| !objectId \|\| !contractId \|\| !selectedEquipment \|\| !startDate \|\| !endDate \|\| conflictWarn\}/);
+  assert.match(buttonBlock, /disabled=\{isSubmitting \|\| !selectedClient \|\| !contractId \|\| !selectedEquipment \|\| !startDate \|\| !endDate \|\| conflictWarn\}/);
 });
 
 test('standalone rental creation form loads manager options', () => {
@@ -112,11 +118,12 @@ test('standalone rental creation submit button creates a rental, not a contract'
   assert.doesNotMatch(submitActions, /Создать договор/);
 });
 
-test('rental creation UI makes client object and contract requirements explicit', () => {
-  assert.match(rentalNewSource, /Объект клиента <span className="text-red-500">\*<\/span>/);
+test('rental creation UI keeps ClientObject optional while contract remains required', () => {
+  assert.match(rentalNewSource, /Объект клиента <span className="font-normal text-gray-500">\(необязательно\)<\/span>/);
   assert.match(rentalNewSource, /Договор <span className="text-red-500">\*<\/span>/);
-  assert.match(rentalNewSource, /Добавьте первый объект прямо здесь/);
-  assert.match(rentalNewSource, /disabled=\{isSubmitting \|\| !client \|\| !objectId \|\| !contractId/);
+  assert.match(rentalNewSource, /Можно продолжить без объекта или добавить площадку\./);
+  assert.match(rentalNewSource, /disabled=\{isSubmitting \|\| !client \|\| !contractId/);
+  assert.doesNotMatch(rentalNewSource, /disabled=\{isSubmitting \|\| !client \|\| !objectId/);
   assert.match(rentalNewSource, /createClientObject\.mutateAsync/);
   assert.match(rentalNewSource, /createClientContract\.mutateAsync/);
   assert.match(rentalNewSource, /refreshClientRelationCache\(qc, CLIENT_OBJECT_KEYS\.all\)/);
@@ -171,18 +178,19 @@ test('standalone rental creation keeps object and contract selects controlled by
   assert.match(rentalNewSource, /const selectId = \(value: unknown\) => \(value === undefined \|\| value === null \? '' : String\(value\)\)/);
   assert.match(rentalNewSource, /id: selectId\(object\.id\),\s*label: clientObjectLabel\(object\)/);
   assert.match(rentalNewSource, /id: selectId\(contract\.id\),\s*label: clientContractLabel\(contract\)/);
-  assert.match(rentalNewSource, /value=\{objectId\}[\s\S]*setObjectId\(event\.target\.value\);\s*setContractId\(''\);/);
+  assert.match(rentalNewSource, /value=\{objectId\}[\s\S]*const nextObjectId = event\.target\.value;[\s\S]*setObjectId\(nextObjectId\);\s*setContractId\(''\);/);
   assert.match(rentalNewSource, /const resetClientDependencies = \(\) => \{\s*setObjectId\(''\);\s*setContractId\(''\);/);
   assert.match(rentalNewSource, /if \(clientId !== nextClientId\) resetClientDependencies\(\)/);
   assert.doesNotMatch(rentalNewSource, /useEffect\(\(\) => \{\s*setObjectId\(''\);\s*setContractId\(''\);\s*\}, \[clientId\]\)/);
   assert.match(rentalNewSource, /<select[^>]*data-testid="rental-object-select"[^>]*value=\{objectId\}/);
   assert.match(rentalNewSource, /<option value="">Без объекта<\/option>/);
+  assert.match(rentalNewSource, /<option value="__create__">\+ Добавить новый объект<\/option>/);
   assert.match(rentalNewSource, /<option key=\{option\.id\} value=\{option\.id\}>\{option\.label\}<\/option>/);
   assert.match(rentalNewSource, /<select[^>]*data-testid="rental-contract-select"[^>]*value=\{contractId\}/);
   assert.match(rentalNewSource, /<option value="">Выберите договор<\/option>/);
   assert.match(rentalNewSource, /return name \|\| address \|\| 'Объект без названия'/);
   assert.match(rentalNewSource, /return number \|\| title \|\| date \|\| 'Договор без номера'/);
-  assert.match(rentalNewSource, /Для выбранного клиента и объекта нет активных договоров/);
+  assert.match(rentalNewSource, /Для выбранного клиента\{objectId \? ' и объекта' : ''\} нет активных договоров/);
 });
 
 test('standalone rental creation keeps selected client label visible from stable client id', () => {

@@ -45,6 +45,7 @@ import { formatDate, formatDateTime } from '../lib/utils';
 import { useAuth } from '../contexts/AuthContext';
 import { normalizeUserRole } from '../lib/userStorage';
 import { useServerPagination } from '../hooks/useServerPagination';
+import { useClientObjectsList } from '../hooks/useClientRelations';
 import { PaginationControls } from '../components/common/PaginationControls';
 import { chooseBestGanttRentalEntry, getGanttRentalSourceId } from '../lib/rentalPlannerRows.js';
 import {
@@ -553,16 +554,18 @@ export default function Deliveries() {
     queryFn: deliveriesService.getCarriers,
     enabled: canManageDeliveries,
   });
-  const { data: ganttRentals = [] } = useQuery({
+  const ganttRentalsQuery = useQuery({
     queryKey: ['gantt-rentals-deliveries'],
     queryFn: rentalsService.getGanttData,
     enabled: canManageDeliveries,
   });
-  const { data: classicRentals = [] } = useQuery({
+  const ganttRentals = ganttRentalsQuery.data ?? [];
+  const classicRentalsQuery = useQuery({
     queryKey: ['classic-rentals-deliveries'],
     queryFn: rentalsService.getAll,
     enabled: canManageDeliveries,
   });
+  const classicRentals = classicRentalsQuery.data ?? [];
   const { data: equipment = [] } = useQuery({
     queryKey: ['equipment-deliveries'],
     queryFn: equipmentService.getAll,
@@ -573,6 +576,8 @@ export default function Deliveries() {
     queryFn: clientsService.getAll,
     enabled: canManageDeliveries,
   });
+  const clientObjectsQuery = useClientObjectsList({ enabled: canManageDeliveries });
+  const clientObjects = clientObjectsQuery.data ?? [];
   const { data: customerCounterparties = [] } = useQuery({
     queryKey: ['counterparties', 'deliveries', 'customer'],
     queryFn: () => counterpartiesService.getAll({ role: 'customer' }),
@@ -600,6 +605,7 @@ export default function Deliveries() {
 
   const rentalOptions = useMemo<RentalOption[]>(() => {
     const equipmentById = new Map(equipment.map((item) => [item.id, item]));
+    const clientObjectsById = new Map(clientObjects.map((item) => [item.id, item]));
     const classicMatchByGantt = new Map<string, Rental>();
     const classicById = new Map((classicRentals as Rental[]).map((item) => [String(item.id || ''), item]));
 
@@ -626,6 +632,8 @@ export default function Deliveries() {
         const classic = classicMatchByGantt.get(item.id);
         const stableClientId = item.clientId || classic?.clientId || '';
         const client = (clients as Client[]).find((entry) => entry.id === stableClientId);
+        const clientObject = clientObjectsById.get(classic?.objectId || item.objectId || '');
+        const objectAddress = clientObject?.address || classic?.objectAddress || item.objectAddress || '';
         const counterpartyId = item.counterpartyId || classic?.counterpartyId || client?.counterpartyId || '';
         const eq = equipmentById.get(item.equipmentId || '') || (equipment as Equipment[]).find((entry) => entry.inventoryNumber === item.equipmentInv);
         const equipmentLabel = eq ? `${eq.manufacturer} ${eq.model}` : item.equipmentInv;
@@ -642,14 +650,14 @@ export default function Deliveries() {
           startDate: item.startDate || classic?.startDate || '',
           endDate: item.endDate || classic?.plannedReturnDate || '',
           shippingFrom: eq?.location || 'Склад',
-          shippingTo: classic?.deliveryAddress || client?.address || item.client || '',
-          receivingFrom: classic?.deliveryAddress || client?.address || item.client || '',
+          shippingTo: objectAddress || classic?.deliveryAddress || client?.address || item.client || '',
+          receivingFrom: objectAddress || classic?.deliveryAddress || client?.address || item.client || '',
           receivingTo: eq?.location || 'Склад/сервис',
-          contactName: client?.contact || '',
-          contactPhone: client?.phone || '',
+          contactName: clientObject?.contactName || client?.contact || '',
+          contactPhone: clientObject?.contactPhone || client?.phone || '',
         };
       });
-  }, [classicRentals, clients, equipment, ganttRentals]);
+  }, [classicRentals, clientObjects, clients, equipment, ganttRentals]);
 
   const carrierOptions = useMemo(() => {
     return [...new Set(carriers.map((item) => item.name || item.key || item.id).filter(Boolean))]
@@ -718,10 +726,29 @@ export default function Deliveries() {
     const params = new URLSearchParams(location.search);
     const key = `${location.pathname}?${location.search}`;
     const shouldOpenCreate = location.pathname.endsWith('/new') || params.get('action') === 'create';
+    const hasRequestedRentalLink = Boolean(
+      params.get('rentalId') || params.get('classicRentalId') || params.get('ganttRentalId'),
+    );
+    if (hasRequestedRentalLink && (
+      !ganttRentalsQuery.isFetched
+      || !classicRentalsQuery.isFetched
+      || !clientObjectsQuery.isFetched
+    )) return;
     if (!canCreate || dialogOpen || !shouldOpenCreate || autoOpenKey === key) return;
     setAutoOpenKey(key);
     openCreateDialog(params);
-  }, [autoOpenKey, canCreate, dialogOpen, location.pathname, location.search, rentalOptions, user?.name]);
+  }, [
+    autoOpenKey,
+    canCreate,
+    classicRentalsQuery.isFetched,
+    clientObjectsQuery.isFetched,
+    dialogOpen,
+    ganttRentalsQuery.isFetched,
+    location.pathname,
+    location.search,
+    rentalOptions,
+    user?.name,
+  ]);
 
   useEffect(() => {
     const media = window.matchMedia('(min-width: 1536px)');

@@ -517,7 +517,7 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'partnerCardUploadedAt',
     'partnerCardUploadedBy',
   ]),
-  client_objects: new Set(['clientId', 'counterpartyId', 'name', 'address', 'contactName', 'contactPhone', 'contractId', 'contractNumber', 'notes', 'status']),
+  client_objects: new Set(['clientId', 'counterpartyId', 'name', 'address', 'contactName', 'contactPhone', 'comment', 'contractId', 'contractNumber', 'notes', 'status']),
   client_contracts: new Set(['counterpartyId', 'clientId', 'objectId', 'objectIds', 'number', 'date', 'title', 'status', 'notes']),
   payment_allocations: new Set(['paymentId', 'clientId', 'objectId', 'contractId', 'rentalId', 'documentId', 'managerId', 'periodStart', 'periodEnd', 'amount', 'status', 'source', 'comment']),
   documents: new Set([

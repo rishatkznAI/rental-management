@@ -8,6 +8,8 @@ const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
+const { registerClientMasterDataRoutes } = require('../server/routes/client-master-data.js');
+const { createClientMasterDataLifecycleService } = require('../server/lib/client-master-data-lifecycle.js');
 const { ensureClientCounterpartyFoundation } = require('../server/lib/counterparty.js');
 const {
   buildClientObjectDebtBreakdown,
@@ -31,9 +33,24 @@ function makeCrudApp(initial = {}) {
     service: [],
     ...initial,
   };
+  for (const collection of ['counterparties', 'clients', 'client_objects']) {
+    for (const record of state[collection] || []) {
+      record.companyId ||= 'COMPANY-A';
+      record.tenantId ||= 'TENANT-A';
+    }
+  }
   const app = express();
   app.use(express.json());
-  const readData = name => state[name] || [];
+  const readData = name => {
+    const rows = state[name] || [];
+    if (['counterparties', 'clients', 'client_objects'].includes(name)) {
+      for (const record of rows) {
+        record.companyId ||= 'COMPANY-A';
+        record.tenantId ||= 'TENANT-A';
+      }
+    }
+    return rows;
+  };
   const writeData = (name, value) => {
     state[name] = value;
   };
@@ -52,12 +69,24 @@ function makeCrudApp(initial = {}) {
       userId: 'U-admin',
       userName: 'Администратор',
       userRole: 'Администратор',
-      ...(req.get('x-company-id') ? { companyId: req.get('x-company-id') } : {}),
-      ...(req.get('x-tenant-id') ? { tenantId: req.get('x-tenant-id') } : {}),
+      companyId: req.get('x-company-id') || 'COMPANY-A',
+      tenantId: req.get('x-tenant-id') || 'TENANT-A',
     };
     next();
   };
   const requirePass = () => (_req, _res, next) => next();
+  const lifecycle = createClientMasterDataLifecycleService({
+    readData,
+    writeDataBatch,
+    generateId: prefix => `${prefix}-lifecycle-${state.__auditSeq = (state.__auditSeq || 0) + 1}`,
+    nowIso: () => '2026-05-07T12:00:00.000Z',
+  });
+  app.use('/api', registerClientMasterDataRoutes({
+    lifecycle,
+    requireAuth,
+    requireRead: requirePass,
+    requireWrite: requirePass,
+  }));
   app.use('/api', registerCrudRoutes({
     collections: ['clients', 'client_objects', 'client_contracts', 'rentals', 'gantt_rentals', 'payments', 'documents', 'service'],
     idPrefixes: {
@@ -235,8 +264,13 @@ test('client_objects transitional API canonicalizes legacy writes and enforces d
     assert.equal(relationChange.body.code, 'COUNTERPARTY_RELATION_IMMUTABLE');
 
     const deleted = await request(baseUrl, 'DELETE', `/api/client_objects/${legacyCreate.body.id}`);
-    assert.equal(deleted.status, 200);
-    assert.equal(deleted.body.ok, true);
+    assert.equal(deleted.status, 409);
+    assert.equal(deleted.body.code, 'CLIENT_OBJECT_ACTIVE');
+    const archived = await request(baseUrl, 'POST', `/api/client_objects/${legacyCreate.body.id}/archive`, {});
+    assert.equal(archived.status, 200);
+    const safeDelete = await request(baseUrl, 'DELETE', `/api/client_objects/${legacyCreate.body.id}`);
+    assert.equal(safeDelete.status, 200);
+    assert.equal(safeDelete.body.ok, true);
     assert.equal(state.client_objects.some(item => item.id === legacyCreate.body.id), false);
     assert.equal(state.clients.length, 1);
     assert.equal(state.counterparties.length, 2);
@@ -685,16 +719,17 @@ test('referenced ClientObject can be archived but cannot be hard-deleted', async
   await withServer(app, async baseUrl => {
     const deleted = await request(baseUrl, 'DELETE', '/api/client_objects/CO-1');
     assert.equal(deleted.status, 409);
-    assert.equal(deleted.body.code, 'CLIENT_OBJECT_HAS_HISTORY');
-    assert.deepEqual(deleted.body.links, [
-      { collection: 'rentals', count: 1 },
-      { collection: 'client_contracts', count: 1 },
-    ]);
+    assert.equal(deleted.body.code, 'CLIENT_OBJECT_ACTIVE');
     assert.equal(state.client_objects.length, 1);
 
-    const archived = await request(baseUrl, 'PATCH', '/api/client_objects/CO-1', { status: 'archived' });
+    const archived = await request(baseUrl, 'POST', '/api/client_objects/CO-1/archive', {});
     assert.equal(archived.status, 200);
-    assert.equal(archived.body.status, 'archived');
+    assert.equal(archived.body.clientObject.status, 'archived');
+    const historyBlocked = await request(baseUrl, 'DELETE', '/api/client_objects/CO-1');
+    assert.equal(historyBlocked.status, 409);
+    assert.equal(historyBlocked.body.code, 'CLIENT_OBJECT_HAS_HISTORY');
+    assert.equal(historyBlocked.body.blockers.some(item => item.collection === 'rentals' && item.recordId === 'R-1'), true);
+    assert.equal(historyBlocked.body.blockers.some(item => item.collection === 'client_contracts' && item.recordId === 'CC-1'), true);
     assert.equal(state.rentals[0].objectId, 'CO-1');
     assert.equal(state.client_contracts[0].objectId, 'CO-1');
   });

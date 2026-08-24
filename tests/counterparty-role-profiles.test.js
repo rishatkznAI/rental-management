@@ -337,7 +337,7 @@ test('role removal is blocked by durable stable-ID references and audit reports 
   const raw = data({
     counterparties: [counterparty('CP-1', ['customer', 'supplier'])],
     clients: [{ id: 'C-1', counterpartyId: 'CP-1', status: 'active' }],
-    rentals: [{ id: 'R-1', counterpartyId: 'CP-1', clientId: 'C-1', status: 'closed' }],
+    rentals: [{ id: 'R-1', counterpartyId: 'CP-1', clientId: 'C-1', status: 'active' }],
   });
   migrate(raw);
   const state = boundaryState(raw);

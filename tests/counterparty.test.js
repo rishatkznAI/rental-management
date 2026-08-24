@@ -38,9 +38,24 @@ function createState(overrides = {}) {
 }
 
 function createApp(state = createState(), { denyWrite = false } = {}) {
+  for (const collection of ['counterparties', 'clients', 'client_objects']) {
+    for (const record of state[collection] || []) {
+      record.companyId ||= 'COMPANY-A';
+      record.tenantId ||= 'TENANT-A';
+    }
+  }
   const app = express();
   app.use(express.json());
-  const readData = name => state[name] || [];
+  const readData = name => {
+    const rows = state[name] || [];
+    if (['counterparties', 'clients', 'client_objects'].includes(name)) {
+      for (const record of rows) {
+        record.companyId ||= 'COMPANY-A';
+        record.tenantId ||= 'TENANT-A';
+      }
+    }
+    return rows;
+  };
   const writeData = (name, value) => { state[name] = value; };
   let sequence = 0;
   const router = express.Router();
@@ -51,7 +66,13 @@ function createApp(state = createState(), { denyWrite = false } = {}) {
       for (const entry of entries) writeData(entry.name, entry.value);
     },
     requireAuth: (req, _res, next) => {
-      req.user = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' };
+      req.user = {
+        userId: 'U-admin',
+        userName: 'Админ',
+        userRole: 'Администратор',
+        companyId: 'COMPANY-A',
+        tenantId: 'TENANT-A',
+      };
       next();
     },
     requireRead: () => (_req, _res, next) => next(),
@@ -624,16 +645,13 @@ test('customer role removal returns stable machine-readable blockers for durable
     rentals: [{ id: 'R-history', counterpartyId: 'CP-history', clientId: 'C-history', status: 'closed' }],
     payments: [{ id: 'P-history', counterpartyId: 'CP-history', clientId: 'C-history', amount: 100 }],
   });
-  const before = structuredClone(state);
   const app = createApp(state);
+  const before = structuredClone(state);
   await withServer(app, async baseUrl => {
     const blocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-history/roles/customer');
     assert.equal(blocked.status, 409);
-    assert.equal(blocked.body.code, 'COUNTERPARTY_ROLE_REMOVAL_BLOCKED');
-    assert.deepEqual(
-      blocked.body.details.blockers.map(item => item.collection),
-      ['rentals', 'payments'],
-    );
+    assert.equal(blocked.body.code, 'COUNTERPARTY_IN_USE');
+    assert.deepEqual(blocked.body.details.blockers.map(item => item.collection), ['payments']);
   });
   assert.deepEqual(state, before, 'blocked removal must not persist partial migration or profile writes');
 });
@@ -722,7 +740,8 @@ test('Counterparty archive is soft-delete and refuses active Client, Site/Object
     state.clients = [{ id: 'C-1', counterpartyId: 'CP-archive' }];
     const blocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
     assert.equal(blocked.status, 409);
-    assert.equal(blocked.body.code, 'COUNTERPARTY_CLIENT_LINK_CONFLICT');
+    assert.equal(blocked.body.code, 'COUNTERPARTY_IN_USE');
+    assert.equal(blocked.body.details.blockers.some(item => item.collection === 'clients' && item.recordId === 'C-1'), true);
 
     state.clients = [];
     state.client_objects = [{
@@ -734,8 +753,8 @@ test('Counterparty archive is soft-delete and refuses active Client, Site/Object
     }];
     const objectBlocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
     assert.equal(objectBlocked.status, 409);
-    assert.equal(objectBlocked.body.code, 'COUNTERPARTY_DOMAIN_LINK_CONFLICT');
-    assert.deepEqual(objectBlocked.body.details.clientObjectIds, ['CO-1']);
+    assert.equal(objectBlocked.body.code, 'COUNTERPARTY_IN_USE');
+    assert.equal(objectBlocked.body.details.blockers.some(item => item.collection === 'client_objects' && item.recordId === 'CO-1'), true);
 
     state.client_objects[0].status = 'archived';
     state.rentals = [{
@@ -745,26 +764,26 @@ test('Counterparty archive is soft-delete and refuses active Client, Site/Object
     }];
     const rentalBlocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
     assert.equal(rentalBlocked.status, 409);
-    assert.equal(rentalBlocked.body.code, 'COUNTERPARTY_DOMAIN_LINK_CONFLICT');
-    assert.deepEqual(rentalBlocked.body.details.rentalIds, ['R-active-direct']);
+    assert.equal(rentalBlocked.body.code, 'COUNTERPARTY_IN_USE');
+    assert.equal(rentalBlocked.body.details.blockers.some(item => item.collection === 'rentals' && item.recordId === 'R-active-direct'), true);
 
     state.rentals[0].status = 'closed';
     state.deliveries = [{ id: 'D-active', counterpartyId: 'CP-archive', status: 'in_transit' }];
     const deliveryBlocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
     assert.equal(deliveryBlocked.status, 409);
-    assert.deepEqual(deliveryBlocked.body.details.deliveryIds, ['D-active']);
+    assert.equal(deliveryBlocked.body.details.blockers.some(item => item.collection === 'deliveries' && item.recordId === 'D-active'), true);
 
     state.deliveries[0].status = 'completed';
     state.service = [{ id: 'S-active', counterpartyId: 'CP-archive', status: 'waiting_parts' }];
     const serviceBlocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
     assert.equal(serviceBlocked.status, 409);
-    assert.deepEqual(serviceBlocked.body.details.serviceTicketIds, ['S-active']);
+    assert.equal(serviceBlocked.body.details.blockers.some(item => item.collection === 'service' && item.recordId === 'S-active'), true);
 
     state.service[0].status = 'ready';
     state.delivery_carriers = [{ id: 'DC-active', counterpartyId: 'CP-archive', status: 'active' }];
     const carrierBlocked = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
     assert.equal(carrierBlocked.status, 409);
-    assert.deepEqual(carrierBlocked.body.details.deliveryCarrierIds, ['DC-active']);
+    assert.equal(carrierBlocked.body.details.blockers.some(item => item.collection === 'delivery_carriers' && item.recordId === 'DC-active'), true);
 
     state.delivery_carriers[0].status = 'inactive';
     const archived = await request(baseUrl, 'DELETE', '/api/counterparties/CP-archive');
@@ -799,12 +818,12 @@ test('Counterparty archive is blocked by active canonical and deterministic Warr
   await withServer(app, async baseUrl => {
     const canonicalBlocked = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);
     assert.equal(canonicalBlocked.status, 409);
-    assert.deepEqual(canonicalBlocked.body.details.warrantyClaimIds, ['W-canonical']);
+    assert.equal(canonicalBlocked.body.details.blockers.some(item => item.collection === 'warranty_claims' && item.recordId === 'W-canonical'), true);
 
     state.warranty_claims = [{ id: 'W-derived', serviceTicketId: 'S-warranty', status: 'parts_shipping' }];
     const deterministicBlocked = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);
     assert.equal(deterministicBlocked.status, 409);
-    assert.deepEqual(deterministicBlocked.body.details.warrantyClaimIds, ['W-derived']);
+    assert.equal(deterministicBlocked.body.details.blockers.some(item => item.collection === 'warranty_claims' && item.recordId === 'W-derived'), true);
 
     state.warranty_claims[0].status = 'closed';
     const archived = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);
@@ -838,7 +857,7 @@ test('Counterparty archive is blocked by active Warranty factory supplier relati
   await withServer(app, async baseUrl => {
     const blocked = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);
     assert.equal(blocked.status, 409);
-    assert.deepEqual(blocked.body.details.warrantyFactoryClaimIds, ['W-factory-active']);
+    assert.equal(blocked.body.details.blockers.some(item => item.collection === 'warranty_claims' && item.recordId === 'W-factory-active'), true);
 
     state.warranty_claims[0].status = 'closed';
     const archived = await request(baseUrl, 'DELETE', `/api/counterparties/${counterparty.id}`);

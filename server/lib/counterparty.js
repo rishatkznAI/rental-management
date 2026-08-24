@@ -255,6 +255,8 @@ function normalizeCounterpartyRecord(input, {
   const timestamp = nowIso();
   const record = {
     id: resolvedId,
+    ...(source.companyId ? { companyId: String(source.companyId).trim() } : {}),
+    ...(source.tenantId ? { tenantId: String(source.tenantId).trim() } : {}),
     type,
     legalName,
     shortName: displayText(source.shortName) || legalName,
@@ -369,6 +371,8 @@ function counterpartyInputFromClient(client) {
   const legalName = displayText(client?.legalName || client?.fullName || client?.company || client?.companyName || client?.name);
   const shortName = displayText(client?.company || client?.companyName || client?.name || legalName);
   return {
+    ...(client?.companyId ? { companyId: client.companyId } : {}),
+    ...(client?.tenantId ? { tenantId: client.tenantId } : {}),
     type: clientTypeToCounterpartyType(client),
     legalName,
     shortName,

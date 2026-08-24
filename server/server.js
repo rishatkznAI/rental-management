@@ -171,6 +171,8 @@ const {
 } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
 const { registerCounterpartyRoutes } = require('./routes/counterparties');
+const { registerClientMasterDataRoutes } = require('./routes/client-master-data');
+const { createClientMasterDataLifecycleService } = require('./lib/client-master-data-lifecycle');
 const { registerCrmActivityRoutes } = require('./routes/crm-activities');
 const { registerDebtCollectionPlanRoutes } = require('./routes/debt-collection-plans');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
@@ -1343,6 +1345,13 @@ function migrateLegacyRepairFacts({ dryRun = false } = {}) {
 
 const apiRouter = express.Router();
 
+const clientMasterDataLifecycle = createClientMasterDataLifecycleService({
+  readData,
+  writeDataBatch,
+  generateId,
+  nowIso,
+});
+
 registerCounterpartyRoutes(apiRouter, {
   readData,
   writeData,
@@ -1353,6 +1362,7 @@ registerCounterpartyRoutes(apiRouter, {
   generateId,
   nowIso,
   auditLog,
+  clientMasterDataLifecycle,
 });
 
 const COLLECTIONS = [
@@ -1427,6 +1437,13 @@ registerSkytechCleanResetRoutes(apiRouter, {
 
 apiRouter.use(createAppDisabledMiddleware({
   getConfig: () => appDisabledConfig,
+}));
+
+apiRouter.use(registerClientMasterDataRoutes({
+  lifecycle: clientMasterDataLifecycle,
+  requireAuth,
+  requireRead,
+  requireWrite,
 }));
 
 registerCanonicalReceivablesReadRoutes(apiRouter, {

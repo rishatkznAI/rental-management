@@ -15,15 +15,15 @@ const {
   SUPPLIER_PROFILES_COLLECTION,
   activateCounterpartyRole,
   activeRolesForCounterparty,
-  archiveCounterpartyRoleProfiles,
   boundaryEntries,
   boundaryState,
   deactivateCounterpartyRole,
   hasActiveCounterpartyRole,
 } = require('../lib/counterparty-role-profiles');
-const { activeServiceCounterpartyReferences } = require('../lib/service-counterparty-relations');
-const { activeWarrantyCounterpartyReferences } = require('../lib/warranty-claim-counterparty-relations');
-const { activeWarrantyFactoryCounterpartyReferences } = require('../lib/warranty-claim-factory-counterparty-relations');
+const {
+  assertEntityOwnerScope,
+  createClientMasterDataLifecycleService,
+} = require('../lib/client-master-data-lifecycle');
 
 const COUNTERPARTY_WRITE_FIELDS = new Set([
   'type',
@@ -148,7 +148,14 @@ function registerCounterpartyRoutes(router, deps) {
     generateId,
     nowIso = () => new Date().toISOString(),
     auditLog,
+    clientMasterDataLifecycle = null,
   } = deps;
+  const lifecycle = clientMasterDataLifecycle || createClientMasterDataLifecycleService({
+    readData,
+    writeDataBatch,
+    generateId,
+    nowIso,
+  });
 
   function readRoleProfileState(overrides = {}) {
     return boundaryState({
@@ -262,6 +269,9 @@ function registerCounterpartyRoutes(router, deps) {
       const input = sanitizeRoleMutationInput(req.body);
       const state = readRoleProfileState();
       const previous = state.counterparties.find(item => String(item?.id || '') === id);
+      if (previous) {
+        assertEntityOwnerScope({ actor: req.user, entityType: 'counterparty', entity: previous, readData });
+      }
       const result = activateCounterpartyRole({
         state,
         counterpartyId: id,
@@ -295,6 +305,19 @@ function registerCounterpartyRoutes(router, deps) {
         ...(req.query.reason !== undefined ? { reason: req.query.reason } : {}),
         ...(req.query.source !== undefined ? { source: req.query.source } : {}),
       });
+      const scopedCounterparty = (readData('counterparties') || [])
+        .find(item => String(item?.id || '') === id);
+      if (scopedCounterparty) {
+        assertEntityOwnerScope({ actor: req.user, entityType: 'counterparty', entity: scopedCounterparty, readData });
+      }
+      if (input.role === 'customer') {
+        return res.json(lifecycle.deactivateCustomerRole({
+          id,
+          actor: req.user,
+          reason: input.reason,
+          source: input.source || 'role_api',
+        }));
+      }
       const state = readRoleProfileState();
       const previous = state.counterparties.find(item => String(item?.id || '') === id);
       const result = deactivateCounterpartyRole({
@@ -335,7 +358,11 @@ function registerCounterpartyRoutes(router, deps) {
         );
       }
       const counterparties = Array.isArray(readData('counterparties')) ? readData('counterparties') : [];
-      const item = normalizeCounterpartyRecord(input, {
+      const item = normalizeCounterpartyRecord({
+        ...input,
+        ...(req.user?.companyId ? { companyId: req.user.companyId } : {}),
+        ...(req.user?.tenantId ? { tenantId: req.user.tenantId } : {}),
+      }, {
         id: generateId('CP'),
         nowIso,
       });
@@ -376,6 +403,12 @@ function registerCounterpartyRoutes(router, deps) {
       if (index === -1) {
         throw counterpartyError('COUNTERPARTY_NOT_FOUND', 'Контрагент не найден.', 404, { id });
       }
+      assertEntityOwnerScope({
+        actor: req.user,
+        entityType: 'counterparty',
+        entity: counterparties[index],
+        readData,
+      });
       const input = sanitizeCounterpartyInput(req.body, { patch: true });
       if (input.status === 'archived') {
         throw counterpartyError(
@@ -443,152 +476,7 @@ function registerCounterpartyRoutes(router, deps) {
   router.delete('/counterparties/:id', requireAuth, requireWrite('counterparties'), (req, res) => {
     try {
       const id = assertCounterpartyId(req.params.id);
-      const counterparties = [...(readData('counterparties') || [])];
-      const index = counterparties.findIndex(item => String(item?.id || '') === id);
-      if (index === -1) {
-        throw counterpartyError('COUNTERPARTY_NOT_FOUND', 'Контрагент не найден.', 404, { id });
-      }
-      const linkedClients = (readData('clients') || [])
-        .filter(client => String(client?.counterpartyId || '') === id);
-      if (linkedClients.length > 0) {
-        throw counterpartyError(
-          'COUNTERPARTY_CLIENT_LINK_CONFLICT',
-          'Нельзя архивировать контрагента, пока существует связанный Client.',
-          409,
-          { counterpartyId: id, clientIds: linkedClients.map(client => client.id) },
-        );
-      }
-      const linkedActiveObjectIds = (readData('client_objects') || [])
-        .filter(object => (
-          String(object?.counterpartyId || '') === id
-          && String(object?.status || 'active') !== 'archived'
-        ))
-        .map(object => object.id)
-        .filter(Boolean);
-      if (linkedActiveObjectIds.length > 0) {
-        throw counterpartyError(
-          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
-          'Нельзя архивировать контрагента, пока существуют связанные активные объекты.',
-          409,
-          { counterpartyId: id, clientObjectIds: linkedActiveObjectIds },
-        );
-      }
-      const terminalRentalStatuses = new Set(['closed', 'returned', 'completed', 'cancelled', 'canceled']);
-      const linkedActiveRentalIds = [
-        ...(readData('rentals') || []),
-        ...(readData('gantt_rentals') || []),
-      ]
-        .filter(rental => (
-          String(rental?.counterpartyId || '') === id
-          && !terminalRentalStatuses.has(String(rental?.status || '').trim().toLowerCase())
-          && !rental?.actualReturnDate
-        ))
-        .map(rental => rental.id)
-        .filter(Boolean);
-      if (linkedActiveRentalIds.length > 0) {
-        throw counterpartyError(
-          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
-          'Нельзя архивировать контрагента, пока существуют связанные активные аренды.',
-          409,
-          { counterpartyId: id, rentalIds: [...new Set(linkedActiveRentalIds)] },
-        );
-      }
-      const linkedActiveServiceIds = activeServiceCounterpartyReferences(id, { readData })
-        .map(ticket => ticket.id)
-        .filter(Boolean);
-      if (linkedActiveServiceIds.length > 0) {
-        throw counterpartyError(
-          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
-          'Нельзя архивировать контрагента, пока существуют связанные активные сервисные заявки.',
-          409,
-          { counterpartyId: id, serviceTicketIds: [...new Set(linkedActiveServiceIds)] },
-        );
-      }
-      const linkedActiveWarrantyClaimIds = activeWarrantyCounterpartyReferences(id, { readData })
-        .map(claim => claim.id)
-        .filter(Boolean);
-      if (linkedActiveWarrantyClaimIds.length > 0) {
-        throw counterpartyError(
-          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
-          'Нельзя архивировать контрагента, пока существуют связанные активные рекламации.',
-          409,
-          { counterpartyId: id, warrantyClaimIds: [...new Set(linkedActiveWarrantyClaimIds)] },
-        );
-      }
-      const linkedActiveWarrantyFactoryClaimIds = activeWarrantyFactoryCounterpartyReferences(id, { readData })
-        .map(claim => claim.id)
-        .filter(Boolean);
-      if (linkedActiveWarrantyFactoryClaimIds.length > 0) {
-        throw counterpartyError(
-          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
-          'Нельзя архивировать supplier Counterparty, пока существуют активные внешние гарантийные связи.',
-          409,
-          { counterpartyId: id, warrantyFactoryClaimIds: [...new Set(linkedActiveWarrantyFactoryClaimIds)] },
-        );
-      }
-      const terminalDeliveryStatuses = new Set(['completed', 'cancelled', 'canceled']);
-      const linkedActiveDeliveryIds = (readData('deliveries') || [])
-        .filter(delivery => (
-          (
-            String(delivery?.counterpartyId || '') === id
-            || String(delivery?.carrierCounterpartyId || delivery?.contractorCounterpartyId || '') === id
-          )
-          && !terminalDeliveryStatuses.has(String(delivery?.status || '').trim().toLowerCase())
-        ))
-        .map(delivery => delivery.id)
-        .filter(Boolean);
-      if (linkedActiveDeliveryIds.length > 0) {
-        throw counterpartyError(
-          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
-          'Нельзя архивировать контрагента, пока существуют связанные активные доставки.',
-          409,
-          { counterpartyId: id, deliveryIds: [...new Set(linkedActiveDeliveryIds)] },
-        );
-      }
-      const linkedActiveCarrierIds = (readData('delivery_carriers') || [])
-        .filter(carrier => (
-          String(carrier?.counterpartyId || carrier?.contractorCounterpartyId || '') === id
-          && String(carrier?.status || 'active').trim().toLowerCase() !== 'inactive'
-        ))
-        .map(carrier => carrier.id)
-        .filter(Boolean);
-      if (linkedActiveCarrierIds.length > 0) {
-        throw counterpartyError(
-          'COUNTERPARTY_DOMAIN_LINK_CONFLICT',
-          'Нельзя архивировать contractor Counterparty, пока активна запись перевозчика.',
-          409,
-          { counterpartyId: id, deliveryCarrierIds: [...new Set(linkedActiveCarrierIds)] },
-        );
-      }
-      const previous = counterparties[index];
-      if (previous.archivedAt || previous.status === 'archived') {
-        return res.json({ ok: true, counterparty: previous });
-      }
-      const archivedAt = nowIso();
-      const item = {
-        ...previous,
-        status: 'archived',
-        archivedAt,
-        updatedAt: archivedAt,
-      };
-      counterparties[index] = item;
-      const state = readRoleProfileState({ counterparties });
-      archiveCounterpartyRoleProfiles({
-        state,
-        counterpartyId: id,
-        actor: req.user,
-        source: 'counterparty_archive',
-        nowIso: () => archivedAt,
-      });
-      writeDataBatch(boundaryEntries(state));
-      auditLog?.(req, {
-        action: 'counterparties.archive',
-        entityType: 'counterparties',
-        entityId: id,
-        before: previous,
-        after: item,
-      });
-      return res.json({ ok: true, counterparty: item });
+      return res.json(lifecycle.archiveCounterparty({ id, actor: req.user }));
     } catch (error) {
       return sendCounterpartyError(res, error);
     }

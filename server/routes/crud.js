@@ -101,6 +101,7 @@ const {
   decorateServiceTicketCounterparty,
 } = require('../lib/service-counterparty-relations');
 const { assertBusinessNumberNotProvided } = require('../lib/business-numbering');
+const { assertEntityOwnerScope } = require('../lib/client-master-data-lifecycle');
 const {
   canonicalizeWarrantyClaimCounterpartyRelation,
   decorateWarrantyClaimCounterparty,
@@ -410,10 +411,6 @@ function registerCrudRoutes(deps) {
     return item;
   }
 
-  function normalizeClientName(value) {
-    return String(value || '').trim().toLowerCase();
-  }
-
   function assertWarrantyTargetServiceAccess(nextClaim, previousClaim, user) {
     const nextServiceTicketId = String(nextClaim?.serviceTicketId || '').trim();
     const previousServiceTicketId = String(previousClaim?.serviceTicketId || '').trim();
@@ -463,104 +460,6 @@ function registerCrudRoutes(deps) {
     if (status === 'closed') return false;
     const due = text(ticket?.dueDate || ticket?.deadline || ticket?.targetDate || ticket?.plannedDate || ticket?.scheduledDate).slice(0, 10);
     return Boolean(due && due < new Date().toISOString().slice(0, 10));
-  }
-
-  function rentalBelongsToClient(rental, client) {
-    const clientId = String(client?.id || '').trim();
-    const rentalClientId = String(rental?.clientId || '').trim();
-    return Boolean(clientId && rentalClientId && rentalClientId === clientId);
-  }
-
-  function rentalDeleteBlockDto(rental, equipmentById) {
-    const equipmentId = rental?.equipmentId || '';
-    const equipment = equipmentId ? equipmentById.get(String(equipmentId)) : null;
-    const equipmentInv = rental?.equipmentInv
-      || rental?.inventoryNumber
-      || equipment?.inventoryNumber
-      || '';
-    return {
-      id: rental?.id,
-      rentalId: rental?.rentalId || rental?.sourceRentalId || rental?.originalRentalId || rental?.id,
-      equipmentId,
-      equipmentInv,
-      startDate: rental?.startDate,
-      endDate: rental?.endDate || rental?.plannedReturnDate,
-      status: rental?.status,
-    };
-  }
-
-  function findClientLinkedRentals(client) {
-    const equipmentById = new Map((readData('equipment') || [])
-      .filter(item => item?.id)
-      .map(item => [String(item.id), item]));
-    const seen = new Set();
-    return [...(readData('rentals') || []), ...(readData('gantt_rentals') || [])]
-      .filter(rental => rentalBelongsToClient(rental, client))
-      .map(rental => rentalDeleteBlockDto(rental, equipmentById))
-      .filter(rental => {
-        const key = `${rental.id || ''}:${rental.rentalId || ''}:${rental.equipmentId || ''}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-  }
-
-  function recordBelongsToClient(record, client, nameFields) {
-    const clientId = String(client?.id || '').trim();
-    const recordClientId = String(record?.clientId || '').trim();
-    if (clientId && recordClientId) return recordClientId === clientId;
-    if (recordClientId) return false;
-
-    const clientName = normalizeClientName(client?.company || client?.name);
-    if (!clientName) return false;
-    return nameFields.some(field => normalizeClientName(record?.[field]) === clientName);
-  }
-
-  function findClientHistoryLinks(client) {
-    const linkSpecs = [
-      { collection: 'documents', label: 'documents', nameFields: ['client', 'clientName'] },
-      { collection: 'payments', label: 'payments', nameFields: ['client', 'clientName'] },
-      { collection: 'deliveries', label: 'deliveries', nameFields: ['client', 'clientName'] },
-      { collection: 'service', label: 'service', nameFields: [] },
-      { collection: 'warranty_claims', label: 'warranty_claims', nameFields: [] },
-      { collection: 'crm_deals', label: 'crm_deals', nameFields: ['company', 'client', 'clientName'] },
-      { collection: 'debt_collection_plans', label: 'debt_collection_plans', nameFields: ['clientName', 'client'] },
-    ];
-
-    return linkSpecs
-      .map(spec => {
-        const items = readData(spec.collection) || [];
-        const matches = items.filter(item => (
-          spec.collection === 'payments' || spec.collection === 'deliveries' || spec.collection === 'service' || spec.collection === 'warranty_claims'
-            ? String(item?.clientId || '').trim() === String(client?.id || '').trim()
-            : recordBelongsToClient(item, client, spec.nameFields)
-        ));
-        return matches.length > 0
-          ? { collection: spec.label, count: matches.length }
-          : null;
-      })
-      .filter(Boolean);
-  }
-
-  function canDeleteClients(req) {
-    const role = normalizeRole(req.user?.userRole);
-    return role === 'Администратор' || role === 'Офис-менеджер';
-  }
-
-  function sendClientHasRentalsError(res, rentals) {
-    return res.status(409).json({
-      error: 'CLIENT_HAS_RENTALS',
-      message: 'Нельзя удалить клиента, потому что у него есть связанные аренды',
-      rentals,
-    });
-  }
-
-  function sendClientHasHistoryError(res, links) {
-    return res.status(409).json({
-      error: 'CLIENT_HAS_HISTORY',
-      message: 'Нельзя удалить клиента, потому что у него есть исторические связи. Переведите клиента в архивный/неактивный статус вместо удаления.',
-      links,
-    });
   }
 
   function sendClientInnError(res, error) {
@@ -689,34 +588,6 @@ function registerCrudRoutes(deps) {
       if (dependent) return { collection: collectionName, id: dependent.id };
     }
     return null;
-  }
-
-  function findClientObjectHistoryLinks(clientObject) {
-    const objectId = String(clientObject?.id || '').trim();
-    if (!objectId) return [];
-    const linkSpecs = [
-      'rentals',
-      'gantt_rentals',
-      'deliveries',
-      'service',
-      'warranty_claims',
-      'documents',
-      'client_contracts',
-      'payments',
-      'payment_allocations',
-      'debt_collection_plans',
-    ];
-    return linkSpecs
-      .map(collectionName => {
-        const matches = (readData(collectionName) || []).filter(record => (
-          [record?.objectId, record?.clientObjectId, record?.siteId]
-            .some(value => String(value || '').trim() === objectId)
-          || (Array.isArray(record?.objectIds)
-            && record.objectIds.some(value => String(value || '').trim() === objectId))
-        ));
-        return matches.length > 0 ? { collection: collectionName, count: matches.length } : null;
-      })
-      .filter(Boolean);
   }
 
   const CLIENT_CONTRACT_PATCH_FIELDS = new Set(['date', 'title', 'objectId', 'objectIds', 'notes', 'status']);
@@ -1919,6 +1790,13 @@ function registerCrudRoutes(deps) {
         }
         accessControl.assertCanCreateCollection(collection, req.user, req.body);
         let input = accessControl.sanitizeCreateInput(collection, req.body, req.user);
+        if (collection === 'clients' || collection === 'client_objects') {
+          input = {
+            ...input,
+            ...(req.user?.companyId ? { companyId: req.user.companyId } : {}),
+            ...(req.user?.tenantId ? { tenantId: req.user.tenantId } : {}),
+          };
+        }
         const idempotencyKey = readInlineRelationIdempotencyKey(req, collection);
         const idempotencyFingerprint = idempotencyKey
           ? inlineRelationFingerprint(collection, input)
@@ -2183,6 +2061,26 @@ function registerCrudRoutes(deps) {
     });
 
     router.patch(`/${collection}/:id`, ...writeMiddlewares(collection), (req, res) => {
+      if (
+        (collection === 'clients' || collection === 'client_objects')
+        && ['companyId', 'tenantId'].some(field => Object.prototype.hasOwnProperty.call(req.body || {}, field))
+      ) {
+        return res.status(409).json({
+          ok: false,
+          code: 'MASTER_DATA_SCOPE_IMMUTABLE',
+          error: 'Scope master-data нельзя менять через generic PATCH.',
+        });
+      }
+      if (
+        collection === 'client_objects'
+        && Object.prototype.hasOwnProperty.call(req.body || {}, 'status')
+      ) {
+        return res.status(409).json({
+          ok: false,
+          code: 'CLIENT_OBJECT_LIFECYCLE_ENDPOINT_REQUIRED',
+          error: 'Статус объекта изменяется только через domain lifecycle endpoint.',
+        });
+      }
       if (isRepairItemCollection(collection)) {
         try {
           assertRepairItemsAdmin(req.user);
@@ -2218,6 +2116,14 @@ function registerCrudRoutes(deps) {
       try {
         if (collection === 'client_contracts') {
           assertScopedClientContractPatch(req, data[idx]);
+        }
+        if (collection === 'clients' || collection === 'client_objects') {
+          assertEntityOwnerScope({
+            actor: req.user,
+            entityType: collection === 'clients' ? 'client' : 'client_object',
+            entity: data[idx],
+            readData,
+          });
         }
         accessControl.assertCanUpdateEntity(collection, data[idx], req.user);
         if (collection === 'equipment') {
@@ -2528,6 +2434,13 @@ function registerCrudRoutes(deps) {
     });
 
     router.delete(`/${collection}/:id`, ...writeMiddlewares(collection), (req, res) => {
+      if (collection === 'clients' || collection === 'client_objects') {
+        return res.status(405).json({
+          ok: false,
+          code: 'DOMAIN_LIFECYCLE_ENDPOINT_REQUIRED',
+          error: `Generic DELETE для ${collection} отключён; требуется domain lifecycle handler.`,
+        });
+      }
       if (isRepairItemCollection(collection)) {
         try {
           assertRepairItemsAdmin(req.user);
@@ -2565,9 +2478,6 @@ function registerCrudRoutes(deps) {
       } catch (error) {
         return sendAccessError(res, error);
       }
-      if (collection === 'clients' && !canDeleteClients(req)) {
-        return res.status(403).json({ ok: false, error: 'Удаление клиентов доступно только администратору или офис-менеджеру.' });
-      }
       const knowledgeProgressForbiddenReason = knowledgeBaseProgressForbiddenReason(req, collection, 'DELETE', data[idx]);
       if (knowledgeProgressForbiddenReason) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
@@ -2588,27 +2498,6 @@ function registerCrudRoutes(deps) {
           return sendEquipmentValidationError(res, error);
         }
         return res.status(error?.status || 400).json({ ok: false, error: error.message });
-      }
-      if (collection === 'clients') {
-        const linkedRentals = findClientLinkedRentals(removedItem);
-        if (linkedRentals.length > 0) {
-          return sendClientHasRentalsError(res, linkedRentals);
-        }
-        const historyLinks = findClientHistoryLinks(removedItem);
-        if (historyLinks.length > 0) {
-          return sendClientHasHistoryError(res, historyLinks);
-        }
-      }
-      if (collection === 'client_objects') {
-        const historyLinks = findClientObjectHistoryLinks(removedItem);
-        if (historyLinks.length > 0) {
-          return res.status(409).json({
-            ok: false,
-            code: 'CLIENT_OBJECT_HAS_HISTORY',
-            error: 'Объект нельзя удалить: существуют связанные записи. Архивируйте объект, чтобы сохранить историю.',
-            links: historyLinks,
-          });
-        }
       }
       if (collection === 'client_contracts') {
         try {
@@ -2852,6 +2741,60 @@ function registerCrudRoutes(deps) {
         accessControl.assertSafeAdminBulkReplaceInput(collection, list);
       } catch (error) {
         return sendAccessError(res, error);
+      }
+
+      if (collection === 'clients' || collection === 'client_objects') {
+        const existing = readData(collection) || [];
+        const incomingIds = new Set(list.map(item => String(item?.id || '').trim()).filter(Boolean));
+        const omittedIds = existing
+          .map(item => String(item?.id || '').trim())
+          .filter(id => id && !incomingIds.has(id));
+        if (omittedIds.length > 0) {
+          return res.status(409).json({
+            ok: false,
+            code: 'DOMAIN_LIFECYCLE_BULK_DELETE_FORBIDDEN',
+            error: `Bulk replace не может удалять ${collection}; используйте domain lifecycle endpoint.`,
+            details: { omittedIds },
+          });
+        }
+        const existingById = new Map(existing.map(item => [String(item?.id || '').trim(), item]));
+        for (const item of existing) {
+          try {
+            assertEntityOwnerScope({
+              actor: req.user,
+              entityType: collection === 'clients' ? 'client' : 'client_object',
+              entity: item,
+              readData,
+            });
+          } catch (error) {
+            return sendAccessError(res, error);
+          }
+        }
+        if (collection === 'client_objects') {
+          const lifecycleStatusMutation = list.find(item => {
+            const previous = existingById.get(String(item?.id || '').trim());
+            return previous && String(item?.status || 'active') !== String(previous?.status || 'active');
+          });
+          if (lifecycleStatusMutation) {
+            return res.status(409).json({
+              ok: false,
+              code: 'CLIENT_OBJECT_LIFECYCLE_ENDPOINT_REQUIRED',
+              error: 'Статус объекта изменяется только через domain lifecycle endpoint.',
+            });
+          }
+        }
+        list = list.map(item => {
+          const previous = existingById.get(String(item?.id || '').trim());
+          return {
+            ...item,
+            ...(previous?.companyId || req.user?.companyId
+              ? { companyId: previous?.companyId || req.user.companyId }
+              : {}),
+            ...(previous?.tenantId || req.user?.tenantId
+              ? { tenantId: previous?.tenantId || req.user.tenantId }
+              : {}),
+          };
+        });
       }
 
       if (collection === 'rentals' || collection === 'gantt_rentals') {

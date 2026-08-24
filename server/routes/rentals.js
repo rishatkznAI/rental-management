@@ -561,6 +561,8 @@ function registerRentalRoutes(deps) {
           requireRentalRelations: collection === 'rentals' && !existing,
           requireActiveObject: !existing || String(item?.objectId || '') !== String(existing?.objectId || ''),
           allowArchivedObjectId: existing?.objectId,
+          requireActiveContract: !existing || String(item?.contractId || '') !== String(existing?.contractId || ''),
+          allowArchivedContractId: existing?.contractId,
           includeObjectSnapshot: true,
           includeContractSnapshot: true,
         });

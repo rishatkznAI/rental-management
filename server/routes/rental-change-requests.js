@@ -251,6 +251,8 @@ function registerRentalChangeRequestRoutes(deps) {
           readData,
           requireActiveObject: String(nextRental.objectId || '') !== String(previousRental.objectId || ''),
           allowArchivedObjectId: previousRental.objectId,
+          requireActiveContract: String(nextRental.contractId || '') !== String(previousRental.contractId || ''),
+          allowArchivedContractId: previousRental.contractId,
           includeObjectSnapshot: true,
           includeContractSnapshot: true,
         });

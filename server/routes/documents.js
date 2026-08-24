@@ -21,6 +21,9 @@ const {
   enrichRecordFromRentalLinks,
 } = require('../lib/client-relations');
 const {
+  assertClientContractAvailableForNewLink,
+} = require('../lib/client-contract-lifecycle');
+const {
   canonicalizeDocumentCounterpartyRelation,
 } = require('../lib/document-counterparty-relations');
 const { linkedRentalIds } = require('../lib/gantt-rental-link-guard');
@@ -305,6 +308,11 @@ function registerDocumentRoutes(router, deps) {
         })
       : item;
     const enriched = enrichRecordFromRentalLinks(linked, readData);
+    if (enriched?.contractId) {
+      assertClientContractAvailableForNewLink(readData, enriched.contractId, {
+        allowArchivedContractId: existing?.contractId,
+      });
+    }
     return canonicalizeDocumentCounterpartyRelation(enriched, { readData }, {
       existing,
       requireActiveObject: !existing,

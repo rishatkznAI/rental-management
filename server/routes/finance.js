@@ -29,6 +29,9 @@ const {
   AUDIT_COLLECTION,
   createAuditEntry,
 } = require('../lib/security-audit');
+const {
+  assertClientContractAvailableForNewLink,
+} = require('../lib/client-contract-lifecycle');
 
 function registerFinanceRoutes(router, deps) {
   const {
@@ -1134,6 +1137,9 @@ function registerFinanceRoutes(router, deps) {
           throw error;
         }
         const rentalId = text(item?.rentalId);
+        const rental = rentals.find(candidate => text(candidate?.id) === rentalId);
+        const contractId = text(item?.contractId || rental?.contractId);
+        if (contractId) assertClientContractAvailableForNewLink(readData, contractId);
         assertPaymentAllocationCandidateCanonical({
           ...item,
           paymentId: req.params.id,
@@ -1146,7 +1152,7 @@ function registerFinanceRoutes(router, deps) {
           error.status = 400;
           throw error;
         }
-        return { item, requestedAmount, rentalId, documentId };
+        return { item, requestedAmount, rentalId, documentId, contractId };
       });
       const allocations = collectionList('payment_allocations');
       const now = nowIso();
@@ -1157,14 +1163,14 @@ function registerFinanceRoutes(router, deps) {
       const created = [];
       for (const entry of validated) {
         if (remaining <= 0) break;
-        const { item, requestedAmount, rentalId, documentId } = entry;
+        const { item, requestedAmount, rentalId, documentId, contractId } = entry;
         const amount = Math.min(requestedAmount, remaining);
         created.push({
           id: text(item.id) || generateId(idPrefixes.payment_allocations || 'PA'),
           paymentId: req.params.id,
           clientId: text(item.clientId) || undefined,
           objectId: text(item.objectId) || undefined,
-          contractId: text(item.contractId) || undefined,
+          contractId: contractId || undefined,
           rentalId,
           documentId: documentId || undefined,
           amount,

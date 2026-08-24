@@ -5,6 +5,11 @@ export type ClientContractCreateInput = Omit<ClientContract, 'id' | 'counterpart
   counterpartyId?: string;
 };
 
+export type ClientContractDeleteContext = {
+  clientId?: string;
+  counterpartyId?: string;
+};
+
 export const clientContractsService = {
   getAll: (): Promise<ClientContract[]> =>
     api.get<ClientContract[]>('/api/client_contracts'),
@@ -16,4 +21,11 @@ export const clientContractsService = {
 
   update: (id: string, data: Partial<ClientContract>): Promise<ClientContract> =>
     api.patch<ClientContract>(`/api/client_contracts/${id}`, data),
+
+  delete: (id: string, context: ClientContractDeleteContext): Promise<{ ok: true }> => {
+    const params = new URLSearchParams();
+    if (context.clientId) params.set('clientId', context.clientId);
+    if (context.counterpartyId) params.set('counterpartyId', context.counterpartyId);
+    return api.del<{ ok: true }>(`/api/client_contracts/${id}?${params.toString()}`);
+  },
 };

@@ -1427,6 +1427,7 @@ export default function Documents() {
   const wizardContract = wizardForm.contractId ? clientContractsById.get(wizardForm.contractId) : undefined;
   const wizardVehicleTrip = wizardForm.vehicleTripId ? vehicleTripsById.get(wizardForm.vehicleTripId) : undefined;
   const wizardContractOptions = (clientContracts as ClientContract[]).filter(contract => {
+    if (contract.status === 'archived') return false;
     if (wizardResolvedCounterpartyId && contract.counterpartyId === wizardResolvedCounterpartyId) return true;
     if (wizardResolvedClientId && contract.clientId === wizardResolvedClientId) return true;
     return !wizardResolvedCounterpartyId && !wizardResolvedClientId;

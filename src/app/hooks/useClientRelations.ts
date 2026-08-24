@@ -68,6 +68,24 @@ export function useCreateClientContract() {
   });
 }
 
+export function useUpdateClientContract() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<ClientContract> }) =>
+      clientContractsService.update(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CLIENT_CONTRACT_KEYS.all }),
+  });
+}
+
+export function useDeleteClientContract() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, clientId, counterpartyId }: { id: string; clientId?: string; counterpartyId?: string }) =>
+      clientContractsService.delete(id, { clientId, counterpartyId }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: CLIENT_CONTRACT_KEYS.all }),
+  });
+}
+
 export async function refreshClientRelationCache(
   qc: ReturnType<typeof useQueryClient>,
   queryKey: typeof CLIENT_OBJECT_KEYS.all | typeof CLIENT_CONTRACT_KEYS.all,

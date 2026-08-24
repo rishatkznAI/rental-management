@@ -30,8 +30,16 @@ import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
 import { useCrmActivities } from '../hooks/useCrmActivities';
-import { useClientContractsList, useClientObjectsList, useCreateClientContract, useCreateClientObject, useDeleteClientContract, useUpdateClientContract, useUpdateClientObject } from '../hooks/useClientRelations';
-import type { Client, ClientObject, ClientStatus } from '../types';
+import {
+  useClientContractsList,
+  useClientObjectsList,
+  useCreateClientContract,
+  useCreateClientObject,
+  useDeleteClientContract,
+  useUpdateClientContract,
+  useUpdateClientObject,
+} from '../hooks/useClientRelations';
+import type { Client, ClientContract, ClientObject, ClientStatus } from '../types';
 import { ApiError } from '../lib/api';
 import { isCrmEnabled } from '../lib/features';
 import { usePermissions } from '../lib/permissions';
@@ -188,6 +196,13 @@ type ClientObjectDraft = {
   comment: string;
 };
 
+type ClientContractDraft = {
+  date: string;
+  title: string;
+  objectId: string;
+  notes: string;
+};
+
 const emptyContactDraft: ClientContactDraft = {
   name: '',
   role: '',
@@ -209,6 +224,87 @@ const emptyClientObjectDraft: ClientObjectDraft = {
   contactPhone: '',
   comment: '',
 };
+
+const emptyClientContractDraft: ClientContractDraft = {
+  date: '',
+  title: '',
+  objectId: '',
+  notes: '',
+};
+
+function clientContractDraft(contract: ClientContract): ClientContractDraft {
+  return {
+    date: contract.date || '',
+    title: contract.title || '',
+    objectId: contract.objectId || '',
+    notes: contract.notes || '',
+  };
+}
+
+function validateClientContractDraft(draft: ClientContractDraft) {
+  if (draft.title.trim().length > 500) return 'Название договора: максимум 500 символов.';
+  if (draft.notes.trim().length > 2000) return 'Примечание: максимум 2000 символов.';
+  return '';
+}
+
+function ContractFormFields({
+  value,
+  onChange,
+  objects,
+}: {
+  value: ClientContractDraft;
+  onChange: (next: ClientContractDraft) => void;
+  objects: ClientObject[];
+}) {
+  const objectSelectId = React.useId();
+  const dateInputId = React.useId();
+  const titleInputId = React.useId();
+  return (
+    <>
+      <label className="space-y-1.5" htmlFor={dateInputId}>
+        <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Дата договора</span>
+        <Input
+          id={dateInputId}
+          type="date"
+          value={value.date}
+          onChange={event => onChange({ ...value, date: event.target.value })}
+        />
+      </label>
+      <label className="space-y-1.5" htmlFor={titleInputId}>
+        <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Название</span>
+        <Input
+          id={titleInputId}
+          value={value.title}
+          onChange={event => onChange({ ...value, title: event.target.value })}
+        />
+      </label>
+      <div>
+        <label className="mb-1 block text-xs uppercase tracking-wide text-gray-500" htmlFor={objectSelectId}>Объект</label>
+        <select
+          id={objectSelectId}
+          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+          value={value.objectId}
+          onChange={event => onChange({ ...value, objectId: event.target.value })}
+        >
+          <option value="">Только клиент</option>
+          {objects.map(object => (
+            <option key={object.id} value={object.id}>
+              {object.name}{object.status === 'archived' ? ' (архив)' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+      <label className="space-y-1.5 md:col-span-2">
+        <span className="block text-sm font-medium text-gray-700 dark:text-gray-200">Примечание</span>
+        <Textarea
+          className="min-h-24"
+          value={value.notes}
+          onChange={event => onChange({ ...value, notes: event.target.value })}
+        />
+      </label>
+    </>
+  );
+}
 
 function validateClientObjectDraft(draft: ClientObjectDraft) {
   if (!draft.name.trim()) return 'Укажите название объекта.';
@@ -501,7 +597,11 @@ export default function ClientDetail() {
   const [editingObjectId, setEditingObjectId] = useState('');
   const [editObjectForm, setEditObjectForm] = useState<ClientObjectDraft>(emptyClientObjectDraft);
   const [editObjectError, setEditObjectError] = useState('');
-  const [contractForm, setContractForm] = useState({ date: '', title: '', objectId: '', notes: '' });
+  const [contractForm, setContractForm] = useState<ClientContractDraft>(emptyClientContractDraft);
+  const [contractDialogMode, setContractDialogMode] = useState<'view' | 'edit' | null>(null);
+  const [selectedContractId, setSelectedContractId] = useState('');
+  const [editContractForm, setEditContractForm] = useState<ClientContractDraft>(emptyClientContractDraft);
+  const [contractFormError, setContractFormError] = useState('');
   const [contactDialogOpen, setContactDialogOpen] = useState(false);
   const [contactDraft, setContactDraft] = useState<ClientContactDraft>(emptyContactDraft);
   const [contactErrors, setContactErrors] = useState<Record<string, string>>({});
@@ -571,7 +671,10 @@ export default function ClientDetail() {
     [client, clientObjectsAll],
   );
   const clientContracts = useMemo(
-    () => clientContractsAll.filter(item => client && item.clientId === client.id),
+    () => clientContractsAll.filter(item => client && (
+      item.clientId === client.id
+      || (!item.clientId && Boolean(client.counterpartyId) && item.counterpartyId === client.counterpartyId)
+    )),
     [client, clientContractsAll],
   );
   const activeClientObjects = clientObjects.filter(item => item.status !== 'archived');
@@ -593,6 +696,7 @@ export default function ClientDetail() {
     [client?.counterpartyId, client?.id, ganttRentals],
   );
   const openedObject = clientObjects.find(item => item.id === openedObjectId) || null;
+  const selectedContract = clientContracts.find(item => item.id === selectedContractId) || null;
   const openedObjectRentals = activeRentals.filter(rental => rental.objectId === openedObjectId);
 
   const clientFinancial = React.useMemo(() => {
@@ -1187,39 +1291,96 @@ export default function ClientDetail() {
 
   function handleCreateContract() {
     if (!client || !canEdit) return;
+    const validationError = validateClientContractDraft(contractForm);
+    if (validationError) {
+      setContractFormError(validationError);
+      return;
+    }
+    setContractFormError('');
     createClientContract.mutate({
       counterpartyId: client.counterpartyId,
       clientId: client.id,
       objectId: contractForm.objectId || undefined,
+      objectIds: contractForm.objectId ? [contractForm.objectId] : [],
       date: contractForm.date || undefined,
-      title: contractForm.title || undefined,
-      notes: contractForm.notes || undefined,
+      title: contractForm.title.trim() || undefined,
+      notes: contractForm.notes.trim() || undefined,
       status: 'active',
     }, {
       onSuccess: () => {
-        setContractForm({ date: '', title: '', objectId: '', notes: '' });
+        setContractForm(emptyClientContractDraft);
         toast.success('Договор клиента добавлен.');
       },
       onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось сохранить договор.'),
     });
   }
 
-  function handleArchiveContract(contractId: string) {
+  function openContract(contract: ClientContract) {
+    setSelectedContractId(contract.id);
+    setContractDialogMode('view');
+    setContractFormError('');
+  }
+
+  function startEditContract(contract: ClientContract) {
+    setSelectedContractId(contract.id);
+    setEditContractForm(clientContractDraft(contract));
+    setContractDialogMode('edit');
+    setContractFormError('');
+  }
+
+  function handleSaveContract() {
+    if (!selectedContract || !canEdit) return;
+    const validationError = validateClientContractDraft(editContractForm);
+    if (validationError) {
+      setContractFormError(validationError);
+      return;
+    }
+    setContractFormError('');
+    const retainedObjectIds = (selectedContract.objectIds || [])
+      .filter(objectId => objectId !== selectedContract.objectId && objectId !== editContractForm.objectId);
+    updateClientContract.mutate({
+      id: selectedContract.id,
+      data: {
+        date: editContractForm.date,
+        title: editContractForm.title.trim(),
+        objectId: editContractForm.objectId,
+        objectIds: editContractForm.objectId
+          ? [editContractForm.objectId, ...retainedObjectIds]
+          : retainedObjectIds,
+        notes: editContractForm.notes.trim(),
+      },
+    }, {
+      onSuccess: () => {
+        setContractDialogMode(null);
+        setSelectedContractId('');
+        setContractFormError('');
+        toast.success(`Договор изменён: ${selectedContract.number}`);
+      },
+      onError: error => {
+        const message = error instanceof Error ? error.message : 'Не удалось изменить договор.';
+        setContractFormError(message);
+        toast.error(message);
+      },
+    });
+  }
+
+  function handleArchiveContract(contract: ClientContract) {
     if (!canEdit) return;
-    updateClientContract.mutate({ id: contractId, data: { status: 'archived' } }, {
-      onSuccess: () => toast.success('Договор архивирован.'),
+    updateClientContract.mutate({ id: contract.id, data: { status: 'archived' } }, {
+      onSuccess: () => toast.success(`Договор архивирован: ${contract.number}`),
       onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось архивировать договор.'),
     });
   }
 
-  function handleDeleteContract(contractId: string, contractNumber?: string) {
+  function handleDeleteContract(contract: ClientContract) {
     if (!client || !canEdit) return;
-    if (!window.confirm(`Удалить договор «${contractNumber || contractId}»? Действие нельзя отменить.`)) return;
+    if (!window.confirm(`Удалить договор «${contract.number || contract.id}»? Действие нельзя отменить.`)) return;
     deleteClientContract.mutate({
-      id: contractId,
+      id: contract.id,
       clientId: client.id,
+      counterpartyId: client.counterpartyId,
     }, {
-      onSuccess: () => toast.success('Договор удалён.'),
+      onSuccess: () => toast.success(`Договор удалён: ${contract.number}`),
       onError: error => {
         if (error instanceof ApiError) {
           const body = error.body as { code?: string } | undefined;
@@ -2263,36 +2424,39 @@ export default function ClientDetail() {
                           <p className="font-semibold text-gray-900 dark:text-white">{contract.number}</p>
                           <p className="text-gray-500 dark:text-gray-400">{contract.title || 'Договор'}</p>
                           <p className="mt-1 text-xs text-gray-500">Объект: {object?.name || 'только клиент'}</p>
+                          {contract.date && <p className="mt-1 text-xs text-gray-500">Дата: {formatDate(contract.date)}</p>}
                         </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <Badge variant={contract.status === 'archived' ? 'default' : 'success'}>
-                            {contract.status === 'archived' ? 'Архивный' : 'Активен'}
-                          </Badge>
-                          {canEdit && contract.status !== 'archived' && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleArchiveContract(contract.id)}
-                              disabled={updateClientContract.isPending}
-                            >
-                              <Archive className="h-4 w-4" />
-                              Архивировать
-                            </Button>
-                          )}
-                          {canEdit && contract.status === 'archived' && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => handleDeleteContract(contract.id, contract.number)}
-                              disabled={deleteClientContract.isPending}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Удалить
-                            </Button>
-                          )}
-                        </div>
+                        <Badge variant={contract.status === 'archived' ? 'default' : 'success'}>
+                          {contract.status === 'archived' ? 'Архивный' : 'Активен'}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Button variant="secondary" size="sm" onClick={() => openContract(contract)}>
+                          Открыть
+                        </Button>
+                        {canEdit && (
+                          <Button variant="secondary" size="sm" onClick={() => startEditContract(contract)}>
+                            <Edit className="h-4 w-4" />
+                            Изменить
+                          </Button>
+                        )}
+                        {canEdit && contract.status !== 'archived' && (
+                          <Button variant="secondary" size="sm" onClick={() => handleArchiveContract(contract)}>
+                            <Archive className="h-4 w-4" />
+                            Архивировать
+                          </Button>
+                        )}
+                        {canEdit && contract.status === 'archived' && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="text-red-600 hover:text-red-700 dark:text-red-300"
+                            onClick={() => handleDeleteContract(contract)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Удалить
+                          </Button>
+                        )}
                       </div>
                     </div>
                   );
@@ -2304,21 +2468,10 @@ export default function ClientDetail() {
                 <div className="rounded-md border border-dashed border-gray-300 px-3 py-2 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
                   Номер договора будет присвоен после создания
                 </div>
-                <Input label="Дата" type="date" value={contractForm.date} onChange={e => setContractForm({ ...contractForm, date: e.target.value })} />
-                <Input label="Название" value={contractForm.title} onChange={e => setContractForm({ ...contractForm, title: e.target.value })} />
-                <div>
-                  <label className="mb-1 block text-xs uppercase tracking-wide text-gray-500">Объект</label>
-                  <select
-                    className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-white"
-                    value={contractForm.objectId}
-                    onChange={e => setContractForm({ ...contractForm, objectId: e.target.value })}
-                  >
-                    <option value="">Только клиент</option>
-                    {activeClientObjects.map(object => (
-                      <option key={object.id} value={object.id}>{object.name}</option>
-                    ))}
-                  </select>
-                </div>
+                <ContractFormFields value={contractForm} onChange={setContractForm} objects={activeClientObjects} />
+                {contractFormError && (
+                  <p className="text-sm text-red-600 dark:text-red-300 md:col-span-2">{contractFormError}</p>
+                )}
                 <div className="md:col-span-2">
                   <Button onClick={handleCreateContract} disabled={createClientContract.isPending}>
                     <Plus className="h-4 w-4" />
@@ -3191,6 +3344,84 @@ export default function ClientDetail() {
       </DialogContent>
     </Dialog>
 
+    <Dialog
+      open={Boolean(contractDialogMode && selectedContract)}
+      onOpenChange={open => {
+        if (!open) {
+          setContractDialogMode(null);
+          setSelectedContractId('');
+          setContractFormError('');
+        }
+      }}
+    >
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl rounded-2xl bg-white p-5 dark:bg-gray-950 sm:p-6">
+        <DialogHeader>
+          <DialogTitle>
+            {contractDialogMode === 'edit' ? 'Изменить договор' : `Договор ${selectedContract?.number || ''}`}
+          </DialogTitle>
+          <DialogDescription>
+            {contractDialogMode === 'edit'
+              ? 'Номер, внутренний ID, дата создания и принадлежность компании остаются без изменений.'
+              : 'Карточка договора и его lifecycle-статус.'}
+          </DialogDescription>
+        </DialogHeader>
+        {selectedContract && contractDialogMode === 'view' && (
+          <div className="grid max-h-[65vh] gap-4 overflow-y-auto py-4 pr-1 sm:grid-cols-2">
+            <Field label="Номер" value={selectedContract.number} mono />
+            <Field label="Статус" value={selectedContract.status === 'archived' ? 'Архив' : 'Активен'} />
+            <Field label="Дата договора" value={selectedContract.date ? formatDate(selectedContract.date) : 'Не указана'} />
+            <Field label="Название" value={selectedContract.title || 'Договор'} />
+            <Field
+              label="Объект"
+              value={clientObjects.find(object => object.id === selectedContract.objectId)?.name || 'Только клиент'}
+            />
+            <Field label="Создан" value={selectedContract.createdAt ? formatDateTime(selectedContract.createdAt) : 'Не указано'} />
+            <Field label="Примечание" value={selectedContract.notes || 'Нет'} className="sm:col-span-2" />
+          </div>
+        )}
+        {selectedContract && contractDialogMode === 'edit' && (
+          <div className="max-h-[65vh] space-y-4 overflow-y-auto py-4 pr-1">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <EditField label="Номер договора" readonly>
+                <ReadonlyEditValue value={selectedContract.number} />
+              </EditField>
+              <EditField label="Статус" readonly>
+                <ReadonlyEditValue value={selectedContract.status === 'archived' ? 'Архив' : 'Активен'} />
+              </EditField>
+              <ContractFormFields
+                value={editContractForm}
+                onChange={setEditContractForm}
+                objects={selectedContract.status === 'archived'
+                  ? clientObjects
+                  : clientObjects.filter(object => object.status !== 'archived' || object.id === selectedContract.objectId)}
+              />
+            </div>
+            {contractFormError && (
+              <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                {contractFormError}
+              </p>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => { setContractDialogMode(null); setSelectedContractId(''); setContractFormError(''); }}>
+            {contractDialogMode === 'edit' ? 'Отмена' : 'Закрыть'}
+          </Button>
+          {contractDialogMode === 'view' && canEdit && selectedContract && (
+            <Button onClick={() => startEditContract(selectedContract)}>
+              <Edit className="h-4 w-4" />
+              Изменить
+            </Button>
+          )}
+          {contractDialogMode === 'edit' && (
+            <Button onClick={handleSaveContract} disabled={updateClientContract.isPending}>
+              <Save className="h-4 w-4" />
+              {updateClientContract.isPending ? 'Сохранение…' : 'Сохранить изменения'}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog
       open={objectDialogOpen}
       onOpenChange={open => {

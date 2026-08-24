@@ -12,6 +12,7 @@ const { ensureClientCounterpartyFoundation } = require('../server/lib/counterpar
 const {
   buildClientObjectDebtBreakdown,
   enrichRecordFromRentalLinks,
+  normalizeClientRelationLinks,
 } = require('../server/lib/client-relations.js');
 
 function makeCrudApp(initial = {}) {
@@ -51,6 +52,8 @@ function makeCrudApp(initial = {}) {
       userId: 'U-admin',
       userName: 'Администратор',
       userRole: 'Администратор',
+      ...(req.get('x-company-id') ? { companyId: req.get('x-company-id') } : {}),
+      ...(req.get('x-tenant-id') ? { tenantId: req.get('x-tenant-id') } : {}),
     };
     next();
   };
@@ -480,6 +483,194 @@ test('client objects and contracts are client-scoped and validated', async () =>
     });
     assert.equal(secondContract.status, 201);
     assert.equal(state.client_contracts.length, 3);
+  });
+});
+
+test('ClientContract PATCH edits business fields in place and preserves identity, ownership, history links, and lifecycle', async () => {
+  const createdAt = '2026-01-02T03:04:05.000Z';
+  const { app, state } = makeCrudApp({
+    clients: [{
+      id: 'C-1',
+      company: 'Клиент',
+      inn: '7707083893',
+      innNormalized: '7707083893',
+      history: [],
+    }],
+    client_objects: [
+      { id: 'CO-1', clientId: 'C-1', name: 'Старый объект', status: 'active' },
+      { id: 'CO-2', clientId: 'C-1', name: 'Новый объект', status: 'active' },
+    ],
+    client_contracts: [{
+      id: 'CC-1',
+      clientId: 'C-1',
+      objectId: 'CO-1',
+      objectIds: ['CO-1'],
+      number: 'CTR-26-000002',
+      date: '2026-01-10',
+      title: 'Исходный договор',
+      notes: 'Исходное примечание',
+      status: 'active',
+      companyId: 'COMPANY-A',
+      tenantId: 'TENANT-A',
+      createdAt,
+    }],
+    rentals: [{ id: 'R-1', clientId: 'C-1', contractId: 'CC-1' }],
+    documents: [{ id: 'D-1', clientId: 'C-1', contractId: 'CC-1' }],
+    service: [{ id: 'S-1', clientId: 'C-1', contractId: 'CC-1' }],
+    deliveries: [{ id: 'DEL-1', clientId: 'C-1', contractId: 'CC-1' }],
+    payment_allocations: [{ id: 'PA-1', clientId: 'C-1', contractId: 'CC-1' }],
+  });
+  const scopedHeaders = { 'x-company-id': 'COMPANY-A', 'x-tenant-id': 'TENANT-A' };
+  const linkedSnapshots = Object.fromEntries(
+    ['rentals', 'documents', 'service', 'deliveries', 'payment_allocations']
+      .map(name => [name, structuredClone(state[name])]),
+  );
+
+  await withServer(app, async baseUrl => {
+    const updated = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', {
+      date: '2026-02-20',
+      title: 'Обновлённый договор',
+      objectId: 'CO-2',
+      objectIds: ['CO-2'],
+      notes: 'Обновлённое примечание',
+    }, scopedHeaders);
+
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.id, 'CC-1');
+    assert.equal(updated.body.number, 'CTR-26-000002');
+    assert.equal(updated.body.createdAt, createdAt);
+    assert.equal(updated.body.companyId, 'COMPANY-A');
+    assert.equal(updated.body.tenantId, 'TENANT-A');
+    assert.equal(updated.body.date, '2026-02-20');
+    assert.equal(updated.body.title, 'Обновлённый договор');
+    assert.equal(updated.body.objectId, 'CO-2');
+    assert.deepEqual(updated.body.objectIds, ['CO-2']);
+    assert.equal(updated.body.notes, 'Обновлённое примечание');
+    assert.equal(updated.body.status, 'active');
+
+    const reloaded = await request(baseUrl, 'GET', '/api/client_contracts/CC-1', undefined, scopedHeaders);
+    assert.equal(reloaded.status, 200);
+    assert.equal(reloaded.body.title, 'Обновлённый договор');
+    assert.equal(reloaded.body.date, '2026-02-20');
+
+    for (const [name, snapshot] of Object.entries(linkedSnapshots)) {
+      assert.deepEqual(state[name], snapshot, `${name} links must be preserved`);
+    }
+    assert.equal(state.clients[0].history.length, 1);
+    assert.equal(state.clients[0].history[0].text, 'Договор изменён: CTR-26-000002');
+
+    const noOp = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', {
+      date: '2026-02-20',
+      title: 'Обновлённый договор',
+      objectId: 'CO-2',
+      objectIds: ['CO-2'],
+      notes: 'Обновлённое примечание',
+    }, scopedHeaders);
+    assert.equal(noOp.status, 200);
+    assert.equal(state.clients[0].history.length, 1, 'no-op update must not duplicate activity');
+
+    for (const payload of [
+      { id: 'CC-FORGED' },
+      { number: 'CTR-99-999999' },
+      { businessNumber: 'CTR-99-999999' },
+      { createdAt: '2099-01-01T00:00:00.000Z' },
+      { companyId: 'COMPANY-B' },
+      { tenantId: 'TENANT-B' },
+    ]) {
+      const rejected = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', payload, scopedHeaders);
+      assert.equal(rejected.status, 409);
+      assert.equal(rejected.body.code, 'CLIENT_CONTRACT_FIELD_IMMUTABLE');
+    }
+    assert.equal(state.client_contracts[0].id, 'CC-1');
+    assert.equal(state.client_contracts[0].number, 'CTR-26-000002');
+    assert.equal(state.client_contracts[0].createdAt, createdAt);
+
+    const crossCompany = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', {
+      title: 'Чужое изменение',
+    }, { 'x-company-id': 'COMPANY-B', 'x-tenant-id': 'TENANT-A' });
+    assert.equal(crossCompany.status, 403);
+    assert.equal(crossCompany.body.code, 'CLIENT_CONTRACT_SCOPE_FORBIDDEN');
+    assert.equal(state.client_contracts[0].title, 'Обновлённый договор');
+
+    const crossTenant = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', {
+      title: 'Чужое tenant-изменение',
+    }, { 'x-company-id': 'COMPANY-A', 'x-tenant-id': 'TENANT-B' });
+    assert.equal(crossTenant.status, 403);
+    assert.equal(crossTenant.body.code, 'CLIENT_CONTRACT_SCOPE_FORBIDDEN');
+    assert.equal(state.client_contracts[0].title, 'Обновлённый договор');
+
+    const archived = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', {
+      status: 'archived',
+    }, scopedHeaders);
+    assert.equal(archived.status, 200);
+    assert.equal(archived.body.status, 'archived');
+
+    const editedArchived = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', {
+      title: 'Историческая редакция',
+    }, scopedHeaders);
+    assert.equal(editedArchived.status, 200);
+    assert.equal(editedArchived.body.status, 'archived');
+    assert.equal(editedArchived.body.id, 'CC-1');
+    assert.equal(editedArchived.body.number, 'CTR-26-000002');
+
+    assert.throws(
+      () => normalizeClientRelationLinks(
+        { clientId: 'C-1', contractId: 'CC-1' },
+        'C-1',
+        { readData: name => state[name] || [], requireActiveContract: true },
+      ),
+      error => error?.code === 'CLIENT_CONTRACT_ARCHIVED' && error?.status === 409,
+    );
+
+    const archivedPayment = await request(baseUrl, 'POST', '/api/payments', {
+      clientId: 'C-1',
+      contractId: 'CC-1',
+      amount: 1000,
+      paidAmount: 0,
+      status: 'pending',
+    });
+    assert.equal(archivedPayment.status, 409);
+    assert.equal(archivedPayment.body.code, 'CLIENT_CONTRACT_ARCHIVED');
+
+    const archivedDocument = await request(baseUrl, 'POST', '/api/documents', {
+      clientId: 'C-1',
+      contractId: 'CC-1',
+      type: 'contract',
+      number: 'D-ARCHIVED',
+      status: 'draft',
+    });
+    assert.equal(archivedDocument.status, 409);
+    assert.equal(archivedDocument.body.code, 'CLIENT_CONTRACT_ARCHIVED');
+
+    const archivedService = await request(baseUrl, 'POST', '/api/service', {
+      clientId: 'C-1',
+      contractId: 'CC-1',
+      equipmentId: 'EQ-1',
+      equipment: 'Подъемник',
+      reason: 'Осмотр',
+      description: 'Осмотр',
+      priority: 'medium',
+      sla: '24 ч',
+      status: 'new',
+    });
+    assert.equal(archivedService.status, 409);
+    assert.equal(archivedService.body.code, 'CLIENT_CONTRACT_ARCHIVED');
+
+    const historicalLink = normalizeClientRelationLinks(
+      { clientId: 'C-1', contractId: 'CC-1' },
+      'C-1',
+      {
+        readData: name => state[name] || [],
+        requireActiveContract: true,
+        allowArchivedContractId: 'CC-1',
+      },
+    );
+    assert.equal(historicalLink.contractId, 'CC-1');
+
+    const protectedDelete = await request(baseUrl, 'DELETE', '/api/client_contracts/CC-1?clientId=C-1', undefined, scopedHeaders);
+    assert.equal(protectedDelete.status, 409);
+    assert.equal(protectedDelete.body.code, 'CONTRACT_HAS_HISTORY');
+    assert.equal(state.client_contracts[0].id, 'CC-1');
   });
 });
 

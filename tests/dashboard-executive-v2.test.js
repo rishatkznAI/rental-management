@@ -30,6 +30,11 @@ test('Dashboard V2 has the prescribed executive hierarchy and mobile priority', 
   assert.match(dashboardSource, /contextLabel: user\?\.role \|\| 'Операционный центр'/);
 });
 
+test('Dashboard command board stays inside the application main landmark without nesting another main', () => {
+  assert.match(cockpitSource, /<section[\s\S]{0,220}data-testid="dashboard-command-board"/);
+  assert.doesNotMatch(cockpitSource, /<main[\s\S]{0,220}data-testid="dashboard-command-board"/);
+});
+
 test('Dashboard V2 exposes exactly the four prescribed KPI definitions for an authorized executive', () => {
   const start = dashboardSource.indexOf('const executiveKpis: ExecutiveKpi[] = [');
   const end = dashboardSource.indexOf('].filter(Boolean) as ExecutiveKpi[];', start);

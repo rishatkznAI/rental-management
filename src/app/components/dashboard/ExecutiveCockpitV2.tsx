@@ -582,7 +582,11 @@ export function ExecutiveCockpitV2(props: ExecutiveCockpitV2Props) {
           </div>
         </header>
 
-        <main className="grid min-w-0 grid-cols-12 gap-3" data-testid="dashboard-command-board">
+        <section
+          aria-label="Операционный центр"
+          className="grid min-w-0 grid-cols-12 gap-3"
+          data-testid="dashboard-command-board"
+        >
           <AttentionPanel signals={props.attention} state={props.attentionState} />
           <ExecutiveKpiStrip kpis={props.kpis} />
           <MonthDynamics month={props.month} />
@@ -592,7 +596,7 @@ export function ExecutiveCockpitV2(props: ExecutiveCockpitV2Props) {
           {props.service ? <ServicePanel service={props.service} /> : null}
           {props.sales ? <SalesPanel sales={props.sales} /> : null}
           {props.recentChanges ? <RecentChanges recentChanges={props.recentChanges} /> : null}
-        </main>
+        </section>
       </div>
     </div>
   );

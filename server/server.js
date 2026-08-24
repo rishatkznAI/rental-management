@@ -1706,6 +1706,7 @@ apiRouter.use(registerCrudRoutes({
   normalizeRecordClientLink,
   normalizeServiceTicketForWrite,
   businessNumbering,
+  db: ensureDb(),
 }));
 
 registerLeasingRoutes(apiRouter, {

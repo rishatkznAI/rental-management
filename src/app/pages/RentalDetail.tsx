@@ -375,12 +375,15 @@ export default function RentalDetail() {
   const objectOptions = selectedRentalObject && !activeClientObjects.some(object => object.id === selectedRentalObject.id)
     ? [selectedRentalObject, ...activeClientObjects]
     : activeClientObjects;
-  const contractOptions = clientContracts.filter(contract =>
+  const activeContractOptions = clientContracts.filter(contract =>
     contract.clientId === selectedClient?.id &&
     contract.status !== 'archived' &&
     (!currentObjectId || !contract.objectId || contract.objectId === currentObjectId)
   );
   const selectedRentalContract = clientContracts.find(contract => contract.id === currentContractId);
+  const contractOptions = selectedRentalContract && !activeContractOptions.some(contract => contract.id === selectedRentalContract.id)
+    ? [selectedRentalContract, ...activeContractOptions]
+    : activeContractOptions;
   const primaryEquipmentId = resolvedRentalEquipment[0]?.id || '';
   const quickActions = useMemo(
     () => buildRentalQuickActions({

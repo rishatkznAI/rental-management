@@ -509,6 +509,127 @@ test('referenced ClientObject can be archived but cannot be hard-deleted', async
   });
 });
 
+test('unused ClientContract can be archived and deleted while legacy status reads as active', async () => {
+  const { app, state } = makeCrudApp({
+    clients: [
+      { id: 'C-1', company: 'Клиент', inn: '7707083893', innNormalized: '7707083893' },
+      { id: 'C-2', company: 'Другой', inn: '123456789012', innNormalized: '123456789012' },
+    ],
+    client_contracts: [
+      { id: 'CC-unused', clientId: 'C-1', number: 'Д-1', status: 'active' },
+      { id: 'CC-legacy', clientId: 'C-1', number: 'Д-legacy' },
+      { id: 'CC-other', clientId: 'C-2', number: 'Д-2', status: 'active' },
+    ],
+  });
+  state.client_contracts.find(item => item.id === 'CC-other').counterpartyId = state.clients.find(item => item.id === 'C-2').counterpartyId;
+
+  await withServer(app, async baseUrl => {
+    const legacy = await request(baseUrl, 'GET', '/api/client_contracts/CC-legacy');
+    assert.equal(legacy.status, 200);
+    assert.equal(legacy.body.status, 'active');
+
+    const archived = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-unused', { status: 'archived' });
+    assert.equal(archived.status, 200);
+    assert.equal(archived.body.status, 'archived');
+
+    const reloaded = await request(baseUrl, 'GET', '/api/client_contracts/CC-unused');
+    assert.equal(reloaded.status, 200);
+    assert.equal(reloaded.body.status, 'archived');
+
+    const newDocument = await request(baseUrl, 'POST', '/api/documents', {
+      clientId: 'C-1',
+      contractId: 'CC-unused',
+      type: 'act',
+      number: 'A-1',
+      status: 'draft',
+    });
+    assert.equal(newDocument.status, 409);
+    assert.equal(newDocument.body.code, 'CLIENT_CONTRACT_ARCHIVED');
+
+    const missingContext = await request(baseUrl, 'DELETE', '/api/client_contracts/CC-unused');
+    assert.equal(missingContext.status, 400);
+    assert.equal(missingContext.body.code, 'CLIENT_CONTRACT_DELETE_CONTEXT_REQUIRED');
+
+    const wrongClient = await request(baseUrl, 'DELETE', '/api/client_contracts/CC-other?clientId=C-1');
+    assert.equal(wrongClient.status, 409);
+    assert.equal(wrongClient.body.code, 'CLIENT_CONTRACT_RELATION_MISMATCH');
+    assert.equal(state.client_contracts.some(item => item.id === 'CC-other'), true);
+
+    const mixedContext = await request(
+      baseUrl,
+      'DELETE',
+      `/api/client_contracts/CC-other?clientId=C-1&counterpartyId=${encodeURIComponent(state.client_contracts.find(item => item.id === 'CC-other').counterpartyId)}`,
+    );
+    assert.equal(mixedContext.status, 409);
+    assert.equal(mixedContext.body.code, 'CLIENT_CONTRACT_RELATION_MISMATCH');
+
+    const deleted = await request(baseUrl, 'DELETE', '/api/client_contracts/CC-unused?clientId=C-1');
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.body.ok, true);
+    assert.equal(state.client_contracts.some(item => item.id === 'CC-unused'), false);
+  });
+});
+
+test('linked ClientContract can be archived but every hard-delete path preserves history', async () => {
+  const linkedContract = { id: 'CC-linked', clientId: 'C-1', number: 'Д-linked', status: 'active' };
+  const { app, state } = makeCrudApp({
+    clients: [{ id: 'C-1', company: 'Клиент', inn: '7707083893', innNormalized: '7707083893' }],
+    client_contracts: [linkedContract],
+    rentals: [{ id: 'R-1', clientId: 'C-1', contractId: linkedContract.id }],
+    gantt_rentals: [{ id: 'GR-1', rentalId: 'R-1', clientId: 'C-1', contractId: linkedContract.id }],
+    rental_change_requests: [{ id: 'RCR-1', rentalId: 'R-1', newValue: { contractId: linkedContract.id } }],
+    deliveries: [{ id: 'DL-1', clientId: 'C-1', contractId: linkedContract.id }],
+    service: [{ id: 'S-1', clientId: 'C-1', clientContractId: linkedContract.id }],
+    warranty_claims: [{ id: 'W-1', clientId: 'C-1', contractId: linkedContract.id }],
+    client_objects: [{ id: 'CO-1', clientId: 'C-1', name: 'Объект', contractId: linkedContract.id }],
+    documents: [{
+      id: 'D-1',
+      clientId: 'C-1',
+      type: 'rental_contract',
+      contractId: linkedContract.id,
+      snapshot: { clientContract: { id: linkedContract.id, number: linkedContract.number } },
+    }],
+    mechanic_documents: [{ id: 'MD-1', contractId: linkedContract.id }],
+    payments: [{ id: 'P-1', clientId: 'C-1', contractId: linkedContract.id, amount: 1000 }],
+    payment_allocations: [{ id: 'PA-1', paymentId: 'P-1', contractId: linkedContract.id, amount: 1000 }],
+    debt_collection_plans: [{ id: 'DP-1', contractId: linkedContract.id }],
+  });
+
+  await withServer(app, async baseUrl => {
+    const archived = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-linked', { status: 'archived' });
+    assert.equal(archived.status, 200);
+    assert.equal(archived.body.status, 'archived');
+
+    const deleted = await request(baseUrl, 'DELETE', '/api/client_contracts/CC-linked?clientId=C-1');
+    assert.equal(deleted.status, 409);
+    assert.equal(deleted.body.code, 'CONTRACT_HAS_HISTORY');
+    assert.deepEqual(deleted.body.links.map(link => link.collection), [
+      'rentals',
+      'gantt_rentals',
+      'rental_change_requests',
+      'deliveries',
+      'service',
+      'warranty_claims',
+      'client_objects',
+      'documents',
+      'mechanic_documents',
+      'payments',
+      'payment_allocations',
+      'debt_collection_plans',
+    ]);
+    assert.equal(deleted.body.links.every(link => link.count === 1 && link.source === 'json'), true);
+    assert.equal(state.client_contracts[0].status, 'archived');
+    assert.equal(state.rentals[0].contractId, 'CC-linked');
+    assert.equal(state.documents[0].snapshot.clientContract.number, 'Д-linked');
+    assert.equal(state.payments[0].contractId, 'CC-linked');
+
+    const bulkBypass = await request(baseUrl, 'PUT', '/api/client_contracts', []);
+    assert.equal(bulkBypass.status, 409);
+    assert.equal(bulkBypass.body.code, 'CLIENT_CONTRACT_BULK_DELETE_FORBIDDEN');
+    assert.equal(state.client_contracts.length, 1);
+  });
+});
+
 test('payments documents and service reject foreign object or contract links', async () => {
   const { app } = makeCrudApp({
     clients: [

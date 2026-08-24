@@ -633,7 +633,9 @@ function PaymentAllocationPanel({
   const unallocated = Math.max(0, paid - allocated);
   const allocationStatus = allocated <= 0 ? 'не распределён' : unallocated > 0 ? 'частично распределён' : 'распределён полностью';
   const clientObjects = objects.filter(item => text(item.clientId) === paymentClientId);
-  const clientContracts = contracts.filter(item => text(item.clientId) === paymentClientId);
+  const clientContracts = contracts.filter(item => (
+    text(item.clientId) === paymentClientId && item.status !== 'archived'
+  ));
   const rentalDebtRows = useMemo(
     () => buildRentalDebtRows(rentals, allPayments, allocations),
     [allocations, allPayments, rentals],

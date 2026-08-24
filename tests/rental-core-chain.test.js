@@ -616,6 +616,44 @@ test('rental creation still requires a Client contract when ClientObject is omit
   });
 });
 
+test('archived contract is rejected for new Rental while historical Rental keeps it by stable ID', async () => {
+  const { app, state } = createApp();
+
+  await withServer(app, async baseUrl => {
+    state.client_contracts[0].status = 'archived';
+    const rejectedCreate = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(rejectedCreate.status, 409);
+    assert.equal(rejectedCreate.body.code, 'CLIENT_CONTRACT_ARCHIVED');
+    assert.equal(state.rentals.length, 0);
+
+    state.client_contracts[0].status = 'active';
+    const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(created.status, 201);
+
+    state.client_contracts[0].status = 'archived';
+    const historicalUpdate = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      contact: 'Исторический контакт',
+    });
+    assert.equal(historicalUpdate.status, 200, JSON.stringify(historicalUpdate.body));
+    assert.equal(historicalUpdate.body.contractId, 'CC-1');
+    assert.equal(historicalUpdate.body.contractNumber, 'Д-1');
+
+    state.client_contracts.push({
+      id: 'CC-3',
+      clientId: 'C-1',
+      objectId: 'CO-1',
+      number: 'Д-3',
+      status: 'archived',
+    });
+    const rejectedPatch = await request(baseUrl, 'PATCH', `/api/rentals/${created.body.id}`, {
+      contractId: 'CC-3',
+    });
+    assert.equal(rejectedPatch.status, 409);
+    assert.equal(rejectedPatch.body.code, 'CLIENT_CONTRACT_ARCHIVED');
+    assert.equal(state.rentals[0].contractId, 'CC-1');
+  });
+});
+
 test('rental create and patch reject foreign object and contract links', async () => {
   const { app } = createApp();
 

@@ -116,6 +116,13 @@ const {
   assertCanonicalArWorkflowWrite,
   decorateArWorkflowRecord,
 } = require('../lib/ar-debtor-workflow');
+const {
+  CONTRACT_HAS_HISTORY_CODE,
+  assertClientContractAvailableForNewLink,
+  assertClientContractDeleteContext,
+  clientContractStatus,
+  findClientContractHistoryLinks,
+} = require('../lib/client-contract-lifecycle');
 
 const INLINE_RELATION_IDEMPOTENCY_COLLECTION = 'inline_relation_idempotency';
 const INLINE_RELATION_IDEMPOTENCY_SCOPES = new Set(['client_objects', 'client_contracts']);
@@ -185,6 +192,7 @@ function registerCrudRoutes(deps) {
     serviceAuditLog,
     normalizeRecordClientLink,
     businessNumbering = null,
+    db = null,
   } = deps;
 
   const router = express.Router();
@@ -345,6 +353,11 @@ function registerCrudRoutes(deps) {
     }
     if (collection === 'client_contracts') {
       return normalizeClientContractRecord(item, existing, { readData: readDataOverride, nowIso });
+    }
+    if (['payments', 'payment_allocations', 'documents', 'service'].includes(collection) && item?.contractId) {
+      assertClientContractAvailableForNewLink(readDataOverride, item.contractId, {
+        allowArchivedContractId: existing?.contractId,
+      });
     }
     if (collection === 'delivery_carriers') {
       return canonicalizeDeliveryCarrierCounterpartyRelation(item, { readData: readDataOverride }, {
@@ -1602,6 +1615,9 @@ function registerCrudRoutes(deps) {
       if (collection === 'service') {
         data = normalizeServiceTicketList(data);
       }
+      if (collection === 'client_contracts') {
+        data = data.map(item => ({ ...item, status: clientContractStatus(item) }));
+      }
       if (collection === 'users') {
         if (canReadFullUsers(req)) {
           return res.json(data.map(sanitizeUser));
@@ -1754,6 +1770,7 @@ function registerCrudRoutes(deps) {
       if (collection === 'service_works') item = normalizeServiceWorkRecord(item);
       if (collection === 'spare_parts') item = normalizeSparePartRecord(item);
       if (collection === 'service') item = normalizeServiceTicketRecord(item);
+      if (collection === 'client_contracts') item = { ...item, status: clientContractStatus(item) };
       if (collection === 'users') {
         if (canReadFullUsers(req) || item.id === req.user.userId) {
           return res.json(sanitizeUser(item));
@@ -2492,6 +2509,27 @@ function registerCrudRoutes(deps) {
           });
         }
       }
+      if (collection === 'client_contracts') {
+        try {
+          assertClientContractDeleteContext(removedItem, req.query);
+        } catch (error) {
+          return res.status(error.status || 400).json({
+            ok: false,
+            code: error.code,
+            error: error.message,
+            details: error.details,
+          });
+        }
+        const historyLinks = findClientContractHistoryLinks(removedItem, { readData, db });
+        if (historyLinks.length > 0) {
+          return res.status(409).json({
+            ok: false,
+            code: CONTRACT_HAS_HISTORY_CODE,
+            error: 'Договор используется в истории и не может быть удалён. Его можно архивировать.',
+            links: historyLinks,
+          });
+        }
+      }
       if (collection === 'equipment') {
         const blocker = equipmentReferenceBlocker(removedItem);
         if (blocker) {
@@ -2746,6 +2784,17 @@ function registerCrudRoutes(deps) {
         if (collection === 'client_objects' || collection === 'client_contracts' || collection === 'documents') {
           const existingById = new Map((readData(collection) || [])
             .map(item => [String(item?.id || ''), item]));
+          if (collection === 'client_contracts') {
+            const incomingIds = new Set(list.map(item => String(item?.id || '')).filter(Boolean));
+            const removedContract = [...existingById.values()]
+              .find(item => !incomingIds.has(String(item?.id || '')));
+            if (removedContract) {
+              const error = new Error('Массовая замена не может удалять договоры клиентов. Используйте защищённое удаление конкретного договора.');
+              error.status = 409;
+              error.code = 'CLIENT_CONTRACT_BULK_DELETE_FORBIDDEN';
+              throw error;
+            }
+          }
           const stagedReadData = name => name === collection ? list : readData(name);
           list = list.map(item => normalizeClientDomainRecord(
             collection,
@@ -2795,7 +2844,11 @@ function registerCrudRoutes(deps) {
         if (collection === 'clients' && error?.code === 'CLIENT_INN_DUPLICATE') {
           return sendClientInnError(res, error);
         }
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return res.status(error?.status || 400).json({
+          ok: false,
+          ...(error?.code ? { code: error.code } : {}),
+          error: error.message,
+        });
       }
 
       if (collection === 'service_works') {

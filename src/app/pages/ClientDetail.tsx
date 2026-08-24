@@ -20,7 +20,7 @@ import {
   Building2, MapPin, User, CreditCard, CheckCircle, XCircle,
   AlertTriangle, Download, Plus, Save, Trash2, Upload, X, Wrench,
   ShieldAlert, MoreHorizontal, Printer, Paperclip,
-  Star, CalendarDays, ReceiptText, BriefcaseBusiness, MapPinned,
+  Star, CalendarDays, ReceiptText, BriefcaseBusiness, MapPinned, Archive,
 } from 'lucide-react';
 import { cn, formatDate, formatDateTime, formatCurrency } from '../lib/utils';
 import { CLIENT_KEYS, useClientById, useDeleteClient, useUpdateClient } from '../hooks/useClients';
@@ -30,7 +30,7 @@ import { useDocumentsList } from '../hooks/useDocuments';
 import { useServiceTicketsList } from '../hooks/useServiceTickets';
 import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
 import { useCrmActivities } from '../hooks/useCrmActivities';
-import { useClientContractsList, useClientObjectsList, useCreateClientContract, useCreateClientObject, useUpdateClientObject } from '../hooks/useClientRelations';
+import { useClientContractsList, useClientObjectsList, useCreateClientContract, useCreateClientObject, useDeleteClientContract, useUpdateClientContract, useUpdateClientObject } from '../hooks/useClientRelations';
 import type { Client, ClientObject, ClientStatus } from '../types';
 import { ApiError } from '../lib/api';
 import { isCrmEnabled } from '../lib/features';
@@ -548,6 +548,8 @@ export default function ClientDetail() {
   const createClientObject = useCreateClientObject();
   const updateClientObject = useUpdateClientObject();
   const createClientContract = useCreateClientContract();
+  const updateClientContract = useUpdateClientContract();
+  const deleteClientContract = useDeleteClientContract();
   const { data: debtPlanResponse } = useDebtCollectionPlans();
   const { data: crmActivities = [] } = useCrmActivities(client ? { clientId: client.id } : undefined, Boolean(isCrmEnabled && client && can('view', 'crm')));
   const debtCollectionPlans = debtPlanResponse?.plans ?? [];
@@ -1199,6 +1201,35 @@ export default function ClientDetail() {
         toast.success('Договор клиента добавлен.');
       },
       onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось сохранить договор.'),
+    });
+  }
+
+  function handleArchiveContract(contractId: string) {
+    if (!canEdit) return;
+    updateClientContract.mutate({ id: contractId, data: { status: 'archived' } }, {
+      onSuccess: () => toast.success('Договор архивирован.'),
+      onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось архивировать договор.'),
+    });
+  }
+
+  function handleDeleteContract(contractId: string, contractNumber?: string) {
+    if (!client || !canEdit) return;
+    if (!window.confirm(`Удалить договор «${contractNumber || contractId}»? Действие нельзя отменить.`)) return;
+    deleteClientContract.mutate({
+      id: contractId,
+      clientId: client.id,
+    }, {
+      onSuccess: () => toast.success('Договор удалён.'),
+      onError: error => {
+        if (error instanceof ApiError) {
+          const body = error.body as { code?: string } | undefined;
+          if (body?.code === 'CONTRACT_HAS_HISTORY') {
+            toast.error('Договор используется в истории и не может быть удалён. Его можно архивировать.');
+            return;
+          }
+        }
+        toast.error(error instanceof Error ? error.message : 'Не удалось удалить договор.');
+      },
     });
   }
 
@@ -2221,16 +2252,47 @@ export default function ClientDetail() {
                 {clientContracts.map(contract => {
                   const object = contract.objectId ? clientObjects.find(item => item.id === contract.objectId) : null;
                   return (
-                    <div key={contract.id} className="rounded-md border border-gray-200 p-3 text-sm dark:border-gray-800">
+                    <div
+                      key={contract.id}
+                      data-testid="client-contract-card"
+                      data-contract-id={contract.id}
+                      className="rounded-md border border-gray-200 p-3 text-sm dark:border-gray-800"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-semibold text-gray-900 dark:text-white">{contract.number}</p>
                           <p className="text-gray-500 dark:text-gray-400">{contract.title || 'Договор'}</p>
                           <p className="mt-1 text-xs text-gray-500">Объект: {object?.name || 'только клиент'}</p>
                         </div>
-                        <Badge variant={contract.status === 'archived' ? 'default' : 'success'}>
-                          {contract.status === 'archived' ? 'Архив' : 'Активен'}
-                        </Badge>
+                        <div className="flex flex-col items-end gap-2">
+                          <Badge variant={contract.status === 'archived' ? 'default' : 'success'}>
+                            {contract.status === 'archived' ? 'Архивный' : 'Активен'}
+                          </Badge>
+                          {canEdit && contract.status !== 'archived' && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleArchiveContract(contract.id)}
+                              disabled={updateClientContract.isPending}
+                            >
+                              <Archive className="h-4 w-4" />
+                              Архивировать
+                            </Button>
+                          )}
+                          {canEdit && contract.status === 'archived' && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleDeleteContract(contract.id, contract.number)}
+                              disabled={deleteClientContract.isPending}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Удалить
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );

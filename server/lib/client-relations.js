@@ -5,6 +5,9 @@ const {
   canonicalizeClientContractCounterpartyRelation,
 } = require('./document-counterparty-relations');
 const { counterpartyError } = require('./counterparty');
+const {
+  assertClientContractAvailableForNewLink,
+} = require('./client-contract-lifecycle');
 
 const OBJECT_REQUIRED_ERROR = 'Для объекта укажите clientId или counterpartyId и название';
 const CONTRACT_REQUIRED_ERROR = 'Для договора клиента укажите Counterparty/Client и номер договора';
@@ -83,9 +86,14 @@ function assertContractBelongsToClient(readData, contractId, clientId) {
   return contract;
 }
 
-function assertContractObjectConsistency(readData, contractId, objectId, clientId) {
+function assertContractObjectConsistency(readData, contractId, objectId, clientId, options = {}) {
   const contract = assertContractBelongsToClient(readData, contractId, clientId);
   if (!contract) return null;
+  if (options.requireActiveContract) {
+    assertClientContractAvailableForNewLink(readData, contractId, {
+      allowArchivedContractId: options.allowArchivedContractId,
+    });
+  }
   const currentObjectId = text(objectId);
   if (currentObjectId) assertObjectBelongsToClient(readData, currentObjectId, clientId);
   for (const linkedObjectId of contractObjectIds(contract)) {
@@ -133,7 +141,10 @@ function normalizeClientRelationLinks(payload, clientId, options = {}) {
   }
   let contract = null;
   if (contractId) {
-    contract = assertContractObjectConsistency(data, contractId, objectId, resolvedClientId);
+    contract = assertContractObjectConsistency(data, contractId, objectId, resolvedClientId, {
+      requireActiveContract: options.requireActiveContract,
+      allowArchivedContractId: options.allowArchivedContractId,
+    });
   }
   return {
     ...payload,
@@ -230,7 +241,10 @@ function normalizeClientObjectRecord(record, existing = null, deps = {}) {
       );
     }
     if (record?.contractId) {
-      assertContractObjectConsistency(deps.readData, record.contractId, record.id || existing?.id, clientId);
+      assertContractObjectConsistency(deps.readData, record.contractId, record.id || existing?.id, clientId, {
+        requireActiveContract: true,
+        allowArchivedContractId: existing?.contractId,
+      });
     }
   }
   return {

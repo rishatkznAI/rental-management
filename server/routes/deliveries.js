@@ -10,6 +10,9 @@ const {
   getClientObjectById,
 } = require('../lib/client-relations');
 const {
+  assertClientContractAvailableForNewLink,
+} = require('../lib/client-contract-lifecycle');
+const {
   canonicalizeDeliveryCarrierCounterpartyRelation,
   canonicalizeDeliveryCounterpartyRelations,
   isHistoricalDeliveryCarrierRelation,
@@ -441,6 +444,11 @@ function registerDeliveryRoutes(router, deps) {
 
   function normalizeDeliveryCounterpartyLinks(delivery, existing = null) {
     const historical = Boolean(existing) && isHistoricalDeliveryRelation(existing);
+    if (delivery?.contractId) {
+      assertClientContractAvailableForNewLink(readData, delivery.contractId, {
+        allowArchivedContractId: existing?.contractId,
+      });
+    }
     return canonicalizeDeliveryCounterpartyRelations(delivery, { readData }, {
       existing,
       allowArchived: historical,

@@ -174,6 +174,47 @@ async function request(baseUrl, method, path, token, body) {
   return { response, json };
 }
 
+test('archived ClientContract is blocked for new documents while historical document snapshots remain editable', async () => {
+  const { app, state } = createApp();
+  state.client_contracts = [{
+    id: 'CC-archived',
+    counterpartyId: 'CP-1',
+    clientId: 'C-1',
+    number: 'CTR-ARCHIVED',
+    status: 'archived',
+  }];
+  state.documents = [{
+    id: 'D-history',
+    counterpartyId: 'CP-1',
+    clientId: 'C-1',
+    contractId: 'CC-archived',
+    type: 'act',
+    number: 'ACT-HISTORY',
+    status: 'signed',
+    snapshot: { clientContract: { id: 'CC-archived', number: 'CTR-ARCHIVED' } },
+  }];
+
+  await withServer(app, async baseUrl => {
+    const rejected = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      counterpartyId: 'CP-1',
+      clientId: 'C-1',
+      contractId: 'CC-archived',
+      type: 'act',
+      status: 'draft',
+    });
+    assert.equal(rejected.response.status, 409);
+    assert.equal(rejected.json.code, 'CLIENT_CONTRACT_ARCHIVED');
+    assert.equal(state.documents.length, 1);
+
+    const historicalPatch = await request(baseUrl, 'PATCH', '/api/documents/D-history', 'office', {
+      notes: 'Историческая пометка',
+    });
+    assert.equal(historicalPatch.response.status, 200);
+    assert.equal(historicalPatch.json.contractId, 'CC-archived');
+    assert.equal(historicalPatch.json.snapshot.clientContract.number, 'CTR-ARCHIVED');
+  });
+});
+
 test('documents gantt references are bounded, scoped and compact', async () => {
   const { app, state } = createApp();
   state.gantt_rentals = Array.from({ length: 130 }, (_, index) => ({

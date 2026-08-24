@@ -1,5 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clientObjectsService } from '../services/client-objects.service';
+import type { ClientObjectLifecycleAnalysis } from '../services/client-objects.service';
 import {
   clientContractsService,
   type ClientContractCreateInput,
@@ -10,6 +11,7 @@ import { CLIENT_KEYS } from './useClients';
 
 export const CLIENT_OBJECT_KEYS = {
   all: ['client_objects'] as const,
+  lifecycle: (id: string) => ['client_objects', id, 'lifecycle'] as const,
 };
 
 export const CLIENT_CONTRACT_KEYS = {
@@ -48,6 +50,51 @@ export function useUpdateClientObject() {
     mutationFn: ({ id, data }: { id: string; data: Partial<ClientObject> }) =>
       clientObjectsService.update(id, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: CLIENT_OBJECT_KEYS.all }),
+  });
+}
+
+export function useClientObjectLifecycleMap(objects: ClientObject[], enabled = true) {
+  const archived = objects.filter(object => object.status === 'archived');
+  const results = useQueries({
+    queries: archived.map(object => ({
+      queryKey: CLIENT_OBJECT_KEYS.lifecycle(object.id),
+      queryFn: () => clientObjectsService.getLifecycle(object.id),
+      enabled,
+      staleTime: 30_000,
+    })),
+  });
+  return {
+    byId: new Map<string, ClientObjectLifecycleAnalysis>(
+      archived.flatMap((object, index) => results[index]?.data ? [[object.id, results[index].data]] : []),
+    ),
+    failedIds: new Set(
+      archived.filter((_object, index) => results[index]?.isError).map(object => object.id),
+    ),
+    isLoading: results.some(result => result.isLoading),
+  };
+}
+
+export function useArchiveClientObject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => clientObjectsService.archive(id),
+    onSuccess: (result) => {
+      qc.setQueryData<ClientObject[]>(CLIENT_OBJECT_KEYS.all, current =>
+        (current || []).map(item => item.id === result.clientObject.id ? result.clientObject : item));
+      qc.invalidateQueries({ queryKey: CLIENT_OBJECT_KEYS.lifecycle(result.clientObject.id) });
+    },
+  });
+}
+
+export function useDeleteClientObject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => clientObjectsService.delete(id),
+    onSuccess: (_result, id) => {
+      qc.setQueryData<ClientObject[]>(CLIENT_OBJECT_KEYS.all, current =>
+        (current || []).filter(item => item.id !== id));
+      qc.removeQueries({ queryKey: CLIENT_OBJECT_KEYS.lifecycle(id) });
+    },
   });
 }
 

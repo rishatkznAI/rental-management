@@ -30,38 +30,6 @@ const ROLE_PROFILE_CODES = Object.freeze({
 });
 
 const ACTIVE_PROFILE_STATUSES = new Set(['active', 'new', 'blocked', 'Активен']);
-const CUSTOMER_REFERENCE_SPECS = Object.freeze([
-  ['rentals', ['counterpartyId'], ['clientId']],
-  ['gantt_rentals', ['counterpartyId'], ['clientId']],
-  ['rental_change_requests', ['counterpartyId'], ['clientId']],
-  ['payments', ['counterpartyId'], ['clientId']],
-  ['payment_allocations', [], ['clientId']],
-  ['documents', ['counterpartyId'], ['clientId']],
-  ['client_objects', ['counterpartyId'], ['clientId']],
-  ['client_contracts', ['counterpartyId'], ['clientId']],
-  ['deliveries', ['counterpartyId'], ['clientId']],
-  ['service', ['counterpartyId'], ['clientId']],
-  ['warranty_claims', ['counterpartyId'], ['clientId']],
-  ['crm_deals', ['counterpartyId'], ['clientId']],
-  ['crm_activities', ['counterpartyId'], ['clientId']],
-  ['debt_collection_plans', ['counterpartyId'], ['clientId']],
-  ['debt_collection_actions', ['counterpartyId'], ['clientId']],
-  ['receivable_payment_plans', ['counterpartyId'], ['clientId']],
-]);
-const SUPPLIER_REFERENCE_SPECS = Object.freeze([
-  ['payments', ['counterpartyId']],
-  ['warranty_claims', ['factoryCounterpartyId']],
-  ['company_expenses', ['supplierCounterpartyId', 'vendorCounterpartyId']],
-  ['finance_operations', ['supplierCounterpartyId', 'vendorCounterpartyId']],
-  ['spare_parts', ['supplierCounterpartyId', 'vendorCounterpartyId']],
-]);
-const CONTRACTOR_REFERENCE_SPECS = Object.freeze([
-  ['payments', ['counterpartyId']],
-  ['deliveries', ['contractorCounterpartyId', 'carrierCounterpartyId']],
-  ['delivery_carriers', ['counterpartyId', 'contractorCounterpartyId']],
-  ['service', ['contractorCounterpartyId']],
-  ['service_field_trips', ['contractorCounterpartyId']],
-]);
 
 function relationId(value) {
   return String(value ?? '').trim();
@@ -238,10 +206,25 @@ function actorId(actor) {
   return relationId(actor?.userId || actor?.id || actor?.userName || actor) || 'system';
 }
 
-function createSupplierProfile(counterpartyId, timestamp) {
+function ownerScope(counterparty) {
+  const companyId = relationId(counterparty?.companyId);
+  const tenantId = relationId(counterparty?.tenantId);
+  if (!companyId || !tenantId) {
+    throw counterpartyError(
+      'COUNTERPARTY_SCOPE_UNKNOWN',
+      'Counterparty scope must be known before role/profile creation.',
+      409,
+      { counterpartyId: relationId(counterparty?.id) || null },
+    );
+  }
+  return { companyId, tenantId };
+}
+
+function createSupplierProfile(counterpartyId, timestamp, scope) {
   return {
     id: deterministicRoleProfileId('supplier', counterpartyId),
     counterpartyId,
+    ...scope,
     status: 'active',
     categories: [],
     settlementTerms: null,
@@ -255,10 +238,11 @@ function createSupplierProfile(counterpartyId, timestamp) {
   };
 }
 
-function createContractorProfile(counterpartyId, timestamp) {
+function createContractorProfile(counterpartyId, timestamp, scope) {
   return {
     id: deterministicRoleProfileId('contractor', counterpartyId),
     counterpartyId,
+    ...scope,
     status: 'active',
     serviceCategories: [],
     geographicScope: null,
@@ -272,7 +256,7 @@ function createContractorProfile(counterpartyId, timestamp) {
   };
 }
 
-function activateProfile(state, counterpartyId, roleCode, timestamp) {
+function activateProfile(state, counterpartyId, roleCode, timestamp, scope) {
   if (roleCode === 'customer') {
     const profile = findUniqueByCounterparty(
       state.clients,
@@ -298,8 +282,8 @@ function activateProfile(state, counterpartyId, roleCode, timestamp) {
   const profile = findUniqueByCounterparty(profiles, counterpartyId, entity);
   if (!profile) {
     profiles.push(roleCode === 'supplier'
-      ? createSupplierProfile(counterpartyId, timestamp)
-      : createContractorProfile(counterpartyId, timestamp));
+      ? createSupplierProfile(counterpartyId, timestamp, scope)
+      : createContractorProfile(counterpartyId, timestamp, scope));
     return true;
   }
   if (isActiveProfile(profile)) return false;
@@ -375,6 +359,7 @@ function activateCounterpartyRole({
   }
 
   const timestamp = nowIso();
+  const scope = ownerScope(counterparty);
   const assignments = state[ROLE_ASSIGNMENTS_COLLECTION];
   const existing = findUniqueAssignment(assignments, id, role);
   let assignment = existing;
@@ -382,6 +367,7 @@ function activateCounterpartyRole({
     assignment = {
       id: deterministicRoleAssignmentId(id, role),
       counterpartyId: id,
+      ...scope,
       roleCode: role,
       status: 'active',
       validFrom: timestamp,
@@ -409,82 +395,17 @@ function activateCounterpartyRole({
     changed = true;
   }
 
-  if (activateProfile(state, id, role, timestamp)) changed = true;
+  if (activateProfile(state, id, role, timestamp, scope)) changed = true;
   if (projectActiveRolesToCounterparty(state, id, timestamp)) changed = true;
   return { state, assignment, counterparty: state.counterparties[counterpartyIndex], changed };
 }
 
-function recordMatchesStableRelation(record, counterpartyId, clientIds, counterpartyFields, clientFields = []) {
-  const cpMatch = counterpartyFields.some(field => relationId(record?.[field]) === counterpartyId);
-  const clientMatch = clientFields.some(field => clientIds.has(relationId(record?.[field])));
-  return cpMatch || clientMatch;
-}
-
 function findRoleRemovalBlockers({ counterpartyId, roleCode, data }) {
-  const id = relationId(counterpartyId);
-  const role = normalizeCounterpartyRole(roleCode);
-  const clients = readCollection(data, 'clients').filter(item => relationId(item?.counterpartyId) === id);
-  const clientIds = new Set(clients.map(item => relationId(item?.id)).filter(Boolean));
-  const specs = role === 'customer'
-    ? CUSTOMER_REFERENCE_SPECS
-    : role === 'supplier' ? SUPPLIER_REFERENCE_SPECS : CONTRACTOR_REFERENCE_SPECS;
-  const blockers = [];
-  for (const [collection, counterpartyFields, clientFields = []] of specs) {
-    if (role === 'customer' && collection === 'warranty_claims') {
-      // Lazy loading avoids a module-initialization cycle: Warranty resolution uses
-      // the authoritative role helper from this module.
-      const { activeWarrantyCounterpartyReferences } = require('./warranty-claim-counterparty-relations');
-      const records = activeWarrantyCounterpartyReferences(id, data);
-      if (records.length > 0) {
-        blockers.push({
-          collection,
-          recordIds: records.map(record => relationId(record?.id)).filter(Boolean),
-          count: records.length,
-          relationFields: ['counterpartyId', 'serviceTicketId', 'clientId', 'rentalId'],
-        });
-      }
-      continue;
-    }
-    if (role === 'supplier' && collection === 'warranty_claims') {
-      const { activeWarrantyFactoryCounterpartyReferences } = require('./warranty-claim-factory-counterparty-relations');
-      const records = activeWarrantyFactoryCounterpartyReferences(id, data);
-      if (records.length > 0) {
-        blockers.push({
-          collection,
-          recordIds: records.map(record => relationId(record?.id)).filter(Boolean),
-          count: records.length,
-          relationFields: ['factoryCounterpartyId'],
-        });
-      }
-      continue;
-    }
-    const records = readCollection(data, collection)
-      .filter(record => recordMatchesStableRelation(
-        record,
-        id,
-        clientIds,
-        counterpartyFields,
-        clientFields,
-      ))
-      .filter(record => role !== 'customer' || collection !== 'service' || ![
-        'ready',
-        'closed',
-        'completed',
-        'cancelled',
-        'canceled',
-      ].includes(relationId(record?.status).toLowerCase()));
-    if (records.length === 0) continue;
-    blockers.push({
-      collection,
-      recordIds: records.map(record => relationId(record?.id)).filter(Boolean),
-      count: records.length,
-      relationFields: [...counterpartyFields, ...clientFields],
-      ...(role !== 'customer' && collection === 'payments'
-        ? { ambiguity: 'Payment has no role-specific direction; removal fails closed.' }
-        : {}),
-    });
-  }
-  return blockers;
+  // Lazy loading avoids a module-initialization cycle: the lifecycle service uses
+  // role boundary mutations, while this compatibility API delegates analysis back
+  // to the single authoritative stable-ID registry.
+  const { findCounterpartyRoleRemovalBlockers } = require('./client-master-data-lifecycle');
+  return findCounterpartyRoleRemovalBlockers({ counterpartyId, roleCode, data });
 }
 
 function deactivateCounterpartyRole({

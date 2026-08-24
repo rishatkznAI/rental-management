@@ -171,6 +171,12 @@ const {
 } = require('./routes/bot');
 const { registerCrudRoutes } = require('./routes/crud');
 const { registerCounterpartyRoutes } = require('./routes/counterparties');
+const { registerClientMasterDataRoutes } = require('./routes/client-master-data');
+const { createClientMasterDataLifecycleService } = require('./lib/client-master-data-lifecycle');
+const {
+  createTrustedActorScopeResolver,
+  resolveOptionalActorScope,
+} = require('./lib/trusted-actor-scope');
 const { registerCrmActivityRoutes } = require('./routes/crm-activities');
 const { registerDebtCollectionPlanRoutes } = require('./routes/debt-collection-plans');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
@@ -568,8 +574,9 @@ const wialonIpsGateway = createWialonIpsGateway({
 // ── Сессии (SQLite-backed, Bearer-токен) ──────────────────────────────────────
 
 const SESSION_TTL = Math.max(15 * 60 * 1000, Number(process.env.SESSION_TTL_MS || 8 * 60 * 60 * 1000));
+const resolveTrustedActorScope = createTrustedActorScopeResolver({ db: ensureDb() });
 
-function createSession(user) {
+function createSession(user, actorScope = resolveOptionalActorScope(resolveTrustedActorScope, user?.id)) {
   const token = crypto.randomBytes(32).toString('hex');
   const session = {
     userId:    user.id,
@@ -581,6 +588,13 @@ function createSession(user) {
     ownerName: user.ownerName || null,
     tokenVersion: Number(user.tokenVersion) || 0,
     passwordChangedAt: user.passwordChangedAt || null,
+    actorScope: actorScope ? {
+      companyId: actorScope.companyId,
+      tenantId: actorScope.tenantId,
+      membershipId: actorScope.membershipId,
+      membershipVersion: actorScope.membershipVersion,
+      tenantModel: actorScope.tenantModel,
+    } : null,
     createdAt: Date.now(),
   };
   saveSession(token, session, session.createdAt + SESSION_TTL);
@@ -756,8 +770,17 @@ function requireAuth(req, res, next) {
     destroySession(token);
     return res.status(401).json({ ok: false, error: 'Carrier account is available in MAX bot only' });
   }
+  const liveActorScope = resolveOptionalActorScope(resolveTrustedActorScope, currentUser.id);
+  const storedActorScope = session.actorScope;
+  const actorScopeChanged = Boolean(storedActorScope && liveActorScope) && (
+    storedActorScope.companyId !== liveActorScope.companyId
+    || storedActorScope.tenantId !== liveActorScope.tenantId
+    || storedActorScope.membershipId !== liveActorScope.membershipId
+  );
+  req.actorScope = actorScopeChanged ? null : liveActorScope;
+  const { actorScope: _storedActorScope, ...sessionIdentity } = session;
   req.user = {
-    ...session,
+    ...sessionIdentity,
     userName: currentUser.name,
     userRole: normalizeRole(currentUser.role),
     rawRole: currentUser.role,
@@ -769,6 +792,10 @@ function requireAuth(req, res, next) {
     carrierId: currentUser.carrierId || null,
     tokenVersion: Number(currentUser.tokenVersion) || 0,
     passwordChangedAt: currentUser.passwordChangedAt || null,
+    ...(req.actorScope ? {
+      companyId: req.actorScope.companyId,
+      tenantId: req.actorScope.tenantId,
+    } : {}),
   };
   next();
 }
@@ -1343,6 +1370,13 @@ function migrateLegacyRepairFacts({ dryRun = false } = {}) {
 
 const apiRouter = express.Router();
 
+const clientMasterDataLifecycle = createClientMasterDataLifecycleService({
+  readData,
+  writeDataBatch,
+  generateId,
+  nowIso,
+});
+
 registerCounterpartyRoutes(apiRouter, {
   readData,
   writeData,
@@ -1353,6 +1387,7 @@ registerCounterpartyRoutes(apiRouter, {
   generateId,
   nowIso,
   auditLog,
+  clientMasterDataLifecycle,
 });
 
 const COLLECTIONS = [
@@ -1401,6 +1436,7 @@ registerAuthRoutes(app, {
   hashPassword,
   needsPasswordRehash,
   createSession,
+  resolveActorScope: principalId => resolveOptionalActorScope(resolveTrustedActorScope, principalId),
   requireAuth,
   destroySession,
   deleteSessionsForUserIds,
@@ -1427,6 +1463,13 @@ registerSkytechCleanResetRoutes(apiRouter, {
 
 apiRouter.use(createAppDisabledMiddleware({
   getConfig: () => appDisabledConfig,
+}));
+
+apiRouter.use(registerClientMasterDataRoutes({
+  lifecycle: clientMasterDataLifecycle,
+  requireAuth,
+  requireRead,
+  requireWrite,
 }));
 
 registerCanonicalReceivablesReadRoutes(apiRouter, {

@@ -13,6 +13,8 @@ const { assertProductionSmokeFixtureMutationAllowed } = require('../server/lib/p
 const { normalizeRole } = require('../server/lib/role-groups.js');
 const { registerAuthRoutes } = require('../server/routes/auth.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
+const { registerClientMasterDataRoutes } = require('../server/routes/client-master-data.js');
+const { createClientMasterDataLifecycleService } = require('../server/lib/client-master-data-lifecycle.js');
 const { registerRentalChangeRequestRoutes } = require('../server/routes/rental-change-requests.js');
 const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { registerBotRoutes } = require('../server/routes/bot.js');
@@ -145,6 +147,16 @@ function createState() {
 }
 
 function createSecurityApp(state = createState()) {
+  for (const user of state.users || []) {
+    user.companyId ||= 'COMPANY-A';
+    user.tenantId ||= 'TENANT-A';
+  }
+  for (const collection of ['counterparties', 'clients', 'client_objects']) {
+    for (const record of state[collection] || []) {
+      record.companyId ||= 'COMPANY-A';
+      record.tenantId ||= 'TENANT-A';
+    }
+  }
   const app = express();
   app.use(express.json());
   const sessions = new Map([
@@ -162,8 +174,20 @@ function createSecurityApp(state = createState()) {
     ['warranty-camel-token', { userId: 'U-warranty-camel', tokenVersion: 0, passwordChangedAt: null }],
     ['investor-token', { userId: 'U-investor', tokenVersion: 0, passwordChangedAt: null }],
   ]);
-  const readData = name => state[name] || [];
+  const readData = name => {
+    const rows = state[name] || [];
+    if (['counterparties', 'clients', 'client_objects'].includes(name)) {
+      for (const record of rows) {
+        record.companyId ||= 'COMPANY-A';
+        record.tenantId ||= 'TENANT-A';
+      }
+    }
+    return rows;
+  };
   const writeData = (name, value) => { state[name] = value; };
+  const writeDataBatch = entries => {
+    for (const entry of entries || []) writeData(entry.name, entry.value);
+  };
   const accessControl = createAccessControl({ readData });
   const serviceAuditLog = createServiceAuditLog({
     readData,
@@ -188,9 +212,18 @@ function createSecurityApp(state = createState()) {
       userName: user.name,
       userRole: user.role,
       email: user.email,
+      companyId: user.companyId,
+      tenantId: user.tenantId,
       ownerId: user.ownerId || null,
       tokenVersion: Number(user.tokenVersion) || 0,
       passwordChangedAt: user.passwordChangedAt || null,
+    };
+    req.actorScope = {
+      companyId: user.companyId,
+      tenantId: user.tenantId,
+      membershipId: `MEMBERSHIP-${user.id}`,
+      principalId: user.id,
+      source: 'test_active_company_membership',
     };
     return next();
   }
@@ -292,6 +325,18 @@ function createSecurityApp(state = createState()) {
     idPrefixes: { rental_change_requests: 'RCR' },
     accessControl,
   }));
+  const clientMasterDataLifecycle = createClientMasterDataLifecycleService({
+    readData,
+    writeDataBatch,
+    generateId: prefix => `${prefix}-lifecycle-${(state.audit_logs || []).length + 1}`,
+    nowIso: () => '2026-04-28T12:00:00.000Z',
+  });
+  apiRouter.use(registerClientMasterDataRoutes({
+    lifecycle: clientMasterDataLifecycle,
+    requireAuth,
+    requireRead,
+    requireWrite,
+  }));
   apiRouter.use(registerCrudRoutes({
     collections: [
 	      'equipment',
@@ -337,6 +382,7 @@ function createSecurityApp(state = createState()) {
     },
     readData,
     writeData,
+    writeDataBatch,
     deleteSessionsForUserIds: ids => ids.length,
     requireAuth,
     requireRead,
@@ -507,11 +553,20 @@ test('/api/clients creates clients with normalized INN and rejects duplicate INN
     }));
     assert.equal(created.status, 201);
     assert.equal(created.body.innNormalized, '1655123456');
+    assert.equal(created.body.companyId, 'COMPANY-A');
+    assert.equal(created.body.tenantId, 'TENANT-A');
     assert.ok(created.body.counterpartyId);
     assert.equal(state.counterparties.length, initialCounterpartyCount + 1);
     const createdCounterparty = state.counterparties.find(item => item.id === created.body.counterpartyId);
     assert.ok(createdCounterparty);
     assert.deepEqual(createdCounterparty.roles, ['customer']);
+    assert.equal(createdCounterparty.companyId, 'COMPANY-A');
+    assert.equal(createdCounterparty.tenantId, 'TENANT-A');
+    const customerAssignment = state.counterparty_role_assignments.find(item => (
+      item.counterpartyId === created.body.counterpartyId && item.roleCode === 'customer'
+    ));
+    assert.equal(customerAssignment.companyId, 'COMPANY-A');
+    assert.equal(customerAssignment.tenantId, 'TENANT-A');
 
     const duplicate = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
       company: 'ООО Бета',
@@ -526,6 +581,89 @@ test('/api/clients creates clients with normalized INN and rejects duplicate INN
 
   assert.equal(state.clients.length, 1);
   assert.equal(state.counterparties.length, initialCounterpartyCount + 1);
+});
+
+test('generic scoped create assigns trusted scope and rejects ownership fields before persistence', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async baseUrl => {
+    for (const ownership of [
+      { companyId: 'COMPANY-FOREIGN' },
+      { tenantId: 'TENANT-FOREIGN' },
+    ]) {
+      const before = state.clients.length;
+      const rejected = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+        inn: ownership.companyId ? '7707083893' : '7707083894',
+        ...ownership,
+      }));
+      assert.equal(rejected.status, 409);
+      assert.equal(rejected.body.code, 'MASTER_DATA_SCOPE_CLIENT_SUPPLIED');
+      assert.equal(state.clients.length, before);
+    }
+
+    const client = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
+      company: 'ООО Scope Boundary',
+      inn: '7707083895',
+    }));
+    assert.equal(client.status, 201, JSON.stringify(client.body));
+
+    const object = await request(baseUrl, 'POST', '/api/client_objects', 'admin-token', {
+      clientId: client.body.id,
+      name: 'Scope объект',
+      address: 'Казань',
+      status: 'active',
+    });
+    assert.equal(object.status, 201, JSON.stringify(object.body));
+
+    const contract = await request(baseUrl, 'POST', '/api/client_contracts', 'admin-token', {
+      clientId: client.body.id,
+      objectId: object.body.id,
+      number: 'SCOPE-1',
+      status: 'active',
+    });
+    assert.equal(contract.status, 201, JSON.stringify(contract.body));
+
+    for (const record of [client.body, object.body, contract.body]) {
+      assert.equal(record.companyId, 'COMPANY-A');
+      assert.equal(record.tenantId, 'TENANT-A');
+    }
+
+    const objectCount = state.client_objects.length;
+    const foreignObject = await request(baseUrl, 'POST', '/api/client_objects', 'admin-token', {
+      clientId: client.body.id,
+      name: 'Foreign object',
+      address: 'Москва',
+      companyId: 'COMPANY-FOREIGN',
+    });
+    assert.equal(foreignObject.status, 409);
+    assert.equal(foreignObject.body.code, 'MASTER_DATA_SCOPE_CLIENT_SUPPLIED');
+    assert.equal(state.client_objects.length, objectCount);
+  });
+});
+
+test('generic bulk creation cannot persist an unscoped Client or Contract', async () => {
+  const { app, state } = createSecurityApp();
+
+  await withServer(app, async baseUrl => {
+    const clients = await request(baseUrl, 'PUT', '/api/clients', 'admin-token', [clientPayload({
+      id: 'C-bulk-scope',
+      company: 'ООО Bulk Scope',
+      inn: '7707083896',
+    })]);
+    assert.equal(clients.status, 200, JSON.stringify(clients.body));
+    assert.equal(state.clients[0].companyId, 'COMPANY-A');
+    assert.equal(state.clients[0].tenantId, 'TENANT-A');
+
+    const contracts = await request(baseUrl, 'PUT', '/api/client_contracts', 'admin-token', [{
+      id: 'CC-bulk-scope',
+      clientId: 'C-bulk-scope',
+      number: 'BULK-SCOPE-1',
+      status: 'active',
+    }]);
+    assert.equal(contracts.status, 200, JSON.stringify(contracts.body));
+    assert.equal(state.client_contracts[0].companyId, 'COMPANY-A');
+    assert.equal(state.client_contracts[0].tenantId, 'TENANT-A');
+  });
 });
 
 test('/api/clients allows editing own INN and rejects changing to another client INN', async () => {
@@ -966,7 +1104,8 @@ test('/api/clients delete returns 404 for missing client', async () => {
   await withServer(app, async (baseUrl) => {
     const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-missing', 'admin-token');
     assert.equal(deleted.status, 404);
-    assert.equal(deleted.body.error, 'Not found');
+    assert.equal(deleted.body.code, 'CLIENT_NOT_FOUND');
+    assert.equal(deleted.body.error, 'Client не найден.');
   });
 });
 
@@ -983,17 +1122,8 @@ test('/api/clients delete rejects clients linked to rentals by clientId', async 
   await withServer(app, async (baseUrl) => {
     const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'admin-token');
     assert.equal(deleted.status, 409);
-    assert.equal(deleted.body.error, 'CLIENT_HAS_RENTALS');
-    assert.equal(deleted.body.message, 'Нельзя удалить клиента, потому что у него есть связанные аренды');
-    assert.deepEqual(deleted.body.rentals, [{
-      id: 'R-1',
-      rentalId: 'A-100',
-      equipmentId: 'EQ-own',
-      equipmentInv: '100',
-      startDate: '2026-05-01',
-      endDate: '2026-05-10',
-      status: 'active',
-    }]);
+    assert.equal(deleted.body.code, 'CLIENT_HAS_HISTORY');
+    assert.equal(deleted.body.blockers.some(item => item.collection === 'rentals' && item.recordId === 'R-1'), true);
   });
 
   assert.equal(state.clients.length, 1);
@@ -1036,10 +1166,10 @@ test('/api/clients delete rejects clients with historical non-rental links', asy
   await withServer(app, async (baseUrl) => {
     const deleted = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'admin-token');
     assert.equal(deleted.status, 409);
-    assert.equal(deleted.body.error, 'CLIENT_HAS_HISTORY');
-    assert.equal(deleted.body.links.find(item => item.collection === 'documents').count, 1);
-    assert.equal(deleted.body.links.find(item => item.collection === 'payments').count, 1);
-    assert.equal(deleted.body.links.find(item => item.collection === 'deliveries').count, 1);
+    assert.equal(deleted.body.code, 'CLIENT_HAS_HISTORY');
+    assert.equal(deleted.body.blockers.some(item => item.collection === 'documents' && item.recordId === 'D-1'), true);
+    assert.equal(deleted.body.blockers.some(item => item.collection === 'payments' && item.recordId === 'P-1'), true);
+    assert.equal(deleted.body.blockers.some(item => item.collection === 'deliveries' && item.recordId === 'DL-1'), true);
     assert.equal(JSON.stringify(deleted.body).includes('Старый снимок'), false);
     assert.equal(JSON.stringify(deleted.body).includes('DL-name-only'), false);
   });
@@ -1058,7 +1188,7 @@ test('/api/clients delete is limited to admin or client-management role', async 
   await withServer(app, async (baseUrl) => {
     const managerDelete = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'manager-token');
     assert.equal(managerDelete.status, 403);
-    assert.equal(managerDelete.body.error, 'Удаление клиентов доступно только администратору или офис-менеджеру.');
+    assert.equal(managerDelete.body.code, 'MASTER_DATA_FORBIDDEN');
 
     const officeDelete = await request(baseUrl, 'DELETE', '/api/clients/C-1', 'office-token');
     assert.equal(officeDelete.status, 200);
@@ -1108,7 +1238,7 @@ test('/api/rentals lets admin replace rental client and then old client can be d
   await withServer(app, async (baseUrl) => {
     const blocked = await request(baseUrl, 'DELETE', '/api/clients/C-old', 'admin-token');
     assert.equal(blocked.status, 409);
-    assert.equal(blocked.body.error, 'CLIENT_HAS_RENTALS');
+    assert.equal(blocked.body.code, 'CLIENT_HAS_HISTORY');
 
     const update = await request(baseUrl, 'PATCH', '/api/rentals/R-1', 'admin-token', {
       clientId: 'C-new',
@@ -3620,7 +3750,15 @@ test('/api/manager/my-plan is read-only and does not expose secret-like fields',
   state.gantt_rentals = [
     { id: 'GR-1', managerId: 'U-manager', manager: 'Руслан', clientId: 'C-1', client: 'ООО План', equipmentId: 'EQ-1', status: 'active', plannedReturnDate: '2026-05-23', debt: 1000, cookie: 'hidden' },
   ];
-  state.clients = [{ id: 'C-1', company: 'ООО План', managerId: 'U-manager', manager: 'Руслан', passwordHash: 'hidden' }];
+  state.clients = [{
+    id: 'C-1',
+    company: 'ООО План',
+    managerId: 'U-manager',
+    manager: 'Руслан',
+    passwordHash: 'hidden',
+    companyId: 'COMPANY-A',
+    tenantId: 'TENANT-A',
+  }];
   const before = JSON.stringify(state);
 
   await withServer(app, async baseUrl => {

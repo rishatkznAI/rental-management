@@ -50,6 +50,15 @@ function createSystemApp(overrides = {}) {
         normalizedRole: 'Администратор',
         email: 'admin@example.test',
       };
+      req.actorScope = Object.prototype.hasOwnProperty.call(overrides, 'actorScope')
+        ? overrides.actorScope
+        : {
+            companyId: 'COMPANY-A',
+            tenantId: 'TENANT-A',
+            membershipId: 'MEMBERSHIP-A',
+            principalId: req.user.userId,
+            source: 'test_active_company_membership',
+          };
       next();
     }),
     requireAdmin: overrides.requireAdmin || ((_req, _res, next) => next()),
@@ -72,6 +81,14 @@ function createSystemApp(overrides = {}) {
     uploadRoot: overrides.uploadRoot,
   });
   return { app, messages, auditEntries };
+}
+
+function scopedMasterData(record) {
+  return {
+    ...record,
+    companyId: 'COMPANY-A',
+    tenantId: 'TENANT-A',
+  };
 }
 
 async function withServer(app, fn) {
@@ -192,6 +209,8 @@ function createLegacySyncStore(initialCollections) {
 function legacySyncCounterparty(roles) {
   return {
     id: 'CP-sync',
+    companyId: 'COMPANY-A',
+    tenantId: 'TENANT-A',
     type: 'legal_entity',
     legalName: 'ООО Синхронизация',
     shortName: 'Синхронизация',
@@ -207,6 +226,8 @@ function legacySyncCounterparty(roles) {
 function legacySyncClient(overrides = {}) {
   return {
     id: 'C-sync',
+    companyId: 'COMPANY-A',
+    tenantId: 'TENANT-A',
     counterpartyId: 'CP-sync',
     company: 'Синхронизация',
     legalName: 'ООО Синхронизация',
@@ -217,10 +238,17 @@ function legacySyncClient(overrides = {}) {
   };
 }
 
+function legacySyncClientPayload(overrides = {}) {
+  const { companyId: _companyId, tenantId: _tenantId, ...client } = legacySyncClient(overrides);
+  return client;
+}
+
 function legacySyncAssignment(roleCode, overrides = {}) {
   return {
     id: `RA-${roleCode}`,
     counterpartyId: 'CP-sync',
+    companyId: 'COMPANY-A',
+    tenantId: 'TENANT-A',
     roleCode,
     status: 'active',
     validFrom: '2026-01-01T00:00:00.000Z',
@@ -583,14 +611,14 @@ test('/api/sync preserves server-owned opening receivable state by stable Client
     openingReceivableUpdatedBy: 'Админ',
   };
   const collections = {
-    clients: [{
+    clients: [scopedMasterData({
       id: 'C-1',
       counterpartyId: 'CP-1',
       company: 'ООО Остаток',
       inn: '1655123456',
       ...openingReceivable,
-    }],
-    counterparties: [{
+    })],
+    counterparties: [scopedMasterData({
       id: 'CP-1',
       type: 'legal_entity',
       legalName: 'ООО Остаток',
@@ -598,7 +626,7 @@ test('/api/sync preserves server-owned opening receivable state by stable Client
       inn: '1655123456',
       roles: ['customer'],
       status: 'active',
-    }],
+    })],
   };
   const { app } = createSystemApp({
     readData: name => collections[name] || [],
@@ -2681,16 +2709,16 @@ test('/api/admin/system-data/import cannot resurrect an existing terminal Classi
 test('/api/admin/system-data/import canonicalizes Document and ClientContract identity and rejects conflicts atomically', async () => {
   const collections = {
     counterparties: [
-      { id: 'CP-1', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
-      { id: 'CP-2', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
+      scopedMasterData({ id: 'CP-1', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] }),
+      scopedMasterData({ id: 'CP-2', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] }),
     ],
     counterparty_role_assignments: [
-      { id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active', validTo: null },
-      { id: 'A-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active', validTo: null },
+      scopedMasterData({ id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active', validTo: null }),
+      scopedMasterData({ id: 'A-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active', validTo: null }),
     ],
     clients: [
-      { id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Одинаковое' },
-      { id: 'C-2', counterpartyId: 'CP-2', company: 'ООО Одинаковое' },
+      scopedMasterData({ id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Одинаковое' }),
+      scopedMasterData({ id: 'C-2', counterpartyId: 'CP-2', company: 'ООО Одинаковое' }),
     ],
     client_contracts: [],
     documents: [],
@@ -3305,7 +3333,7 @@ test('/api/admin/system-data/import rejects duplicate client INNs before writing
 
 test('/api/admin/system-data/import accepts valid clients payload', async () => {
   const collections = {
-    clients: [{
+    clients: [scopedMasterData({
       id: 'C-1',
       company: 'ООО Старый',
       inn: '1655123456',
@@ -3317,7 +3345,7 @@ test('/api/admin/system-data/import accepts valid clients payload', async () => 
       openingReceivableCreatedByUserId: 'U-admin',
       openingReceivableUpdatedAt: '2026-08-02T00:00:00.000Z',
       openingReceivableUpdatedByUserId: 'U-admin',
-    }],
+    })],
     users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password' }],
   };
   const writes = [];
@@ -3360,6 +3388,11 @@ test('/api/admin/system-data/import accepts valid clients payload', async () => 
     assert.equal(collections.clients.find(client => client.id === 'C-1').openingReceivableRevision, 2);
     assert.equal(collections.clients.find(client => client.id === 'C-1').debt, 130000);
     assert.equal(collections.counterparties.length, 2);
+    assert.ok(collections.clients.every(item => item.companyId === 'COMPANY-A' && item.tenantId === 'TENANT-A'));
+    assert.ok(collections.counterparties.every(item => item.companyId === 'COMPANY-A' && item.tenantId === 'TENANT-A'));
+    assert.ok(collections.counterparty_role_assignments.every(item => (
+      item.companyId === 'COMPANY-A' && item.tenantId === 'TENANT-A'
+    )));
     assert.ok(collections.clients.every(client => collections.counterparties.some(counterparty => (
       counterparty.id === client.counterpartyId
       && counterparty.roles.includes('customer')
@@ -3405,7 +3438,175 @@ test('/api/admin/system-data/import derives role assignments and supplier profil
     );
     assert.equal(collections.supplier_profiles.length, 1);
     assert.equal(collections.supplier_profiles[0].counterpartyId, 'CP-import');
+    assert.equal(collections.supplier_profiles[0].companyId, 'COMPANY-A');
+    assert.equal(collections.supplier_profiles[0].tenantId, 'TENANT-A');
     assert.deepEqual(collections.contractor_profiles, []);
+  });
+});
+
+test('system import requires trusted actor scope and cannot accept ownership authority', async () => {
+  const collections = {
+    counterparties: [],
+    counterparty_role_assignments: [],
+    supplier_profiles: [],
+    contractor_profiles: [],
+    clients: [],
+  };
+  const writes = [];
+  const incomplete = createSystemApp({
+    actorScope: null,
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+
+  await withServer(incomplete.app, async baseUrl => {
+    const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        clients: [{ id: 'C-unscoped', company: 'Без scope', inn: '7707083893' }],
+      },
+    });
+    assert.equal(rejected.status, 403);
+    assert.equal(rejected.body.code, 'ACTOR_SCOPE_INCOMPLETE');
+  });
+  assert.deepEqual(writes, []);
+  assert.deepEqual(collections.clients, []);
+
+  const trusted = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: (name, value) => {
+      writes.push({ name, value });
+      collections[name] = value;
+    },
+  });
+  await withServer(trusted.app, async baseUrl => {
+    const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        counterparties: [{
+          id: 'CP-forged',
+          companyId: 'COMPANY-FOREIGN',
+          tenantId: 'TENANT-FOREIGN',
+          type: 'legal_entity',
+          legalName: 'ООО Forged',
+          inn: '7707083894',
+          roles: ['customer'],
+        }],
+      },
+    });
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.ok, false);
+    assert.match(JSON.stringify(rejected.body), /companyId|tenantId|MASTER_DATA_SCOPE_CLIENT_SUPPLIED/);
+  });
+  assert.deepEqual(writes, []);
+  assert.deepEqual(collections.counterparties, []);
+
+  collections.counterparties = [{
+    id: 'CP-foreign-owner',
+    companyId: 'COMPANY-B',
+    tenantId: 'TENANT-B',
+    type: 'legal_entity',
+    legalName: 'ООО Foreign Owner',
+    roles: ['supplier'],
+    status: 'active',
+  }];
+  await withServer(trusted.app, async baseUrl => {
+    const rejected = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: {
+        counterparty_role_assignments: [{
+          id: 'RA-foreign-owner',
+          counterpartyId: 'CP-foreign-owner',
+          roleCode: 'contractor',
+          status: 'active',
+        }],
+      },
+    });
+    assert.equal(rejected.status, 400);
+    assert.match(JSON.stringify(rejected.body.errors), /MASTER_DATA_SCOPE_FORBIDDEN/);
+  });
+  assert.deepEqual(writes, []);
+});
+
+test('/api/sync assigns trusted scope and rejects incomplete or client-supplied ownership', async () => {
+  await withLegacySyncEnabled(async () => {
+    const collections = {
+      counterparties: [],
+      counterparty_role_assignments: [],
+      supplier_profiles: [],
+      contractor_profiles: [],
+      clients: [],
+      client_contracts: [],
+    };
+    const trusted = createSystemApp({
+      readData: name => collections[name] || [],
+      getSnapshot: () => ({ clients: collections.clients }),
+      writeData: (name, value) => { collections[name] = value; },
+    });
+
+    await withServer(trusted.app, async baseUrl => {
+      const synced = await postJson(baseUrl, '/api/sync', {
+        clients: [{
+          id: 'C-sync-scope',
+          company: 'ООО Sync Scope',
+          inn: '7707083897',
+        }],
+      });
+      assert.equal(synced.status, 200, JSON.stringify(synced.body));
+      assert.equal(collections.clients[0].companyId, 'COMPANY-A');
+      assert.equal(collections.clients[0].tenantId, 'TENANT-A');
+      assert.equal(collections.counterparties[0].companyId, 'COMPANY-A');
+      assert.equal(collections.counterparties[0].tenantId, 'TENANT-A');
+      assert.equal(collections.counterparty_role_assignments[0].companyId, 'COMPANY-A');
+      assert.equal(collections.counterparty_role_assignments[0].tenantId, 'TENANT-A');
+
+      const contractSynced = await postJson(baseUrl, '/api/sync', {
+        client_contracts: [{
+          id: 'CC-sync-scope',
+          clientId: 'C-sync-scope',
+          number: 'SYNC-SCOPE-1',
+          status: 'active',
+        }],
+      });
+      assert.equal(contractSynced.status, 200, JSON.stringify(contractSynced.body));
+      assert.equal(collections.client_contracts[0].companyId, 'COMPANY-A');
+      assert.equal(collections.client_contracts[0].tenantId, 'TENANT-A');
+
+      const before = structuredClone(collections);
+      const forged = await postJson(baseUrl, '/api/sync', {
+        clients: [{
+          id: 'C-forged-scope',
+          company: 'ООО Forged Sync',
+          inn: '7707083898',
+          companyId: 'COMPANY-FOREIGN',
+        }],
+      });
+      assert.equal(forged.status, 403);
+      assert.deepEqual(collections, before);
+    });
+
+    const incompleteCollections = { clients: [], counterparties: [] };
+    const writes = [];
+    const incomplete = createSystemApp({
+      actorScope: null,
+      readData: name => incompleteCollections[name] || [],
+      getSnapshot: () => ({ clients: incompleteCollections.clients }),
+      writeData: (name, value) => {
+        writes.push({ name, value });
+        incompleteCollections[name] = value;
+      },
+    });
+    await withServer(incomplete.app, async baseUrl => {
+      const rejected = await postJson(baseUrl, '/api/sync', {
+        clients: [{ id: 'C-no-scope', company: 'Нет scope', inn: '7707083899' }],
+      });
+      assert.equal(rejected.status, 403);
+      assert.equal(rejected.body.code, 'ACTOR_SCOPE_INCOMPLETE');
+    });
+    assert.deepEqual(writes, []);
   });
 });
 
@@ -3444,7 +3645,7 @@ test('/api/sync rejects missing and duplicate normalized client INN', async () =
   const previousEnabled = process.env.ENABLE_LEGACY_SYNC;
   process.env.ENABLE_LEGACY_SYNC = '1';
   const collections = {
-    clients: [{ id: 'C-existing', company: 'ООО Старый', inn: '1655123456' }],
+    clients: [scopedMasterData({ id: 'C-existing', company: 'ООО Старый', inn: '1655123456' })],
   };
   const writes = [];
   const { app } = createSystemApp({
@@ -3509,7 +3710,7 @@ test('/api/sync cannot resurrect stale supplier projection over an inactive assi
 
     await withServer(store.app, async (baseUrl) => {
       const response = await postJson(baseUrl, '/api/sync', {
-        clients: [legacySyncClient({ manager: 'Новый менеджер' })],
+        clients: [legacySyncClientPayload({ manager: 'Новый менеджер' })],
       });
 
       assert.equal(response.status, 200);
@@ -3544,7 +3745,7 @@ test('/api/sync deterministically bootstraps a genuine legacy role with no assig
 
     await withServer(store.app, async (baseUrl) => {
       const response = await postJson(baseUrl, '/api/sync', {
-        clients: [legacySyncClient()],
+        clients: [legacySyncClientPayload()],
       });
 
       assert.equal(response.status, 200);
@@ -3593,7 +3794,7 @@ test('/api/sync activates Client customer compatibility through RoleAssignment a
 
     await withServer(store.app, async (baseUrl) => {
       const response = await postJson(baseUrl, '/api/sync', {
-        clients: [legacySyncClient()],
+        clients: [legacySyncClientPayload()],
       });
 
       assert.equal(response.status, 200);
@@ -3648,7 +3849,7 @@ test('/api/sync preserves unrelated inactive supplier and contractor state durin
 
     await withServer(store.app, async (baseUrl) => {
       const response = await postJson(baseUrl, '/api/sync', {
-        clients: [legacySyncClient({ manager: 'Изменённый менеджер' })],
+        clients: [legacySyncClientPayload({ manager: 'Изменённый менеджер' })],
       });
 
       assert.equal(response.status, 200);
@@ -3699,7 +3900,7 @@ test('/api/sync leaves existing active role assignments and profiles unchanged',
 
     await withServer(store.app, async (baseUrl) => {
       const response = await postJson(baseUrl, '/api/sync', {
-        clients: [legacySyncClient({ manager: 'Только Client' })],
+        clients: [legacySyncClientPayload({ manager: 'Только Client' })],
       });
 
       assert.equal(response.status, 200);
@@ -3768,16 +3969,16 @@ test('/api/sync canonicalizes Payment relations and never resolves metadata-only
 test('/api/sync canonicalizes staged Document and ClientContract relations and rejects conflicts before writing', async () => {
   const store = createLegacySyncStore({
     counterparties: [
-      { id: 'CP-1', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
-      { id: 'CP-2', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
+      { id: 'CP-1', companyId: 'COMPANY-A', tenantId: 'TENANT-A', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
+      { id: 'CP-2', companyId: 'COMPANY-A', tenantId: 'TENANT-A', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
     ],
     counterparty_role_assignments: [
       { id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active', validTo: null },
       { id: 'A-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active', validTo: null },
     ],
     clients: [
-      { id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Одинаковое' },
-      { id: 'C-2', counterpartyId: 'CP-2', company: 'ООО Одинаковое' },
+      { id: 'C-1', companyId: 'COMPANY-A', tenantId: 'TENANT-A', counterpartyId: 'CP-1', company: 'ООО Одинаковое' },
+      { id: 'C-2', companyId: 'COMPANY-A', tenantId: 'TENANT-A', counterpartyId: 'CP-2', company: 'ООО Одинаковое' },
     ],
     client_contracts: [],
     documents: [],

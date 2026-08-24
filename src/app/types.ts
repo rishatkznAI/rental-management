@@ -1200,6 +1200,8 @@ export interface ClientContactPerson {
 
 export interface Client {
   id: string;
+  companyId?: string;
+  tenantId?: string;
   counterpartyId?: string;
   company: string;
   inn: string;
@@ -1273,6 +1275,8 @@ export interface CounterpartyDuplicateWarning {
 
 export interface Counterparty {
   id: string;
+  companyId?: string;
+  tenantId?: string;
   type: CounterpartyType;
   legalName: string;
   shortName: string;
@@ -1342,6 +1346,8 @@ export interface ContractorProfile {
 
 export interface ClientObject {
   id: string;
+  companyId?: string;
+  tenantId?: string;
   clientId?: string;
   counterpartyId?: string;
   name: string;

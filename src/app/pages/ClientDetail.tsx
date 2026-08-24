@@ -32,10 +32,13 @@ import { useDebtCollectionPlans } from '../hooks/useDebtCollectionPlans';
 import { useCrmActivities } from '../hooks/useCrmActivities';
 import {
   useClientContractsList,
+  useClientObjectLifecycleMap,
   useClientObjectsList,
+  useArchiveClientObject,
   useCreateClientContract,
   useCreateClientObject,
   useDeleteClientContract,
+  useDeleteClientObject,
   useUpdateClientContract,
   useUpdateClientObject,
 } from '../hooks/useClientRelations';
@@ -647,6 +650,8 @@ export default function ClientDetail() {
   const { data: clientContractsAll = [] } = useClientContractsList();
   const createClientObject = useCreateClientObject();
   const updateClientObject = useUpdateClientObject();
+  const archiveClientObject = useArchiveClientObject();
+  const deleteClientObject = useDeleteClientObject();
   const createClientContract = useCreateClientContract();
   const updateClientContract = useUpdateClientContract();
   const deleteClientContract = useDeleteClientContract();
@@ -677,6 +682,7 @@ export default function ClientDetail() {
     )),
     [client, clientContractsAll],
   );
+  const clientObjectLifecycle = useClientObjectLifecycleMap(clientObjects, canEdit);
   const activeClientObjects = clientObjects.filter(item => item.status !== 'archived');
   const clientTabModel = useMemo(() => buildClientDetailTabModel({
     client,
@@ -1242,9 +1248,31 @@ export default function ClientDetail() {
   }
 
   function handleArchiveObject(objectId: string) {
-    updateClientObject.mutate({ id: objectId, data: { status: 'archived' } }, {
+    archiveClientObject.mutate(objectId, {
       onSuccess: () => toast.success('Объект архивирован.'),
       onError: error => toast.error(error instanceof Error ? error.message : 'Не удалось архивировать объект.'),
+    });
+  }
+
+  function handleDeleteObject(object: ClientObject) {
+    if (!window.confirm(`Удалить архивный объект «${object.name}»? Это действие нельзя отменить.`)) return;
+    deleteClientObject.mutate(object.id, {
+      onSuccess: () => toast.success('Архивный объект удалён.'),
+      onError: error => {
+        const responseBody = error instanceof ApiError
+          && error.body
+          && typeof error.body === 'object'
+          ? error.body as { blockers?: unknown }
+          : null;
+        const blockers = Array.isArray(responseBody?.blockers)
+          ? responseBody.blockers
+          : [];
+        if (blockers.length > 0) {
+          toast.error('Удаление недоступно: объект используется в истории клиента.');
+          return;
+        }
+        toast.error(error instanceof Error ? error.message : 'Не удалось удалить объект.');
+      },
     });
   }
 
@@ -2312,6 +2340,8 @@ export default function ClientDetail() {
                   const contract = object.contractId ? clientContracts.find(item => item.id === object.contractId) : null;
                   const isObjectEditing = editingObjectId === object.id;
                   const aggregate = objectRentalAggregates[object.id];
+                  const lifecycle = clientObjectLifecycle.byId.get(object.id);
+                  const lifecycleUnavailable = clientObjectLifecycle.failedIds.has(object.id);
                   return (
                     <div key={object.id} className="rounded-2xl border border-gray-200 p-4 text-sm dark:border-gray-800">
                       {isObjectEditing ? (
@@ -2387,7 +2417,28 @@ export default function ClientDetail() {
                                 Архивировать
                               </Button>
                             )}
+                            {canEdit && object.status === 'archived' && lifecycle?.canDelete && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => handleDeleteObject(object)}
+                                disabled={deleteClientObject.isPending}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                Удалить
+                              </Button>
+                            )}
                           </div>
+                          {object.status === 'archived' && lifecycle && lifecycle.blockers.length > 0 && (
+                            <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                              Удаление недоступно: объект используется в истории клиента.
+                            </p>
+                          )}
+                          {object.status === 'archived' && lifecycleUnavailable && (
+                            <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                              Удаление недоступно: не удалось безопасно проверить историю и scope объекта.
+                            </p>
+                          )}
                         </>
                       )}
                     </div>

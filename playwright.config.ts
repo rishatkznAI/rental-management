@@ -15,7 +15,9 @@ const adminResetEnv = !usesExternalDb || process.env.E2E_FORCE_ADMIN_RESET === '
   : {};
 
 const frontendCommand = `${nodeBin} ${viteBin} --host 127.0.0.1 --port 5173`;
-const backendCommand = `${nodeBin} server.js`;
+const backendCommand = usesExternalDb
+  ? `${nodeBin} server.js`
+  : `${nodeBin} scripts/start-e2e-server.js`;
 
 export default defineConfig({
   testDir: './e2e',
@@ -51,6 +53,8 @@ export default defineConfig({
       env: {
         DB_PATH: e2eDbPath,
         ...adminResetEnv,
+        NODE_ENV: 'test',
+        ...(!usesExternalDb ? { E2E_TRUSTED_SCOPE_BOOTSTRAP: '1' } : {}),
         GPRS_ENABLED: 'true',
       },
     },

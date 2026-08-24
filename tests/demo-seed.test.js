@@ -11,6 +11,7 @@ const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const Database = serverRequire('better-sqlite3');
 const {
+  DEMO_COMPANY_ID,
   DEMO_PREFIX,
   DEMO_USER_EMAILS,
   assertDemoSeedAllowed,
@@ -136,6 +137,18 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   assert.deepEqual(supplierProfiles, []);
   assert.equal(contractorProfiles.length, 1);
   assert.equal(contractorProfiles[0].counterpartyId, 'DEMO-CP-CONTRACTOR-001');
+  for (const collection of [
+    counterparties,
+    roleAssignments,
+    contractorProfiles,
+    clients,
+    clientObjects,
+    clientContracts,
+  ]) {
+    assert.ok(collection.every(item => (
+      item.companyId === DEMO_COMPANY_ID && item.tenantId === DEMO_COMPANY_ID
+    )));
+  }
   assert.ok(clients.every(client => counterparties.some(counterparty => (
     counterparty.id === client.counterpartyId
     && counterparty.roles.includes('customer')
@@ -164,6 +177,24 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   assert.ok(deliveries.some(item => item.status === 'completed'));
   assert.ok(deliveries.every(item => item.counterpartyId && item.carrierCounterpartyId));
   assert.equal(deliveryCarriers[0].counterpartyId, 'DEMO-CP-CONTRACTOR-001');
+
+  const authorityDb = new Database(dbPath, { readonly: true });
+  try {
+    assert.equal(
+      authorityDb.prepare('SELECT status FROM canonical_companies WHERE id = ?').get(DEMO_COMPANY_ID).status,
+      'active',
+    );
+    assert.equal(
+      authorityDb.prepare(`
+        SELECT COUNT(*) AS count
+        FROM company_memberships
+        WHERE companyId = ? AND status = 'active'
+      `).get(DEMO_COMPANY_ID).count,
+      4,
+    );
+  } finally {
+    authorityDb.close();
+  }
 
   for (const collection of [users, counterparties, clients, equipment, rentals, service, deliveries]) {
     assert.ok(collection.every(item => String(item.id || '').startsWith(DEMO_PREFIX)));

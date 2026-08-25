@@ -13,5 +13,4 @@ module.exports = Object.freeze({
   sourceDbPath: '/data/app.sqlite',
   canonicalCompanyId: CANONICAL_COMPANY_ID,
   githubRepository: 'rishatkznAI/rental-management',
-  productionApiOrigin: 'https://api.skytech-rent.ru',
 });

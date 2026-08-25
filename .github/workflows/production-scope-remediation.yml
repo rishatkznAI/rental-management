@@ -82,7 +82,7 @@ jobs:
       RAILWAY_VOLUME_NAME: rental-management-volume
       RAILWAY_VOLUME_MOUNT_PATH: /data
       CANONICAL_COMPANY_ID: cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ
-      PRODUCTION_API_ORIGIN: https://api.skytech-rent.ru
+      PRODUCTION_API_ORIGIN: https://rental-management-production-35bc.up.railway.app
     steps:
       - name: Mask and validate secrets
         env:
@@ -231,7 +231,7 @@ jobs:
           INDEPENDENT_COPY_EVIDENCE_JSON: ${{ inputs.independent_copy_evidence_json }}
           REMEDIATION_SIGNING_SECRET: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET }}
         run: |
-          test "$PRODUCTION_API_ORIGIN" = "https://api.skytech-rent.ru"
+          test "$PRODUCTION_API_ORIGIN" = "https://rental-management-production-35bc.up.railway.app"
           independent_copy_evidence='null'
           if [[ "$MODE" == "apply" ]]; then
             independent_copy_evidence="$INDEPENDENT_COPY_EVIDENCE_JSON"

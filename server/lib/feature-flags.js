@@ -31,6 +31,11 @@ function getGsmDisabledConfig(env = process.env) {
   };
 }
 
+function isProductionScopeWriteFreezeEnabled(env = process.env) {
+  return env.PRODUCTION_SCOPE_REMEDIATION_ENABLED === 'true'
+    && env.PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE === 'true';
+}
+
 function isCanonicalReceivablesReadApiEnabled(env = process.env) {
   return envFlagEnabled(env.CANONICAL_RECEIVABLES_READ_API_ENABLED);
 }
@@ -81,6 +86,7 @@ module.exports = {
   getAppDisabledConfig,
   getBotDisabledConfig,
   getGsmDisabledConfig,
+  isProductionScopeWriteFreezeEnabled,
   isCanonicalReceivablesReadApiEnabled,
   isForecastReceivablesReadApiEnabled,
   sendAppDisabled,

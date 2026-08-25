@@ -128,6 +128,7 @@ const {
   assertOwnershipFieldsNotClientSupplied,
   assertRecordMatchesActorScope,
   assignTrustedScope,
+  filterRecordsByActorScope,
   isScopedMasterDataCollection,
   requireRequestActorScope,
 } = require('../lib/trusted-actor-scope');
@@ -1576,7 +1577,16 @@ function registerCrudRoutes(deps) {
       } catch (error) {
         return sendAccessError(res, error);
       }
+      let actorScope = null;
+      if (isScopedMasterDataCollection(collection)) {
+        try {
+          actorScope = requireRequestActorScope(req);
+        } catch (error) {
+          return sendAccessError(res, error);
+        }
+      }
       let data = readData(collection) || [];
+      if (actorScope) data = filterRecordsByActorScope(data, actorScope);
       if (collection === 'service_works') {
         data = data
           .map(normalizeServiceWorkRecord)
@@ -1673,7 +1683,17 @@ function registerCrudRoutes(deps) {
         } catch (error) {
           return sendAccessError(res, error);
         }
-        const data = accessControl.filterCollectionByScope(collection, readData(collection) || [], req.user);
+        let actorScope;
+        try {
+          actorScope = requireRequestActorScope(req);
+        } catch (error) {
+          return sendAccessError(res, error);
+        }
+        const data = accessControl.filterCollectionByScope(
+          collection,
+          filterRecordsByActorScope(readData(collection) || [], actorScope),
+          req.user,
+        );
         return res.json({
           ok: true,
           duplicates: buildClientInnDuplicateReport(data),
@@ -1745,9 +1765,24 @@ function registerCrudRoutes(deps) {
       } catch (error) {
         return sendAccessError(res, error);
       }
+      let actorScope = null;
+      if (isScopedMasterDataCollection(collection)) {
+        try {
+          actorScope = requireRequestActorScope(req);
+        } catch (error) {
+          return sendAccessError(res, error);
+        }
+      }
       const data = readData(collection) || [];
       let item = data.find(entry => entry.id === req.params.id);
       if (!item) return res.status(404).json({ ok: false, error: 'Not found' });
+      if (actorScope) {
+        try {
+          assertRecordMatchesActorScope(item, actorScope);
+        } catch (error) {
+          return sendAccessError(res, error);
+        }
+      }
       if (collection === 'service_works') item = normalizeServiceWorkRecord(item);
       if (collection === 'spare_parts') item = normalizeSparePartRecord(item);
       if (collection === 'service') item = normalizeServiceTicketRecord(item);
@@ -1851,6 +1886,7 @@ function registerCrudRoutes(deps) {
             if (!accessControl.canAccessEntity(collection, existing, req.user)) {
               return res.status(403).json({ ok: false, error: 'Forbidden' });
             }
+            if (actorScope) assertRecordMatchesActorScope(existing, actorScope);
             res.setHeader('Idempotency-Replayed', 'true');
             const replayed = accessControl.sanitizeEntityForRead(collection, existing, req.user);
             return res.status(200).json(collection === 'payments'
@@ -2150,7 +2186,10 @@ function registerCrudRoutes(deps) {
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
-        if (isScopedMasterDataCollection(collection)) requireRequestActorScope(req);
+        if (isScopedMasterDataCollection(collection)) {
+          const actorScope = requireRequestActorScope(req);
+          assertRecordMatchesActorScope(data[idx], actorScope);
+        }
         if (collection === 'client_contracts') {
           assertScopedClientContractPatch(req, data[idx]);
         }
@@ -2508,7 +2547,10 @@ function registerCrudRoutes(deps) {
       const idx = data.findIndex(entry => entry.id === req.params.id);
       if (idx === -1) return res.status(404).json({ ok: false, error: 'Not found' });
       try {
-        if (isScopedMasterDataCollection(collection)) requireRequestActorScope(req);
+        if (isScopedMasterDataCollection(collection)) {
+          const actorScope = requireRequestActorScope(req);
+          assertRecordMatchesActorScope(data[idx], actorScope);
+        }
         if (collection === 'client_contracts') {
           assertClientContractUpdateScope(req, data[idx]);
         }

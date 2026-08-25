@@ -45,9 +45,8 @@ test('real app shell applies menu visibility after role access checks', () => {
   assert.match(layoutSource, /!section \|\| isSidebarSectionEnabled\(sidebarVisibility, section\)/);
 });
 
-test('public settings expose only non-sensitive sidebar menu configuration', () => {
-  assert.match(systemRoutesSource, /sidebar_navigation_visibility/);
-  assert.match(systemRoutesSource, /sidebar_navigation_order/);
-  assert.match(systemRoutesSource, /sidebar_navigation_groups/);
-  assert.match(systemRoutesSource, /allowedKeys\.has\(String\(item\?\.key \|\| ''\)\.trim\(\)\)/);
+test('public settings do not expose tenant-owned menu configuration before authentication', () => {
+  assert.match(systemRoutesSource, /function getSafePublicSettings\(\)[\s\S]*return \[\];/);
+  assert.match(systemRoutesSource, /app_settings is tenant-owned/);
+  assert.doesNotMatch(systemRoutesSource, /allowedKeys\.has\(String\(item\?\.key \|\| ''\)\.trim\(\)\)/);
 });

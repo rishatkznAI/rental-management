@@ -145,12 +145,13 @@ async function startServer({ app, port, deps, logger = console }) {
     startWialonIpsGateway,
     dbPath,
     botToken,
+    productionScopeWriteFreezeEnabled = false,
   } = deps;
 
   // The factory relation is a strict rollout boundary. Run migration first, then
   // audit before opening the listening socket so a blocked deployment fails
   // deterministically without serving partial application traffic.
-  migrateJsonFilesToDb();
+  if (!productionScopeWriteFreezeEnabled) migrateJsonFilesToDb();
   let warrantyFactoryPreflight = null;
   if (typeof deps.auditWarrantyClaimFactoryCounterpartyRelations === 'function') {
     warrantyFactoryPreflight = deps.auditWarrantyClaimFactoryCounterpartyRelations({ readData: deps.readData });
@@ -171,7 +172,8 @@ async function startServer({ app, port, deps, logger = console }) {
   }
 
   return app.listen(port, async () => {
-    const startupBusinessMaintenanceEnabled = isStartupBusinessMaintenanceEnabled();
+    const startupBusinessMaintenanceEnabled = !productionScopeWriteFreezeEnabled
+      && isStartupBusinessMaintenanceEnabled();
     if (typeof deps.auditCounterpartyRoleProfiles === 'function') {
       try {
         const result = deps.auditCounterpartyRoleProfiles({ readData: deps.readData });
@@ -327,10 +329,14 @@ async function startServer({ app, port, deps, logger = console }) {
         + `activeExternalUnresolved=${unresolved} broken=${result?.summary?.broken || 0}`,
       );
     }
-    cleanupExpiredSessions();
-    seedDefaultUsers();
-    ensureLegacyDefaultUsers();
-    migrateReferenceCollections();
+    if (!productionScopeWriteFreezeEnabled) {
+      cleanupExpiredSessions();
+      seedDefaultUsers();
+      ensureLegacyDefaultUsers();
+      migrateReferenceCollections();
+    } else {
+      logger.log('[production-scope-remediation] startup mutation paths skipped: write freeze active');
+    }
     if (startupBusinessMaintenanceEnabled) {
       migrateLegacyRepairFacts();
     } else {
@@ -402,36 +408,38 @@ async function startServer({ app, port, deps, logger = console }) {
         logger.warn(`[rental-links] diagnostics skipped: ${error?.message || String(error)}`);
       }
     }
-    seedServiceWorks({
-      readData: deps.readData,
-      writeData: deps.writeData,
-      normalizeServiceWorkRecord: deps.normalizeServiceWorkRecord,
-      seedsDir: deps.seedsDir,
-      logger,
-    });
-    seedKnowledgeBaseModules({
-      readData: deps.readData,
-      writeData: deps.writeData,
-      seedsDir: deps.seedsDir,
-      logger,
-    });
-    ensureKnowledgeBaseProgress({
-      readData: deps.readData,
-      writeData: deps.writeData,
-    });
-    seedSpareParts({
-      readData: deps.readData,
-      writeData: deps.writeData,
-      normalizeSparePartRecord: deps.normalizeSparePartRecord,
-      seedsDir: deps.seedsDir,
-      logger,
-    });
-    seedServiceRouteNorms({
-      readData: deps.readData,
-      writeData: deps.writeData,
-      seedsDir: deps.seedsDir,
-      logger,
-    });
+    if (!productionScopeWriteFreezeEnabled) {
+      seedServiceWorks({
+        readData: deps.readData,
+        writeData: deps.writeData,
+        normalizeServiceWorkRecord: deps.normalizeServiceWorkRecord,
+        seedsDir: deps.seedsDir,
+        logger,
+      });
+      seedKnowledgeBaseModules({
+        readData: deps.readData,
+        writeData: deps.writeData,
+        seedsDir: deps.seedsDir,
+        logger,
+      });
+      ensureKnowledgeBaseProgress({
+        readData: deps.readData,
+        writeData: deps.writeData,
+      });
+      seedSpareParts({
+        readData: deps.readData,
+        writeData: deps.writeData,
+        normalizeSparePartRecord: deps.normalizeSparePartRecord,
+        seedsDir: deps.seedsDir,
+        logger,
+      });
+      seedServiceRouteNorms({
+        readData: deps.readData,
+        writeData: deps.writeData,
+        seedsDir: deps.seedsDir,
+        logger,
+      });
+    }
     if (startupBusinessMaintenanceEnabled) {
       cleanupArchivedCrm({
         readData: deps.readData,
@@ -439,12 +447,12 @@ async function startServer({ app, port, deps, logger = console }) {
         logger,
       });
     }
-    applyAdminResetFromEnv();
-    if (typeof startGprsGateway === 'function') {
-      startGprsGateway();
-    }
-    if (typeof startWialonIpsGateway === 'function') {
-      startWialonIpsGateway();
+    if (!productionScopeWriteFreezeEnabled) applyAdminResetFromEnv();
+    if (!productionScopeWriteFreezeEnabled) {
+      if (typeof startGprsGateway === 'function') startGprsGateway();
+      if (typeof startWialonIpsGateway === 'function') startWialonIpsGateway();
+    } else {
+      logger.log('[production-scope-remediation] GSM/GPRS startup skipped: write freeze active');
     }
     if (startupBusinessMaintenanceEnabled) {
       const crmCleanupTimer = setInterval(() => {
@@ -503,12 +511,12 @@ async function startServer({ app, port, deps, logger = console }) {
       logger.log('');
     }
 
-    await registerWebhook();
-    if (typeof startWebhookWatchdog === 'function') {
-      startWebhookWatchdog();
-    }
-    if (typeof startBotPolling === 'function') {
-      startBotPolling();
+    if (!productionScopeWriteFreezeEnabled) {
+      await registerWebhook();
+      if (typeof startWebhookWatchdog === 'function') startWebhookWatchdog();
+      if (typeof startBotPolling === 'function') startBotPolling();
+    } else {
+      logger.log('[production-scope-remediation] bot transports skipped: write freeze active');
     }
   });
 }

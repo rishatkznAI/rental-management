@@ -67,6 +67,9 @@ function createBotHandlers(deps) {
     auditLog = null,
     serviceAuditLog = null,
     notificationService = null,
+    resolveActorScope = () => null,
+    readAuthUsers = () => [],
+    withActorScope = (_scope, operation) => operation(),
   } = deps;
   const requiredAccessMethods = ['canAccessEntity', 'isCarrierDelivery'];
   const missingAccessMethods = !accessControl
@@ -1122,7 +1125,7 @@ function createBotHandlers(deps) {
   function findCarrierSystemUser(carrier = {}) {
     const systemUserId = String(carrier.systemUserId || carrier.system_user_id || '').trim();
     if (!systemUserId) return null;
-    return (readData('users') || []).find(user => String(user?.id || '') === systemUserId) || null;
+    return (readAuthUsers() || []).find(user => String(user?.id || '') === systemUserId) || null;
   }
 
   function findCarrierBySystemUser(user) {
@@ -1147,7 +1150,7 @@ function createBotHandlers(deps) {
     return Number.isFinite(Number(phone)) ? Number(phone) : String(phone || '');
   }
 
-  function buildCarrierBotUser(carrier, phone, replyTarget = null, systemUser = null) {
+  function buildCarrierBotUser(carrier, phone, replyTarget = null, systemUser = null, actorScope = null) {
     return {
       userId: systemUser?.id || carrier.id || `carrier:${phone}`,
       userName: systemUser?.name || carrier.name || 'Перевозчик',
@@ -1160,7 +1163,22 @@ function createBotHandlers(deps) {
       carrierId: carrier.id || null,
       maxUserId: normalizeMaxUserId(phone),
       replyTarget: normalizeReplyTarget(replyTarget, phone),
+      ...(actorScope ? {
+        companyId: actorScope.companyId,
+        tenantId: actorScope.tenantId,
+      } : {}),
     };
+  }
+
+  function persistBotSessionScope(phone, actorScope) {
+    const sessions = getBotSessions();
+    sessions[phone] = {
+      ...(sessions[phone] || {}),
+      companyId: actorScope.companyId,
+      tenantId: actorScope.tenantId,
+      updatedAt: new Date().toISOString(),
+    };
+    saveBotSessions(sessions);
   }
 
   function saveCarrierMaxBinding(carrier, phone, systemUser = null) {
@@ -1200,38 +1218,43 @@ function createBotHandlers(deps) {
   }
 
   function authorizeUser(phone, login, password, replyTarget = null) {
-    const users = readData('users') || [];
+    const users = readAuthUsers() || [];
     const { user: found, error: loginError } = resolveUserByLogin(users, login);
-    if (loginError) {
-      const err = new Error(loginError);
-      err.code = 'DUPLICATE_LOGIN';
-      throw err;
-    }
+    if (loginError) return null;
     if (!found) return null;
     if (found.status !== 'Активен') return null;
     if (!verifyPassword(password, found.password)) return null;
-    if (isCarrierSystemUser(found)) {
-      const carrier = ensureCarrierForSystemUser(found);
-      if (!carrier) return null;
-      const linkedCarrier = saveCarrierMaxBinding(carrier, phone, found);
-      const botUsers = getBotUsers();
-      botUsers[phone] = buildCarrierBotUser(linkedCarrier, phone, replyTarget, found);
-      saveBotUsers(botUsers);
-      return found;
-    }
-    if (isBotOnlyCarrierAccount(found)) return null;
+    const actorScope = resolveActorScope(found.id);
+    if (!actorScope || actorScope.companyId !== actorScope.tenantId) return null;
+    return withActorScope(actorScope, () => {
+      if (isCarrierSystemUser(found)) {
+        const carrier = ensureCarrierForSystemUser(found);
+        if (!carrier || carrier.companyId !== actorScope.companyId || carrier.tenantId !== actorScope.tenantId) return null;
+        const linkedCarrier = saveCarrierMaxBinding(carrier, phone, found);
+        const botUsers = getBotUsers();
+        botUsers[phone] = buildCarrierBotUser(linkedCarrier, phone, replyTarget, found, actorScope);
+        saveBotUsers(botUsers);
+        persistBotSessionScope(phone, actorScope);
+        return botUsers[phone];
+      }
+      if (isBotOnlyCarrierAccount(found)) return null;
 
-    const botUsers = getBotUsers();
-    botUsers[phone] = {
-      userId: found.id,
-      userName: found.name,
-      userRole: normalizeRole(found.role),
-      botMode: 'staff',
-      email: found.email,
-      replyTarget: normalizeReplyTarget(replyTarget, phone),
-    };
-    saveBotUsers(botUsers);
-    return found;
+      const botUsers = getBotUsers();
+      botUsers[phone] = {
+        userId: found.id,
+        name: found.name,
+        userName: found.name,
+        userRole: normalizeRole(found.role),
+        botMode: 'staff',
+        email: found.email,
+        replyTarget: normalizeReplyTarget(replyTarget, phone),
+        companyId: actorScope.companyId,
+        tenantId: actorScope.tenantId,
+      };
+      saveBotUsers(botUsers);
+      persistBotSessionScope(phone, actorScope);
+      return botUsers[phone];
+    });
   }
 
   function findCarrierByMaxKey(phone) {
@@ -1244,6 +1267,9 @@ function createBotHandlers(deps) {
 
   function authorizeCarrier(phone, replyTarget = null) {
     const existing = getAuthorizedUser(phone);
+    // Phone/MAX identity is not tenant authority. A carrier must first be linked
+    // through an authenticated system user and its active Membership.
+    if (!existing) return null;
     const carrier = findCarrierByMaxKey(phone);
     if (preferCarrierAutoLogin && !carrier) {
       return existing?.userRole === 'Перевозчик' ? existing : null;
@@ -1253,10 +1279,15 @@ function createBotHandlers(deps) {
     }
     if (!carrier) return existing || null;
 
+    const systemUser = findCarrierSystemUser(carrier);
+    const actorScope = systemUser ? resolveActorScope(systemUser.id) : null;
+    if (!actorScope || actorScope.companyId !== actorScope.tenantId) return null;
+    if (carrier.companyId !== actorScope.companyId || carrier.tenantId !== actorScope.tenantId) return null;
     const botUsers = getBotUsers();
-    const linkedCarrier = buildCarrierBotUser(carrier, phone, replyTarget, findCarrierSystemUser(carrier));
+    const linkedCarrier = buildCarrierBotUser(carrier, phone, replyTarget, systemUser, actorScope);
     botUsers[phone] = linkedCarrier;
     saveBotUsers(botUsers);
+    persistBotSessionScope(phone, actorScope);
     return linkedCarrier;
   }
 
@@ -1388,9 +1419,14 @@ function createBotHandlers(deps) {
 
   function updateBotSession(phone, patch) {
     const sessions = getBotSessions();
+    const authorizedUser = getBotUsers()[phone] || null;
     sessions[phone] = {
       ...(sessions[phone] || {}),
       ...patch,
+      ...(authorizedUser?.companyId && authorizedUser?.tenantId ? {
+        companyId: authorizedUser.companyId,
+        tenantId: authorizedUser.tenantId,
+      } : {}),
       updatedAt: new Date().toISOString(),
     };
     saveBotSessions(sessions);
@@ -4445,7 +4481,7 @@ function createBotHandlers(deps) {
         console.error('[TRACE] authorizeUser threw:', e.message, e.stack);
         return reply(senderId, '❌ Внутренняя ошибка авторизации. Попробуйте позже.');
       }
-      console.log('[TRACE] user=%s', user ? user.name : 'null');
+      console.log('[TRACE] user=%s', user ? (user.userName || user.name) : 'null');
       if (!user) {
         console.log('[TRACE] sending auth error');
         clearAuthorizedUser(phone);
@@ -4460,7 +4496,7 @@ function createBotHandlers(deps) {
       }
       console.log('[TRACE] sending welcome message for user');
       resetBotFlow(phone);
-      const authUser = getAuthorizedUser(String(phone));
+      const authUser = user;
       return replyWithUi(
         getMainMenuText(authUser),
         {
@@ -4538,7 +4574,7 @@ function createBotHandlers(deps) {
           );
         }
         resetBotFlow(phone);
-        const authUser = getAuthorizedUser(String(phone));
+        const authUser = user;
         return reply(
           senderId,
           getMainMenuText(authUser),

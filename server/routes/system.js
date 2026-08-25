@@ -78,9 +78,11 @@ const {
   assertCompleteActorScope,
   assertRecordMatchesActorScope,
   assignTrustedScope,
+  filterRecordsByActorScope,
   isScopedMasterDataCollection,
   requireRequestActorScope,
 } = require('../lib/trusted-actor-scope');
+const { isTenantOwnedCollection } = require('../lib/tenant-data-boundary');
 const dns = require('dns');
 const fs = require('fs');
 const http = require('http');
@@ -1021,12 +1023,14 @@ function normalizeSystemImportPayload(payload) {
   return {};
 }
 
-function buildSystemDataExport(readData) {
+function buildSystemDataExport(readData, { actorScope = null } = {}) {
   const stats = { strippedSensitiveFields: 0, skippedSensitiveSettings: 0 };
   const collections = {};
   for (const collection of SYSTEM_DATA_COLLECTIONS) {
     const source = readData(collection) || [];
-    const list = Array.isArray(source) ? source : [];
+    const list = isTenantOwnedCollection(collection)
+      ? filterRecordsByActorScope(source, actorScope)
+      : (Array.isArray(source) ? source : []);
     collections[collection] = list
       .map(item => sanitizeSystemRecord(collection, item, stats))
       .filter(item => item !== null);
@@ -1173,7 +1177,16 @@ function analyzeSystemDataImport(payload, readData, { actorScope = null } = {}) 
         for (const field of rentalServerOwnedAuditFields(item)) blocked.add(field);
       }
     }
-    if (isScopedMasterDataCollection(collection)) {
+    if (collection === 'users') {
+      invalidCollections.push('users:USER_MEMBERSHIP_WORKFLOW_REQUIRED');
+      sanitizedCollections[collection] = [];
+      collections[collection] = {
+        incoming: 0,
+        existing: Array.isArray(readData(collection)) ? (readData(collection) || []).length : 0,
+      };
+      continue;
+    }
+    if (isTenantOwnedCollection(collection)) {
       try {
         sanitized = scopeImportedRecords(collection, sanitized, readData, actorScope);
       } catch (error) {
@@ -1618,6 +1631,11 @@ function registerSystemRoutes(app, deps) {
     webhookUrl,
     requireAuth,
     requireAdmin,
+    requirePlatformOperator = (_req, res) => res.status(403).json({
+      ok: false,
+      code: 'PLATFORM_OPERATOR_REQUIRED',
+      error: 'This operation is reserved for the external platform operations plane.',
+    }),
     fetchImpl,
     auditLog,
     analyzeGanttRentalLinks,
@@ -1696,21 +1714,9 @@ function registerSystemRoutes(app, deps) {
   }
 
   function getSafePublicSettings() {
-    const requiredShellKeys = [
-      'sidebar_navigation_groups',
-      'sidebar_navigation_order',
-      'sidebar_navigation_visibility',
-    ];
-    const allowedKeys = new Set(
-      String(process.env.PUBLIC_APP_SETTING_KEYS || 'crm_archive_state,equipment_type_settings,theme,sales_section_settings')
-        .split(',')
-        .map(key => key.trim())
-        .filter(Boolean),
-    );
-    requiredShellKeys.forEach(key => allowedKeys.add(key));
-    return (readData('app_settings') || [])
-      .filter(item => allowedKeys.has(String(item?.key || '').trim()))
-      .map(item => ({ key: item.key, value: item.value }));
+    // app_settings is tenant-owned. Before authentication there is no tenant
+    // authority, so even allowlisted keys must not be read from shared storage.
+    return [];
   }
 
   app.post('/api/sync', requireAuth, requireAdmin, async (req, res) => {
@@ -2187,7 +2193,7 @@ function registerSystemRoutes(app, deps) {
     });
   });
 
-  app.get('/api/admin/system-control-center', requireAuth, requireAdmin, (req, res) => {
+  app.get('/api/admin/system-control-center', requireAuth, requireAdmin, requirePlatformOperator, (req, res) => {
     return res.json(buildSystemControlCenterStatus({
       dbPath,
       buildInfo: buildInfo(),
@@ -2200,7 +2206,17 @@ function registerSystemRoutes(app, deps) {
   });
 
   app.get('/api/admin/system-data/export', requireAuth, requireAdmin, (req, res) => {
-    const payload = buildSystemDataExport(readData);
+    let actorScope;
+    try {
+      actorScope = requireRequestActorScope(req);
+    } catch (error) {
+      return res.status(error.status || 403).json({
+        ok: false,
+        code: error.code || 'ACTOR_SCOPE_INCOMPLETE',
+        error: error.message,
+      });
+    }
+    const payload = buildSystemDataExport(readData, { actorScope });
     auditLog?.(req, {
       action: 'system_data.export',
       entityType: 'system_data',
@@ -2212,7 +2228,7 @@ function registerSystemRoutes(app, deps) {
     return res.json(payload);
   });
 
-  app.get('/api/admin/backup/full', requireAuth, requireAdmin, async (req, res) => {
+  app.get('/api/admin/backup/full', requireAuth, requireAdmin, requirePlatformOperator, async (req, res) => {
     let backup = null;
     const safeBackupErrorMessage = (error) => {
       const code = typeof error?.code === 'string' ? error.code : '';
@@ -2292,7 +2308,7 @@ function registerSystemRoutes(app, deps) {
     }
   });
 
-  app.get('/api/admin/backup/history', requireAuth, requireAdmin, (req, res) => {
+  app.get('/api/admin/backup/history', requireAuth, requireAdmin, requirePlatformOperator, (req, res) => {
     const history = readAuditLogs(readData)
       .filter(entry => entry?.action === 'system.backup.download')
       .map(backupHistoryEntry)
@@ -2363,7 +2379,18 @@ function registerSystemRoutes(app, deps) {
   });
 
   app.get('/api/admin/audit-logs', requireAuth, requireAdmin, (req, res) => {
-    const allLogs = readAuditLogs(readData).map(safeAuditLogEntry);
+    let actorScope;
+    try {
+      actorScope = requireRequestActorScope(req);
+    } catch (error) {
+      return res.status(error.status || 403).json({
+        ok: false,
+        code: error.code || 'ACTOR_SCOPE_INCOMPLETE',
+        error: error.message,
+      });
+    }
+    const allLogs = filterRecordsByActorScope(readAuditLogs(readData), actorScope)
+      .map(safeAuditLogEntry);
     const limit = Math.min(500, Math.max(1, Number(req.query.limit || 100) || 100));
     const logs = allLogs
       .filter(entry => matchesAuditFilters(entry, req.query))
@@ -2423,7 +2450,9 @@ function registerSystemRoutes(app, deps) {
 
     let actorScope = null;
     const requestedCollections = req.body?.collections || req.body || {};
-    if (Object.keys(requestedCollections).some(isScopedMasterDataCollection)) {
+    if (Object.keys(requestedCollections).some(collection => (
+      collection === 'users' || isTenantOwnedCollection(collection)
+    ))) {
       try {
         actorScope = requireRequestActorScope(req);
       } catch (error) {
@@ -2462,7 +2491,9 @@ function registerSystemRoutes(app, deps) {
 
     let actorScope = null;
     const requestedCollections = req.body?.collections || req.body || {};
-    if (Object.keys(requestedCollections).some(isScopedMasterDataCollection)) {
+    if (Object.keys(requestedCollections).some(collection => (
+      collection === 'users' || isTenantOwnedCollection(collection)
+    ))) {
       try {
         actorScope = requireRequestActorScope(req);
       } catch (error) {
@@ -2579,7 +2610,9 @@ function registerSystemRoutes(app, deps) {
       owners: readData('owners') || [],
       mechanics: readData('mechanics') || [],
       bot_users: readData('bot_users') || [],
-      bot_sessions: readData('bot_sessions') || [],
+      // MAX pre-auth sessions are system-global transport state. They are not
+      // tenant business records and must never contribute to tenant diagnostics.
+      bot_sessions: [],
       bot_activity: readData('bot_activity') || [],
       repair_work_items: readData('repair_work_items') || [],
       repair_part_items: readData('repair_part_items') || [],

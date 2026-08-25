@@ -18,6 +18,9 @@ const Database = serverRequire('better-sqlite3');
 const {
   createPlatformIdentityRepository,
 } = serverRequire('./lib/platform-identity-repository.js');
+const {
+  syncSqlShadowIndexForCollection,
+} = serverRequire('./lib/sql-shadow-indexes.js');
 const SERVER_DIR = path.resolve('server');
 const SERVER_ENTRY = path.join(SERVER_DIR, 'server.js');
 const TEST_PASSWORD = 'trusted-scope-e2e-password';
@@ -48,6 +51,8 @@ function testServerEnv({ dbPath, port }) {
     GPRS_ENABLED: 'false',
     MAX_BOT_TRANSPORT: 'disabled',
     LOGIN_FAILURE_DELAY_MS: '0',
+    USE_SQL_DOCUMENTS_INDEX: 'true',
+    USE_SQL_GANTT_INDEX: 'true',
   };
   for (const name of [
     'ADMIN_RESET_EMAIL',
@@ -174,6 +179,33 @@ test('real server preserves trusted actor scope and passes create-role-archive l
       password: legacyPasswordHash(TEST_PASSWORD),
       tokenVersion: 0,
     },
+    {
+      id: 'U-company-b-admin',
+      name: 'Company B Admin',
+      email: 'company-b-admin@example.test',
+      role: 'Администратор',
+      status: 'Активен',
+      password: legacyPasswordHash(TEST_PASSWORD),
+      tokenVersion: 0,
+    },
+    {
+      id: 'U-ambiguous-admin',
+      name: 'Ambiguous Admin',
+      email: 'ambiguous-admin@example.test',
+      role: 'Администратор',
+      status: 'Активен',
+      password: legacyPasswordHash(TEST_PASSWORD),
+      tokenVersion: 0,
+    },
+    {
+      id: 'U-inactive-company-admin',
+      name: 'Inactive Company Admin',
+      email: 'inactive-company-admin@example.test',
+      role: 'Администратор',
+      status: 'Активен',
+      password: legacyPasswordHash(TEST_PASSWORD),
+      tokenVersion: 0,
+    },
   ];
 
   let server;
@@ -208,6 +240,18 @@ test('real server preserves trusted actor scope and passes create-role-archive l
       templateKey: 'template-a',
       templateCapabilities: [],
     });
+    seedAuthority(identity, {
+      companyId: 'company-b',
+      branches: [{ id: 'branch-company-b', displayName: 'Head Office B', isHeadOffice: true }],
+      templateKey: 'template-b',
+      templateCapabilities: [],
+    });
+    seedAuthority(identity, {
+      companyId: 'company-inactive',
+      branches: [{ id: 'branch-company-inactive', displayName: 'Head Office inactive', isHeadOffice: true }],
+      templateKey: 'template-inactive',
+      templateCapabilities: [],
+    });
     identity.repository.createMembership({
       id: 'membership-scoped-admin',
       companyId: 'company-a',
@@ -220,6 +264,94 @@ test('real server preserves trusted actor scope and passes create-role-archive l
       actorContext: testActor(),
       reason: 'server-e2e-membership',
     });
+    identity.repository.createMembership({
+      id: 'membership-company-b-admin',
+      companyId: 'company-b',
+      principalId: 'U-company-b-admin',
+      status: 'active',
+      roleTemplateKey: 'template-b',
+      roleTemplateVersion: 1,
+      companyWideBranchAuthority: true,
+      branchIds: [],
+      actorContext: testActor(),
+      reason: 'server-e2e-membership',
+    });
+    const insertMembershipFixture = identity.db.prepare(`
+      INSERT INTO company_memberships (
+        id, companyId, principalId, status, roleTemplateKey, roleTemplateVersion,
+        companyWideBranchAuthority, version, createdAt, updatedAt, activatedAt,
+        createdBy, updatedBy, reason
+      ) VALUES (?, ?, ?, 'active', ?, 1, 1, 1, ?, ?, ?, 'test-fixture', 'test-fixture', ?)
+    `);
+    for (const [id, companyId, principalId, roleTemplateKey] of [
+      ['membership-ambiguous-a', 'company-a', 'U-ambiguous-admin', 'template-a'],
+      ['membership-ambiguous-b', 'company-b', 'U-ambiguous-admin', 'template-b'],
+      ['membership-inactive', 'company-inactive', 'U-inactive-company-admin', 'template-inactive'],
+    ]) {
+      insertMembershipFixture.run(
+        id,
+        companyId,
+        principalId,
+        roleTemplateKey,
+        '2026-08-24T00:10:00.000Z',
+        '2026-08-24T00:10:00.000Z',
+        '2026-08-24T00:10:00.000Z',
+        'server-e2e-negative-membership',
+      );
+    }
+    identity.db.prepare(`
+      UPDATE canonical_companies
+      SET status = 'inactive', version = version + 1, updatedAt = ?
+      WHERE id = 'company-inactive'
+    `).run('2026-08-24T01:00:00.000Z');
+    const scopedFixtures = {
+      counterparties: [
+        { id: 'CP-A', legalName: 'Company A client', status: 'active', roles: ['customer'], companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'CP-B', legalName: 'Company B client', status: 'active', roles: ['customer'], companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      counterparty_role_assignments: [
+        { id: 'CPRA-A', counterpartyId: 'CP-A', roleCode: 'customer', status: 'active', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'CPRA-B', counterpartyId: 'CP-B', roleCode: 'customer', status: 'active', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      clients: [
+        { id: 'C-A', company: 'Company A client', inn: '7707083893', innNormalized: '7707083893', counterpartyId: 'CP-A', status: 'active', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'C-B', company: 'Company B client', inn: '7811111111', innNormalized: '7811111111', counterpartyId: 'CP-B', status: 'active', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      equipment: [
+        { id: 'EQ-A', inventoryNumber: 'A-001', manufacturer: 'Visible A', model: 'Lift A', status: 'available', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'EQ-B', inventoryNumber: 'B-SECRET', manufacturer: 'Confidential B', model: 'Lift B', status: 'available', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      rentals: [
+        { id: 'R-A', clientId: 'C-A', equipmentId: 'EQ-A', status: 'active', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'R-B', clientId: 'C-B', equipmentId: 'EQ-B', status: 'active', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      gantt_rentals: [
+        { id: 'GR-A', rentalId: 'R-A', clientId: 'C-A', equipmentId: 'EQ-A', client: 'Company A client', startDate: '2026-08-01', endDate: '2026-09-01', status: 'active', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'GR-B', rentalId: 'R-B', clientId: 'C-B', equipmentId: 'EQ-B', client: 'SQL Gantt B Secret', startDate: '2026-08-01', endDate: '2026-09-01', status: 'active', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      documents: [
+        { id: 'DOC-A', type: 'act', number: 'ACT-A', clientId: 'C-A', rentalId: 'R-A', date: '2026-08-20', status: 'signed', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'DOC-B', type: 'act', number: 'SQL-DOCUMENT-B-SECRET', clientId: 'C-B', rentalId: 'R-B', date: '2026-08-20', status: 'signed', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      app_settings: [
+        { id: 'SETTING-A', key: 'tenant_label', value: 'A', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'SETTING-B', key: 'tenant_label', value: 'B-secret', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      audit_logs: [
+        { id: 'AUDIT-A', action: 'equipment.read', entityType: 'equipment', createdAt: '2026-08-24T00:00:00.000Z', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'AUDIT-B', action: 'equipment.secret', entityType: 'equipment', createdAt: '2026-08-24T00:00:00.000Z', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+    };
+    const writeFixture = identity.db.prepare(`
+      INSERT INTO app_data (name, json, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(name) DO UPDATE SET json = excluded.json, updated_at = CURRENT_TIMESTAMP
+    `);
+    for (const [name, value] of Object.entries(scopedFixtures)) {
+      writeFixture.run(name, JSON.stringify(value));
+    }
+    syncSqlShadowIndexForCollection(identityDb, 'documents', scopedFixtures.documents);
+    syncSqlShadowIndexForCollection(identityDb, 'gantt_rentals', scopedFixtures.gantt_rentals);
   } finally {
     identity.db.close();
   }
@@ -243,6 +375,113 @@ test('real server preserves trusted actor scope and passes create-role-archive l
     assert.equal(login.body.user.tenantId, 'company-a');
     const token = login.body.token;
     assert.ok(token);
+
+    const companyACounterparties = await api(server.baseUrl, 'GET', '/api/counterparties', { token });
+    assert.equal(companyACounterparties.status, 200, JSON.stringify(companyACounterparties.body));
+    assert.deepEqual(companyACounterparties.body.map(item => item.id), ['CP-A']);
+    assert.equal(companyACounterparties.body.some(item => item.id === 'CP-B'), false);
+
+    const foreignCounterparty = await api(server.baseUrl, 'GET', '/api/counterparties/CP-B', { token });
+    assert.equal(foreignCounterparty.status, 404, JSON.stringify(foreignCounterparty.body));
+    assert.equal(foreignCounterparty.body.code, 'COUNTERPARTY_NOT_FOUND');
+
+    const companyAClients = await api(server.baseUrl, 'GET', '/api/clients', { token });
+    assert.equal(companyAClients.status, 200, JSON.stringify(companyAClients.body));
+    assert.deepEqual(companyAClients.body.map(item => item.id), ['C-A']);
+
+    const equipmentSearchLeak = await api(server.baseUrl, 'GET', '/api/equipment?search=B-SECRET', { token });
+    assert.equal(equipmentSearchLeak.status, 200, JSON.stringify(equipmentSearchLeak.body));
+    assert.deepEqual(equipmentSearchLeak.body.map(item => item.id), ['EQ-A']);
+    assert.doesNotMatch(JSON.stringify(equipmentSearchLeak.body), /B-SECRET|Confidential B/);
+    const counterpartySearchLeak = await api(server.baseUrl, 'GET', '/api/counterparties?search=Company%20B', { token });
+    assert.equal(counterpartySearchLeak.status, 200, JSON.stringify(counterpartySearchLeak.body));
+    assert.deepEqual(counterpartySearchLeak.body, []);
+    const foreignEquipment = await api(server.baseUrl, 'GET', '/api/equipment/EQ-B', { token });
+    assert.equal(foreignEquipment.status, 404, JSON.stringify(foreignEquipment.body));
+    const foreignEquipmentWrite = await api(server.baseUrl, 'PATCH', '/api/equipment/EQ-B', {
+      token,
+      body: { notes: 'cross-company mutation' },
+    });
+    assert.equal(foreignEquipmentWrite.status, 404, JSON.stringify(foreignEquipmentWrite.body));
+    const foreignEquipmentDelete = await api(server.baseUrl, 'DELETE', '/api/equipment/EQ-B', { token });
+    assert.equal(foreignEquipmentDelete.status, 404, JSON.stringify(foreignEquipmentDelete.body));
+
+    const sqlDocumentSearchLeak = await api(server.baseUrl, 'GET', '/api/documents/references?search=SQL-DOCUMENT-B-SECRET', { token });
+    assert.equal(sqlDocumentSearchLeak.status, 200, JSON.stringify(sqlDocumentSearchLeak.body));
+    assert.deepEqual(sqlDocumentSearchLeak.body.items, []);
+    const sqlDocumentIdLeak = await api(server.baseUrl, 'GET', '/api/documents/references?ids=DOC-B', { token });
+    assert.equal(sqlDocumentIdLeak.status, 200, JSON.stringify(sqlDocumentIdLeak.body));
+    assert.equal(sqlDocumentIdLeak.body.items.some(item => item.id === 'DOC-B'), false);
+    assert.doesNotMatch(JSON.stringify(sqlDocumentIdLeak.body), /SQL-DOCUMENT-B-SECRET/);
+    const sqlGanttSearchLeak = await api(server.baseUrl, 'GET', '/api/documents/gantt-references?search=SQL%20Gantt%20B%20Secret', { token });
+    assert.equal(sqlGanttSearchLeak.status, 200, JSON.stringify(sqlGanttSearchLeak.body));
+    assert.deepEqual(sqlGanttSearchLeak.body.items, []);
+    const sqlGanttIdLeak = await api(server.baseUrl, 'GET', '/api/documents/gantt-references?rentalId=R-B', { token });
+    assert.equal(sqlGanttIdLeak.status, 200, JSON.stringify(sqlGanttIdLeak.body));
+    assert.deepEqual(sqlGanttIdLeak.body.items, []);
+
+    const crossTenantRelationship = await api(server.baseUrl, 'POST', '/api/client_objects', {
+      token,
+      body: { clientId: 'C-B', name: 'Cross-tenant object', address: 'hidden', status: 'active' },
+    });
+    assert.equal(crossTenantRelationship.status >= 400, true, JSON.stringify(crossTenantRelationship.body));
+    assert.doesNotMatch(JSON.stringify(crossTenantRelationship.body), /Company B client|7811111111/);
+
+    const foreignClient = await api(server.baseUrl, 'GET', '/api/clients/C-B', { token });
+    assert.equal(foreignClient.status, 404, JSON.stringify(foreignClient.body));
+
+    const administratorForeignWrite = await api(server.baseUrl, 'PATCH', '/api/clients/C-B', {
+      token,
+      body: { company: 'Administrator must not bypass ownership' },
+    });
+    assert.equal(administratorForeignWrite.status, 404, JSON.stringify(administratorForeignWrite.body));
+
+    const tenantUsers = await api(server.baseUrl, 'GET', '/api/users', { token });
+    assert.equal(tenantUsers.status, 200, JSON.stringify(tenantUsers.body));
+    assert.deepEqual(tenantUsers.body.map(user => user.id), ['U-scoped-admin']);
+    assert.equal(tenantUsers.body.every(user => (
+      user.password === undefined
+      && user.passwordHash === undefined
+      && user.token === undefined
+      && user.tokenVersion === undefined
+    )), true);
+    assert.doesNotMatch(JSON.stringify(tenantUsers.body), new RegExp(legacyPasswordHash(TEST_PASSWORD).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.doesNotMatch(JSON.stringify(tenantUsers.body), /company-b-admin@example\.test/);
+
+    const foreignUser = await api(server.baseUrl, 'GET', '/api/users/U-company-b-admin', { token });
+    assert.equal(foreignUser.status, 404, JSON.stringify(foreignUser.body));
+    const foreignUserWrite = await api(server.baseUrl, 'PATCH', '/api/users/U-company-b-admin', {
+      token,
+      body: { name: 'Must not mutate Company B' },
+    });
+    assert.equal(foreignUserWrite.status, 404, JSON.stringify(foreignUserWrite.body));
+
+    for (const route of [
+      '/api/admin/backup/full',
+      '/api/admin/backup/history',
+      '/api/admin/system-control-center',
+    ]) {
+      const platformOperation = await api(server.baseUrl, 'GET', route, { token });
+      assert.equal(platformOperation.status, 403, `${route}: ${JSON.stringify(platformOperation.body)}`);
+      assert.equal(platformOperation.body.code, 'PLATFORM_OPERATOR_REQUIRED');
+    }
+
+    const scopedExport = await api(server.baseUrl, 'GET', '/api/admin/system-data/export', { token });
+    assert.equal(scopedExport.status, 200, JSON.stringify(scopedExport.body));
+    assert.deepEqual(scopedExport.body.collections.counterparties.map(item => item.id), ['CP-A']);
+    assert.deepEqual(scopedExport.body.collections.clients.map(item => item.id), ['C-A']);
+    assert.deepEqual(scopedExport.body.collections.equipment.map(item => item.id), ['EQ-A']);
+    assert.doesNotMatch(JSON.stringify(scopedExport.body), /B-SECRET|B-secret|AUDIT-B/);
+
+    const auditView = await api(server.baseUrl, 'GET', '/api/admin/audit-logs', { token });
+    assert.equal(auditView.status, 200, JSON.stringify(auditView.body));
+    assert.equal(auditView.body.logs.some(item => item.id === 'AUDIT-A'), true);
+    assert.equal(auditView.body.logs.every(item => item.companyId === undefined), true, 'safe audit DTO hides ownership internals');
+    assert.doesNotMatch(JSON.stringify(auditView.body), /equipment\.secret|AUDIT-B/);
+
+    const publicSettings = await api(server.baseUrl, 'GET', '/api/public-settings');
+    assert.equal(publicSettings.status, 200, JSON.stringify(publicSettings.body));
+    assert.deepEqual(publicSettings.body, []);
 
     await stopActualServer(server);
     server = null;
@@ -370,6 +609,23 @@ test('real server preserves trusted actor scope and passes create-role-archive l
     assert.equal(contract.body.companyId, 'company-a');
     assert.equal(contract.body.tenantId, 'company-a');
 
+    const companyBLogin = await api(server.baseUrl, 'POST', '/api/auth/login', {
+      body: { email: 'company-b-admin@example.test', password: TEST_PASSWORD },
+    });
+    assert.equal(companyBLogin.status, 200, JSON.stringify(companyBLogin.body));
+    const companyBCounterparties = await api(server.baseUrl, 'GET', '/api/counterparties', {
+      token: companyBLogin.body.token,
+    });
+    assert.deepEqual(companyBCounterparties.body.map(item => item.id), ['CP-B']);
+    const companyBContract = await api(server.baseUrl, 'POST', '/api/client_contracts', {
+      token: companyBLogin.body.token,
+      body: { clientId: 'C-B', status: 'active' },
+    });
+    assert.equal(companyBContract.status, 201, JSON.stringify(companyBContract.body));
+    assert.equal(companyBContract.body.companyId, 'company-b');
+    assert.equal(companyBContract.body.tenantId, 'company-b');
+    assert.equal(companyBContract.body.number, contract.body.number, 'number sequences must be tenant-local');
+
     await stopActualServer(server);
     server = null;
     const beforeRejectedWrite = readDatabaseState(dbPath);
@@ -378,22 +634,18 @@ test('real server preserves trusted actor scope and passes create-role-archive l
     const unscopedLogin = await api(server.baseUrl, 'POST', '/api/auth/login', {
       body: { email: 'unscoped-admin@example.test', password: TEST_PASSWORD },
     });
-    assert.equal(unscopedLogin.status, 200, JSON.stringify(unscopedLogin.body));
-    assert.equal(unscopedLogin.body.user.companyId, undefined);
-    assert.equal(unscopedLogin.body.user.tenantId, undefined);
+    assert.equal(unscopedLogin.status, 403, JSON.stringify(unscopedLogin.body));
+    assert.equal(unscopedLogin.body.code, 'ACTOR_SCOPE_INCOMPLETE');
+    assert.equal(unscopedLogin.body.token, undefined);
 
-    const incompleteCreate = await api(server.baseUrl, 'POST', '/api/counterparties', {
-      token: unscopedLogin.body.token,
-      body: {
-        type: 'legal_entity',
-        legalName: 'ООО Must Not Persist',
-        shortName: 'Must Not Persist',
-        inn: '7707083896',
-        roles: ['supplier'],
-      },
-    });
-    assert.equal(incompleteCreate.status, 403, JSON.stringify(incompleteCreate.body));
-    assert.equal(incompleteCreate.body.code, 'ACTOR_SCOPE_INCOMPLETE');
+    for (const email of ['ambiguous-admin@example.test', 'inactive-company-admin@example.test']) {
+      const authorityLogin = await api(server.baseUrl, 'POST', '/api/auth/login', {
+        body: { email, password: TEST_PASSWORD },
+      });
+      assert.equal(authorityLogin.status, 403, JSON.stringify(authorityLogin.body));
+      assert.equal(authorityLogin.body.code, 'ACTOR_SCOPE_INCOMPLETE');
+      assert.equal(authorityLogin.body.token, undefined);
+    }
 
     await stopActualServer(server);
     server = null;

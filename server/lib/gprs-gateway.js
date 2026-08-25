@@ -306,6 +306,8 @@ function createGprsGateway({
     return {
       ...packet,
       equipmentId: match.equipment?.id || null,
+      companyId: match.equipment?.companyId || packet.companyId || null,
+      tenantId: match.equipment?.tenantId || packet.tenantId || null,
       ...equipmentGsmFields(match.equipment),
       equipmentLabel: equipmentLabel(match.equipment) || packet.equipmentLabel || null,
       equipmentMatchStrategy: match.strategy || packet.equipmentMatchStrategy || null,
@@ -369,6 +371,8 @@ function createGprsGateway({
     const next = {
       ...current,
       equipmentId: equipment?.id || current.equipmentId || null,
+      companyId: equipment?.companyId || current.companyId || null,
+      tenantId: equipment?.tenantId || current.tenantId || null,
       equipmentLabel: equipmentLabel(equipment) || current.equipmentLabel || null,
       imei: imei || current.imei || null,
       deviceId: deviceId || current.deviceId || null,
@@ -516,6 +520,8 @@ function createGprsGateway({
       summary: getPacketSummary(packet),
       parsedPayload: packet.parsed,
       ...equipmentGsmFields(equipment),
+      companyId: equipment?.companyId || null,
+      tenantId: equipment?.tenantId || null,
       createdAt: receivedAt,
       createdBy: 'Трекер',
     };

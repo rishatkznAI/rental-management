@@ -25,6 +25,18 @@ function isValidClientInn(value) {
   return normalized.length === 10 || normalized.length === 12;
 }
 
+function clientTenantScopeKey(client) {
+  const companyId = String(client?.companyId || '').trim();
+  const tenantId = String(client?.tenantId || '').trim();
+  return companyId && tenantId && companyId === tenantId
+    ? `tenant:${companyId}`
+    : 'legacy-unscoped';
+}
+
+function clientInnGroupKey(client, innNormalized = getClientInnNormalized(client)) {
+  return `${clientTenantScopeKey(client)}|${innNormalized}`;
+}
+
 function createInvalidInnError() {
   const error = new Error(INVALID_CLIENT_INN_ERROR);
   error.status = 400;
@@ -47,19 +59,20 @@ function buildClientInnDuplicateReport(clients) {
   for (const client of clients || []) {
     const innNormalized = getClientInnNormalized(client);
     if (!innNormalized) continue;
-    const list = byInn.get(innNormalized) || [];
+    const groupKey = clientInnGroupKey(client, innNormalized);
+    const group = byInn.get(groupKey) || { innNormalized, clients: [] };
+    const list = group.clients;
     list.push({
       id: client?.id ? String(client.id) : '',
       company: client?.company || client?.name || client?.clientName || '',
       inn: client?.inn || '',
       innNormalized,
     });
-    byInn.set(innNormalized, list);
+    byInn.set(groupKey, group);
   }
 
-  return Array.from(byInn.entries())
-    .filter(([, matches]) => matches.length > 1)
-    .map(([innNormalized, matches]) => ({ innNormalized, clients: matches }));
+  return Array.from(byInn.values())
+    .filter(group => group.clients.length > 1);
 }
 
 function buildClientInnGroups(clients) {
@@ -67,20 +80,24 @@ function buildClientInnGroups(clients) {
   for (const client of clients || []) {
     const innNormalized = getClientInnNormalized(client);
     if (!innNormalized) continue;
-    const list = groups.get(innNormalized) || [];
+    const key = clientInnGroupKey(client, innNormalized);
+    const group = groups.get(key) || { innNormalized, clients: [] };
+    const list = group.clients;
     list.push(client);
-    groups.set(innNormalized, list);
+    groups.set(key, group);
   }
   return groups;
 }
 
-function findClientByNormalizedInn(clients, innNormalized, exceptClientId) {
+function findClientByNormalizedInn(clients, innNormalized, exceptClientId, candidate = null) {
   const except = exceptClientId ? String(exceptClientId) : '';
   if (!innNormalized) return null;
+  const scopeKey = clientTenantScopeKey(candidate);
   return (clients || []).find(client => {
     if (!client) return false;
     if (except && String(client.id || '') === except) return false;
-    return getClientInnNormalized(client) === innNormalized;
+    return clientTenantScopeKey(client) === scopeKey
+      && getClientInnNormalized(client) === innNormalized;
   }) || null;
 }
 
@@ -102,7 +119,7 @@ function createDuplicateInnError(existingClient) {
 function assertClientInnUnique(clients, candidate, exceptClientId) {
   const normalized = getClientInnNormalized(candidate);
   if (!normalized) return;
-  const existingClient = findClientByNormalizedInn(clients, normalized, exceptClientId);
+  const existingClient = findClientByNormalizedInn(clients, normalized, exceptClientId, candidate);
   if (existingClient) {
     throw createDuplicateInnError(existingClient);
   }
@@ -158,9 +175,10 @@ function assertClientInnWriteAllowed(previousClients, nextClients) {
   const nextGroups = buildClientInnGroups(nextClients);
   const newDuplicateGroups = [];
 
-  for (const [innNormalized, nextGroup] of nextGroups.entries()) {
+  for (const [groupKey, nextGroupEntry] of nextGroups.entries()) {
+    const { innNormalized, clients: nextGroup } = nextGroupEntry;
     if (nextGroup.length <= 1) continue;
-    const previousGroup = previousGroups.get(innNormalized) || [];
+    const previousGroup = previousGroups.get(groupKey)?.clients || [];
     const previousIds = new Set(previousGroup.map(client => String(client?.id || '')).filter(Boolean));
     const hasNewDuplicateMember = nextGroup
       .map(client => String(client?.id || '').trim())

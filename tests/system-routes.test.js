@@ -20,12 +20,24 @@ const {
 } = require('../server/lib/counterparty-role-profiles.js');
 const { getBuildInfo } = require('../server/lib/build-info.js');
 const { resolveReleaseEnv } = require('../server/scripts/start-with-release-type.cjs');
+const { TENANT_OWNED_ARRAY_COLLECTIONS } = require('../server/lib/tenant-data-boundary.js');
 
 function createSystemApp(overrides = {}) {
   const app = express();
   const messages = [];
   const auditEntries = [];
-  const readData = overrides.readData || (() => []);
+  const sourceReadData = overrides.readData || (() => []);
+  const readData = name => {
+    const value = sourceReadData(name);
+    if (TENANT_OWNED_ARRAY_COLLECTIONS.includes(name) && Array.isArray(value)) {
+      return value.map(record => ({
+        ...record,
+        companyId: record.companyId || 'COMPANY-A',
+        tenantId: record.tenantId || 'COMPANY-A',
+      }));
+    }
+    return value;
+  };
   app.use(express.json());
   registerSystemRoutes(app, {
     readData,
@@ -54,7 +66,7 @@ function createSystemApp(overrides = {}) {
         ? overrides.actorScope
         : {
             companyId: 'COMPANY-A',
-            tenantId: 'TENANT-A',
+            tenantId: 'COMPANY-A',
             membershipId: 'MEMBERSHIP-A',
             principalId: req.user.userId,
             source: 'test_active_company_membership',
@@ -62,6 +74,7 @@ function createSystemApp(overrides = {}) {
       next();
     }),
     requireAdmin: overrides.requireAdmin || ((_req, _res, next) => next()),
+    requirePlatformOperator: overrides.requirePlatformOperator || ((_req, _res, next) => next()),
     fetchImpl: overrides.fetchImpl || fetch,
     assertPublicHttpUrlImpl: overrides.assertPublicHttpUrlImpl || (async (url) => new URL(url)),
     auditLog: overrides.auditLog || ((_req, entry) => auditEntries.push(entry)),
@@ -87,7 +100,7 @@ function scopedMasterData(record) {
   return {
     ...record,
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
   };
 }
 
@@ -210,7 +223,7 @@ function legacySyncCounterparty(roles) {
   return {
     id: 'CP-sync',
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
     type: 'legal_entity',
     legalName: 'ООО Синхронизация',
     shortName: 'Синхронизация',
@@ -227,7 +240,7 @@ function legacySyncClient(overrides = {}) {
   return {
     id: 'C-sync',
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
     counterpartyId: 'CP-sync',
     company: 'Синхронизация',
     legalName: 'ООО Синхронизация',
@@ -248,7 +261,7 @@ function legacySyncAssignment(roleCode, overrides = {}) {
     id: `RA-${roleCode}`,
     counterpartyId: 'CP-sync',
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
     roleCode,
     status: 'active',
     validFrom: '2026-01-01T00:00:00.000Z',
@@ -1546,6 +1559,8 @@ test('/api/admin/audit-logs returns filtered safe entries for admins only', asyn
     audit_logs: [
       {
         id: 'AUD-1',
+        companyId: 'COMPANY-A',
+        tenantId: 'COMPANY-A',
         createdAt: '2026-05-02T10:00:00.000Z',
         userId: 'U-1',
         userName: 'Админ',
@@ -1561,6 +1576,8 @@ test('/api/admin/audit-logs returns filtered safe entries for admins only', asyn
       },
       {
         id: 'AUD-2',
+        companyId: 'COMPANY-B',
+        tenantId: 'COMPANY-B',
         createdAt: '2026-05-01T10:00:00.000Z',
         userId: 'U-2',
         userName: 'Менеджер',
@@ -1590,6 +1607,7 @@ test('/api/admin/audit-logs returns filtered safe entries for admins only', asyn
     assert.equal(response.body.logs[0].userAgent, undefined);
     assert.ok(response.body.filters.actions.includes('payments.update'));
     assert.ok(response.body.filters.sections.includes('payments'));
+    assert.equal(response.body.filters.actions.includes('documents.create'), false);
     assert.doesNotMatch(JSON.stringify(response.body), /hidden|token|secret|password|private\.pdf/i);
   });
 });
@@ -2467,7 +2485,7 @@ test('/api/admin/system-data/import dry-run reports counts unknown collections d
   });
 });
 
-test('/api/admin/system-data/import requires confirmation and preserves existing user secrets', async () => {
+test('/api/admin/system-data/import rejects credential-directory restore and preserves existing user secrets', async () => {
   const collections = {
     equipment: [{ id: 'EQ-1', serialNumber: 'OLD' }],
     users: [{ id: 'U-1', email: 'admin@example.test', password: 'existing-password', tokenVersion: 3 }],
@@ -2488,17 +2506,25 @@ test('/api/admin/system-data/import requires confirmation and preserves existing
     assert.equal(rejected.status, 400);
     assert.equal(writes.length, 0);
 
-    const imported = await postJson(baseUrl, '/api/admin/system-data/import', {
+    const rejectedUserRestore = await postJson(baseUrl, '/api/admin/system-data/import', {
       confirm: true,
       collections: {
         equipment: [{ id: 'EQ-2', serialNumber: 'NEW' }],
         users: [{ id: 'U-1', email: 'restored@example.test', password: 'incoming-password', tokenVersion: 99 }],
       },
     });
+    assert.equal(rejectedUserRestore.status, 400);
+    assert.match(rejectedUserRestore.body.errors.join(' '), /USER_MEMBERSHIP_WORKFLOW_REQUIRED/);
+    assert.equal(writes.length, 0);
+
+    const imported = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: { equipment: [{ id: 'EQ-2', serialNumber: 'NEW' }] },
+    });
     assert.equal(imported.status, 200);
-    assert.deepEqual(imported.body.imported, { equipment: 1, users: 1 });
+    assert.deepEqual(imported.body.imported, { equipment: 1 });
     assert.equal(collections.equipment[0].id, 'EQ-2');
-    assert.equal(collections.users[0].email, 'restored@example.test');
+    assert.equal(collections.users[0].email, 'admin@example.test');
     assert.equal(collections.users[0].password, 'existing-password');
     assert.equal(collections.users[0].tokenVersion, 3);
     assert.doesNotMatch(JSON.stringify(imported.body), /incoming-password|existing-password/);
@@ -2525,7 +2551,6 @@ test('/api/admin/system-data/import batch failure leaves every collection unchan
       confirm: true,
       collections: {
         equipment: [{ id: 'EQ-2', serialNumber: 'NEW' }],
-        users: [{ id: 'U-1', email: 'restored@example.test' }],
       },
     });
 
@@ -2596,8 +2621,8 @@ test('/api/admin/system-data/import rejects dangerous fields before writing', as
     assert.equal(dryRun.status, 400);
     assert.deepEqual(dryRun.body.forbiddenFields, {
       equipment: ['auditLog'],
-      users: ['permissions'],
     });
+    assert.match(dryRun.body.errors.join(' '), /USER_MEMBERSHIP_WORKFLOW_REQUIRED/);
     assert.equal(writes.length, 0);
 
     const imported = await postJson(baseUrl, '/api/admin/system-data/import', {
@@ -3388,10 +3413,10 @@ test('/api/admin/system-data/import accepts valid clients payload', async () => 
     assert.equal(collections.clients.find(client => client.id === 'C-1').openingReceivableRevision, 2);
     assert.equal(collections.clients.find(client => client.id === 'C-1').debt, 130000);
     assert.equal(collections.counterparties.length, 2);
-    assert.ok(collections.clients.every(item => item.companyId === 'COMPANY-A' && item.tenantId === 'TENANT-A'));
-    assert.ok(collections.counterparties.every(item => item.companyId === 'COMPANY-A' && item.tenantId === 'TENANT-A'));
+    assert.ok(collections.clients.every(item => item.companyId === 'COMPANY-A' && item.tenantId === 'COMPANY-A'));
+    assert.ok(collections.counterparties.every(item => item.companyId === 'COMPANY-A' && item.tenantId === 'COMPANY-A'));
     assert.ok(collections.counterparty_role_assignments.every(item => (
-      item.companyId === 'COMPANY-A' && item.tenantId === 'TENANT-A'
+      item.companyId === 'COMPANY-A' && item.tenantId === 'COMPANY-A'
     )));
     assert.ok(collections.clients.every(client => collections.counterparties.some(counterparty => (
       counterparty.id === client.counterpartyId
@@ -3439,7 +3464,7 @@ test('/api/admin/system-data/import derives role assignments and supplier profil
     assert.equal(collections.supplier_profiles.length, 1);
     assert.equal(collections.supplier_profiles[0].counterpartyId, 'CP-import');
     assert.equal(collections.supplier_profiles[0].companyId, 'COMPANY-A');
-    assert.equal(collections.supplier_profiles[0].tenantId, 'TENANT-A');
+    assert.equal(collections.supplier_profiles[0].tenantId, 'COMPANY-A');
     assert.deepEqual(collections.contractor_profiles, []);
   });
 });
@@ -3507,7 +3532,7 @@ test('system import requires trusted actor scope and cannot accept ownership aut
   collections.counterparties = [{
     id: 'CP-foreign-owner',
     companyId: 'COMPANY-B',
-    tenantId: 'TENANT-B',
+    tenantId: 'COMPANY-B',
     type: 'legal_entity',
     legalName: 'ООО Foreign Owner',
     roles: ['supplier'],
@@ -3557,11 +3582,11 @@ test('/api/sync assigns trusted scope and rejects incomplete or client-supplied 
       });
       assert.equal(synced.status, 200, JSON.stringify(synced.body));
       assert.equal(collections.clients[0].companyId, 'COMPANY-A');
-      assert.equal(collections.clients[0].tenantId, 'TENANT-A');
+      assert.equal(collections.clients[0].tenantId, 'COMPANY-A');
       assert.equal(collections.counterparties[0].companyId, 'COMPANY-A');
-      assert.equal(collections.counterparties[0].tenantId, 'TENANT-A');
+      assert.equal(collections.counterparties[0].tenantId, 'COMPANY-A');
       assert.equal(collections.counterparty_role_assignments[0].companyId, 'COMPANY-A');
-      assert.equal(collections.counterparty_role_assignments[0].tenantId, 'TENANT-A');
+      assert.equal(collections.counterparty_role_assignments[0].tenantId, 'COMPANY-A');
 
       const contractSynced = await postJson(baseUrl, '/api/sync', {
         client_contracts: [{
@@ -3573,7 +3598,7 @@ test('/api/sync assigns trusted scope and rejects incomplete or client-supplied 
       });
       assert.equal(contractSynced.status, 200, JSON.stringify(contractSynced.body));
       assert.equal(collections.client_contracts[0].companyId, 'COMPANY-A');
-      assert.equal(collections.client_contracts[0].tenantId, 'TENANT-A');
+      assert.equal(collections.client_contracts[0].tenantId, 'COMPANY-A');
 
       const before = structuredClone(collections);
       const forged = await postJson(baseUrl, '/api/sync', {
@@ -3718,7 +3743,7 @@ test('/api/sync cannot resurrect stale supplier projection over an inactive assi
         .find(item => item.roleCode === 'supplier');
       assert.deepEqual(storedSupplier, supplierAssignment);
       assert.equal(storedSupplier.validTo, supplierValidTo);
-      assert.deepEqual(store.collections.supplier_profiles[0], supplierProfile);
+      assert.deepEqual(store.collections.supplier_profiles[0], scopedMasterData(supplierProfile));
       assert.deepEqual(store.collections.counterparties[0].roles, ['customer']);
       assert.equal(store.batches.length, 1);
       assert.deepEqual(store.batches[0].map(entry => entry.name), [
@@ -3862,8 +3887,8 @@ test('/api/sync preserves unrelated inactive supplier and contractor state durin
         store.collections.counterparty_role_assignments.find(item => item.roleCode === 'contractor'),
         contractorAssignment,
       );
-      assert.deepEqual(store.collections.supplier_profiles[0], supplierProfile);
-      assert.deepEqual(store.collections.contractor_profiles[0], contractorProfile);
+      assert.deepEqual(store.collections.supplier_profiles[0], scopedMasterData(supplierProfile));
+      assert.deepEqual(store.collections.contractor_profiles[0], scopedMasterData(contractorProfile));
       assert.deepEqual(store.collections.counterparties[0].roles, ['customer']);
     });
   });
@@ -3906,8 +3931,8 @@ test('/api/sync leaves existing active role assignments and profiles unchanged',
       assert.equal(response.status, 200);
       assert.equal(store.collections.clients[0].manager, 'Только Client');
       assert.deepEqual(store.collections.counterparty_role_assignments, assignments);
-      assert.deepEqual(store.collections.supplier_profiles, [supplierProfile]);
-      assert.deepEqual(store.collections.contractor_profiles, [contractorProfile]);
+      assert.deepEqual(store.collections.supplier_profiles, [scopedMasterData(supplierProfile)]);
+      assert.deepEqual(store.collections.contractor_profiles, [scopedMasterData(contractorProfile)]);
       assert.deepEqual(
         store.collections.counterparties[0].roles,
         ['customer', 'supplier', 'contractor'],
@@ -3969,16 +3994,16 @@ test('/api/sync canonicalizes Payment relations and never resolves metadata-only
 test('/api/sync canonicalizes staged Document and ClientContract relations and rejects conflicts before writing', async () => {
   const store = createLegacySyncStore({
     counterparties: [
-      { id: 'CP-1', companyId: 'COMPANY-A', tenantId: 'TENANT-A', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
-      { id: 'CP-2', companyId: 'COMPANY-A', tenantId: 'TENANT-A', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
+      { id: 'CP-1', companyId: 'COMPANY-A', tenantId: 'COMPANY-A', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
+      { id: 'CP-2', companyId: 'COMPANY-A', tenantId: 'COMPANY-A', legalName: 'ООО Одинаковое', status: 'active', roles: ['customer'] },
     ],
     counterparty_role_assignments: [
       { id: 'A-1', counterpartyId: 'CP-1', roleCode: 'customer', status: 'active', validTo: null },
       { id: 'A-2', counterpartyId: 'CP-2', roleCode: 'customer', status: 'active', validTo: null },
     ],
     clients: [
-      { id: 'C-1', companyId: 'COMPANY-A', tenantId: 'TENANT-A', counterpartyId: 'CP-1', company: 'ООО Одинаковое' },
-      { id: 'C-2', companyId: 'COMPANY-A', tenantId: 'TENANT-A', counterpartyId: 'CP-2', company: 'ООО Одинаковое' },
+      { id: 'C-1', companyId: 'COMPANY-A', tenantId: 'COMPANY-A', counterpartyId: 'CP-1', company: 'ООО Одинаковое' },
+      { id: 'C-2', companyId: 'COMPANY-A', tenantId: 'COMPANY-A', counterpartyId: 'CP-2', company: 'ООО Одинаковое' },
     ],
     client_contracts: [],
     documents: [],

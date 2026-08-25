@@ -7,6 +7,7 @@ const {
   normalizeRole,
 } = require('./role-groups');
 const { CLIENT_OPENING_AR_FIELDS } = require('./counterparty');
+const { isTenantOwnedCollection } = require('./tenant-data-boundary');
 
 const ROLES = {
   ADMIN: 'Администратор',
@@ -1439,9 +1440,22 @@ function isCarrierDelivery(delivery, user) {
   return carrierKeys.some(left => deliveryCarrierKeys.some(right => sameText(left, right)));
 }
 
+function hasTrustedTenantScope(user) {
+  const companyId = String(user?.companyId || '').trim();
+  const tenantId = String(user?.tenantId || '').trim();
+  return Boolean(companyId && tenantId && companyId === tenantId);
+}
+
+function isEntityWithinTrustedTenant(collection, entity, user) {
+  if (!isTenantOwnedCollection(collection) || !hasTrustedTenantScope(user)) return true;
+  return String(entity?.companyId || '').trim() === String(user.companyId)
+    && String(entity?.tenantId || '').trim() === String(user.tenantId);
+}
+
 function canAccessEntity(collection, entity, user, readData) {
   if (!entity || !user) return false;
   if (!isKnownRole(user) || !isKnownCollection(collection)) return false;
+  if (!isEntityWithinTrustedTenant(collection, entity, user)) return false;
   if (isAdmin(user)) return true;
   if (ADMIN_ONLY_READ_COLLECTIONS.has(collection)) return false;
 
@@ -1580,6 +1594,7 @@ function canAccessEntity(collection, entity, user, readData) {
 function canMutateEntity(collection, entity, user, readData) {
   if (!user) return false;
   if (!isKnownRole(user) || !isKnownCollection(collection)) return false;
+  if (!isEntityWithinTrustedTenant(collection, entity, user)) return false;
   if (isAdmin(user)) return true;
   if (ADMIN_ONLY_MUTATE_COLLECTIONS.has(collection)) {
     return false;
@@ -1649,7 +1664,7 @@ function canMutateEntity(collection, entity, user, readData) {
 function filterCollectionByScope(collection, list, user, readData) {
   const data = Array.isArray(list) ? list : [];
   if (!isKnownRole(user) || !isKnownCollection(collection)) return [];
-  if (isAdmin(user)) return data;
+  if (isAdmin(user)) return data.filter(item => isEntityWithinTrustedTenant(collection, item, user));
   if (ADMIN_ONLY_READ_COLLECTIONS.has(collection)) return [];
   return data.filter(item => canAccessEntity(collection, item, user, readData));
 }

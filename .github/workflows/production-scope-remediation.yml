@@ -1,0 +1,413 @@
+name: Production Scope Remediation
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run exactly one guarded remediation mode
+        required: true
+        type: choice
+        options:
+          - preflight
+          - backup
+          - apply
+          - verify
+      expected_deployed_sha:
+        description: Exact 40-character commit currently approved for production
+        required: true
+        type: string
+      expected_plan_checksum:
+        description: Exact execution-plan checksum from the stored receipt; apply only
+        required: false
+        type: string
+      expected_state_fingerprint:
+        description: Exact scoped source-state fingerprint; apply only
+        required: false
+        type: string
+      expected_user_inventory_fingerprint:
+        description: Exact reviewed user-inventory fingerprint; apply only
+        required: false
+        type: string
+      expected_database_fingerprint:
+        description: Exact complete logical database fingerprint; apply only
+        required: false
+        type: string
+      expected_source_file_set_fingerprint:
+        description: Exact DB/WAL/SHM fingerprint from backup; apply only
+        required: false
+        type: string
+      expected_post_database_fingerprint:
+        description: Exact simulated complete post-remediation database fingerprint; apply only
+        required: false
+        type: string
+      approved_company_id:
+        description: Exact immutable canonical Company ID; apply only
+        required: false
+        type: string
+      confirmation:
+        description: Exact Phase A confirmation; apply only
+        required: false
+        type: string
+      backup_id:
+        description: Exact UUID from the stored backup receipt; apply/verify only
+        required: false
+        type: string
+      backup_filename:
+        description: Exact archive filename from the stored receipt; apply/verify only
+        required: false
+        type: string
+      independent_copy_evidence_json:
+        description: Human-approved receipt-bound encrypted artifact evidence JSON; apply only
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-scope-remediation
+  cancel-in-progress: false
+
+jobs:
+  remediation-operation:
+    name: ${{ inputs.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      RAILWAY_PROJECT_ID: 1558b38d-bf16-4b50-9ee6-0871b7152116
+      RAILWAY_ENVIRONMENT_ID: 62833109-61cb-4600-9200-d624d6537a05
+      RAILWAY_SERVICE_ID: b2016e92-3c50-4b00-800d-625a139b219c
+      RAILWAY_VOLUME_ID: 48b8768c-a8a9-4a87-8a4b-b980fff5d00c
+      RAILWAY_VOLUME_NAME: rental-management-volume
+      RAILWAY_VOLUME_MOUNT_PATH: /data
+      CANONICAL_COMPANY_ID: cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ
+      PRODUCTION_API_ORIGIN: https://api.skytech-rent.ru
+    steps:
+      - name: Mask and validate secrets
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          REMEDIATION_SIGNING_SECRET: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          echo "::add-mask::$RAILWAY_TOKEN"
+          echo "::add-mask::$REMEDIATION_SIGNING_SECRET"
+          if [[ "$MODE" == "backup" ]]; then
+            echo "::add-mask::$BACKUP_ENCRYPTION_PASSPHRASE"
+          fi
+          test -n "$RAILWAY_TOKEN"
+          test "$(printf '%s' "$REMEDIATION_SIGNING_SECRET" | wc -c)" -ge 32
+          if [[ "$MODE" == "backup" ]]; then
+            test "$(printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | wc -c)" -ge 32
+          fi
+
+      - name: Install pinned Railway CLI
+        run: npm install --global @railway/cli@4.60.0
+
+      - name: Verify exact Railway target and deployed commit
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        run: |
+          [[ "$EXPECTED_DEPLOYED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          target_dir="$RUNNER_TEMP/production-scope-remediation-target"
+          mkdir -p "$target_dir"
+          cd "$target_dir"
+          railway link \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID"
+          railway status --json > railway-status.json
+          test "$(jq -r '.id' railway-status.json)" = "$RAILWAY_PROJECT_ID"
+          jq -e \
+            --arg environment "$RAILWAY_ENVIRONMENT_ID" \
+            --arg service "$RAILWAY_SERVICE_ID" \
+            --arg volume "$RAILWAY_VOLUME_ID" \
+            --arg volumeName "$RAILWAY_VOLUME_NAME" \
+            --arg mountPath "$RAILWAY_VOLUME_MOUNT_PATH" \
+            --arg sha "$EXPECTED_DEPLOYED_SHA" '
+              ([.environments.edges[].node | select(.id == $environment)]) as $environments
+              | ($environments | length) == 1
+                and (
+                  $environments[0] as $environmentNode
+                  | ([
+                      $environmentNode.serviceInstances.edges[].node
+                      | select(.serviceId == $service)
+                    ]) as $services
+                  | ([
+                      $environmentNode.volumeInstances.edges[].node
+                      | select(.serviceId == $service)
+                      | select(.volume.id == $volume)
+                      | select(.volume.name == $volumeName)
+                      | select(.mountPath == $mountPath)
+                      | select(.state == "READY")
+                    ]) as $volumes
+                  | ($services | length) == 1
+                    and ($volumes | length) == 1
+                    and $services[0].latestDeployment.status == "SUCCESS"
+                    and $services[0].latestDeployment.meta.commitHash == $sha
+                    and ([
+                      $services[0].latestDeployment.instances[]
+                      | select(.status == "RUNNING")
+                    ] | length) == 1
+                )
+            ' railway-status.json > /dev/null
+
+      - name: Validate explicit operation inputs
+        env:
+          MODE: ${{ inputs.mode }}
+          EXPECTED_PLAN_CHECKSUM: ${{ inputs.expected_plan_checksum }}
+          EXPECTED_STATE_FINGERPRINT: ${{ inputs.expected_state_fingerprint }}
+          EXPECTED_USER_INVENTORY_FINGERPRINT: ${{ inputs.expected_user_inventory_fingerprint }}
+          EXPECTED_DATABASE_FINGERPRINT: ${{ inputs.expected_database_fingerprint }}
+          EXPECTED_SOURCE_FILE_SET_FINGERPRINT: ${{ inputs.expected_source_file_set_fingerprint }}
+          EXPECTED_POST_DATABASE_FINGERPRINT: ${{ inputs.expected_post_database_fingerprint }}
+          APPROVED_COMPANY_ID: ${{ inputs.approved_company_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          BACKUP_ID: ${{ inputs.backup_id }}
+          BACKUP_FILENAME: ${{ inputs.backup_filename }}
+          INDEPENDENT_COPY_EVIDENCE_JSON: ${{ inputs.independent_copy_evidence_json }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        run: |
+          if [[ "$MODE" == "apply" || "$MODE" == "verify" ]]; then
+            [[ "$BACKUP_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+            [[ "$BACKUP_FILENAME" =~ ^rentcore-phase-a-[0-9]{8}T[0-9]{6}Z\.zip$ ]]
+          fi
+          if [[ "$MODE" == "apply" ]]; then
+            [[ "$EXPECTED_PLAN_CHECKSUM" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$EXPECTED_STATE_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$EXPECTED_USER_INVENTORY_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$EXPECTED_DATABASE_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$EXPECTED_SOURCE_FILE_SET_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+            [[ "$EXPECTED_POST_DATABASE_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
+            test "$APPROVED_COMPANY_ID" = "$CANONICAL_COMPANY_ID"
+            test "$CONFIRMATION" = "RENTCORE_PHASE_A_APPLY"
+            printf '%s' "$INDEPENDENT_COPY_EVIDENCE_JSON" | jq -e \
+              --arg backupId "$BACKUP_ID" \
+              --arg filename "$BACKUP_FILENAME" \
+              --arg deployedSha "$EXPECTED_DEPLOYED_SHA" \
+              --arg stateFingerprint "$EXPECTED_STATE_FINGERPRINT" \
+              --arg userInventoryFingerprint "$EXPECTED_USER_INVENTORY_FINGERPRINT" \
+              --arg databaseFingerprint "$EXPECTED_DATABASE_FINGERPRINT" \
+              --arg sourceFileSetFingerprint "$EXPECTED_SOURCE_FILE_SET_FINGERPRINT" \
+              --arg expectedPostDatabaseFingerprint "$EXPECTED_POST_DATABASE_FINGERPRINT" \
+              --arg companyId "$APPROVED_COMPANY_ID" \
+              --arg planChecksum "$EXPECTED_PLAN_CHECKSUM" '
+              .evidenceVersion == 1
+              and .provider == "github-actions-encrypted-artifact"
+              and .repository == "rishatkznAI/rental-management"
+              and .backupId == $backupId
+              and .filename == $filename
+              and .deployedSha == $deployedSha
+              and .stateFingerprint == $stateFingerprint
+              and .userInventoryFingerprint == $userInventoryFingerprint
+              and .databaseFingerprint == $databaseFingerprint
+              and .sourceFileSetFingerprint == $sourceFileSetFingerprint
+              and .expectedPostDatabaseFingerprint == $expectedPostDatabaseFingerprint
+              and .canonicalCompanyId == $companyId
+              and .executionPlanChecksum == $planChecksum
+              and (.githubArtifactDigest | test("^(sha256:)?[a-f0-9]{64}$"))
+              and .confirmation == "INDEPENDENT_COPY_VERIFIED"
+              and (.operatorApprovalReference | type == "string" and length >= 16)
+              and (.verifiedAt | fromdateiso8601 > 0)
+            ' > /dev/null
+          fi
+
+      - name: Invoke exactly one guarded operation
+        env:
+          MODE: ${{ inputs.mode }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+          EXPECTED_PLAN_CHECKSUM: ${{ inputs.expected_plan_checksum }}
+          EXPECTED_STATE_FINGERPRINT: ${{ inputs.expected_state_fingerprint }}
+          EXPECTED_USER_INVENTORY_FINGERPRINT: ${{ inputs.expected_user_inventory_fingerprint }}
+          EXPECTED_DATABASE_FINGERPRINT: ${{ inputs.expected_database_fingerprint }}
+          EXPECTED_SOURCE_FILE_SET_FINGERPRINT: ${{ inputs.expected_source_file_set_fingerprint }}
+          EXPECTED_POST_DATABASE_FINGERPRINT: ${{ inputs.expected_post_database_fingerprint }}
+          APPROVED_COMPANY_ID: ${{ inputs.approved_company_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          BACKUP_ID: ${{ inputs.backup_id }}
+          BACKUP_FILENAME: ${{ inputs.backup_filename }}
+          INDEPENDENT_COPY_EVIDENCE_JSON: ${{ inputs.independent_copy_evidence_json }}
+          REMEDIATION_SIGNING_SECRET: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET }}
+        run: |
+          test "$PRODUCTION_API_ORIGIN" = "https://api.skytech-rent.ru"
+          independent_copy_evidence='null'
+          if [[ "$MODE" == "apply" ]]; then
+            independent_copy_evidence="$INDEPENDENT_COPY_EVIDENCE_JSON"
+          fi
+          jq -cnS \
+            --arg expectedDeployedSha "$EXPECTED_DEPLOYED_SHA" \
+            --arg expectedPlanChecksum "$EXPECTED_PLAN_CHECKSUM" \
+            --arg expectedStateFingerprint "$EXPECTED_STATE_FINGERPRINT" \
+            --arg expectedUserInventoryFingerprint "$EXPECTED_USER_INVENTORY_FINGERPRINT" \
+            --arg expectedDatabaseFingerprint "$EXPECTED_DATABASE_FINGERPRINT" \
+            --arg expectedSourceFileSetFingerprint "$EXPECTED_SOURCE_FILE_SET_FINGERPRINT" \
+            --arg expectedPostDatabaseFingerprint "$EXPECTED_POST_DATABASE_FINGERPRINT" \
+            --arg approvedCompanyId "$APPROVED_COMPANY_ID" \
+            --arg confirmation "$CONFIRMATION" \
+            --arg backupId "$BACKUP_ID" \
+            --arg filename "$BACKUP_FILENAME" \
+            --argjson independentBackupEvidence "$independent_copy_evidence" \
+            --arg projectId "$RAILWAY_PROJECT_ID" \
+            --arg environmentId "$RAILWAY_ENVIRONMENT_ID" \
+            --arg serviceId "$RAILWAY_SERVICE_ID" \
+            --arg volumeId "$RAILWAY_VOLUME_ID" \
+            --arg volumeName "$RAILWAY_VOLUME_NAME" \
+            --arg volumeMountPath "$RAILWAY_VOLUME_MOUNT_PATH" '
+              {
+                expectedDeployedSha: $expectedDeployedSha,
+                expectedPlanChecksum: $expectedPlanChecksum,
+                expectedStateFingerprint: $expectedStateFingerprint,
+                expectedUserInventoryFingerprint: $expectedUserInventoryFingerprint,
+                expectedDatabaseFingerprint: $expectedDatabaseFingerprint,
+                expectedSourceFileSetFingerprint: $expectedSourceFileSetFingerprint,
+                expectedPostDatabaseFingerprint: $expectedPostDatabaseFingerprint,
+                approvedCompanyId: $approvedCompanyId,
+                confirmation: $confirmation,
+                independentBackupEvidence: $independentBackupEvidence,
+                backup: { backupId: $backupId, filename: $filename },
+                railwayIdentity: {
+                  projectId: $projectId,
+                  environmentId: $environmentId,
+                  serviceId: $serviceId,
+                  volumeId: $volumeId,
+                  volumeName: $volumeName,
+                  volumeMountPath: $volumeMountPath
+                }
+              }
+            ' | tr -d '\n' > remediation-request.json
+          REQUEST_ID="$(cat /proc/sys/kernel/random/uuid)"
+          ISSUED_AT="$(date +%s)"
+          EXPIRES_AT="$((ISSUED_AT + 300))"
+          BODY_SHA256="$(sha256sum remediation-request.json | awk '{print $1}')"
+          export REQUEST_ID ISSUED_AT EXPIRES_AT BODY_SHA256 MODE
+          OPERATION_SIGNATURE="$(node -e '
+            const crypto = require("crypto");
+            const message = [
+              "rentcore-production-scope-remediation-v1",
+              process.env.REQUEST_ID,
+              process.env.MODE,
+              process.env.ISSUED_AT,
+              process.env.EXPIRES_AT,
+              process.env.BODY_SHA256,
+            ].join("\\n");
+            process.stdout.write(crypto.createHmac("sha256", process.env.REMEDIATION_SIGNING_SECRET).update(message).digest("hex"));
+          ')"
+          base_url="$PRODUCTION_API_ORIGIN/api/admin/production-scope-remediation"
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --header "X-Production-Scope-Remediation-Token: $OPERATION_SIGNATURE" \
+            --header "X-Production-Scope-Remediation-Request-Id: $REQUEST_ID" \
+            --header "X-Production-Scope-Remediation-Issued-At: $ISSUED_AT" \
+            --header "X-Production-Scope-Remediation-Expires-At: $EXPIRES_AT" \
+            --data-binary @remediation-request.json \
+            "$base_url/$MODE" > remediation-response.json
+          jq -e '.ok == true' remediation-response.json > /dev/null
+          jq '{
+            ok,
+            mode: .result.mode,
+            deployedSha: .result.deployedSha,
+            backupId: .result.receipt.backupId,
+            stateFingerprint: (.result.stateFingerprint // .result.receipt.stateFingerprint),
+            databaseFingerprint: (.result.databaseFingerprint // .result.receipt.databaseFingerprint),
+            sourceFileSetFingerprint: .result.receipt.sourceFileSetFingerprint,
+            planChecksum: (.result.executionPlanChecksum // .result.planChecksum),
+            userInventoryFingerprint: (.result.userInventory.fingerprint // .result.receipt.userInventoryFingerprint),
+            userCount: (.result.userInventory.totalCount // 0),
+            blockersCount: ((.result.blockers // []) | length),
+            writes: (.result.writes // 0)
+          }' remediation-response.json
+
+      - name: Download, verify, and encrypt coherent backup off-volume
+        if: inputs.mode == 'backup'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
+        run: |
+          filename="$(jq -er '.result.receipt.filename' remediation-response.json)"
+          expected_sha="$(jq -er '.result.receipt.sha256' remediation-response.json)"
+          expected_size="$(jq -er '.result.receipt.sizeBytes' remediation-response.json)"
+          cd "$RUNNER_TEMP/production-scope-remediation-target"
+          railway volume files --volume "$RAILWAY_VOLUME_ID" download \
+            "/backups/$filename" "$GITHUB_WORKSPACE/remediation-backup.zip" --overwrite
+          test "$(sha256sum "$GITHUB_WORKSPACE/remediation-backup.zip" | awk '{print $1}')" = "$expected_sha"
+          test "$(stat -c '%s' "$GITHUB_WORKSPACE/remediation-backup.zip")" = "$expected_size"
+          cd "$GITHUB_WORKSPACE"
+          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg \
+            --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 \
+            --output remediation-backup.zip.gpg remediation-backup.zip
+          rm -f remediation-backup.zip
+
+      - name: Store encrypted off-volume backup
+        if: inputs.mode == 'backup'
+        id: backup_artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: production-scope-remediation-backup-${{ github.run_id }}
+          path: remediation-backup.zip.gpg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create independent-copy machine evidence
+        if: inputs.mode == 'backup'
+        env:
+          ARTIFACT_URL: ${{ steps.backup_artifact.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.backup_artifact.outputs.artifact-digest }}
+        run: |
+          encrypted_sha="$(sha256sum remediation-backup.zip.gpg | awk '{print $1}')"
+          encrypted_size="$(stat -c '%s' remediation-backup.zip.gpg)"
+          jq -nS \
+            --argjson receipt "$(jq -c '.result.receipt' remediation-response.json)" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg artifactName "production-scope-remediation-backup-$GITHUB_RUN_ID" \
+            --arg artifactUrl "$ARTIFACT_URL" \
+            --arg githubArtifactDigest "$ARTIFACT_DIGEST" \
+            --arg encryptedArchiveSha256 "$encrypted_sha" \
+            --argjson encryptedArchiveSizeBytes "$encrypted_size" '
+              {
+                evidenceVersion: 1,
+                provider: "github-actions-encrypted-artifact",
+                repository: $repository,
+                runId: $runId,
+                artifactName: $artifactName,
+                artifactUrl: $artifactUrl,
+                githubArtifactDigest: $githubArtifactDigest,
+                encryptedArchiveSha256: $encryptedArchiveSha256,
+                encryptedArchiveSizeBytes: $encryptedArchiveSizeBytes,
+                backupId: $receipt.backupId,
+                filename: $receipt.filename,
+                backupSha256: $receipt.sha256,
+                backupSizeBytes: $receipt.sizeBytes,
+                deployedSha: $receipt.deployedSha,
+                stateFingerprint: $receipt.stateFingerprint,
+                userInventoryFingerprint: $receipt.userInventoryFingerprint,
+                databaseFingerprint: $receipt.databaseFingerprint,
+                sourceFileSetFingerprint: $receipt.sourceFileSetFingerprint,
+                canonicalCompanyId: $receipt.canonicalCompanyId,
+                bundledPlanChecksum: $receipt.bundledPlanChecksum,
+                executionPlanChecksum: $receipt.executionPlanChecksum,
+                expectedPostDatabaseFingerprint: $receipt.expectedPostDatabaseFingerprint,
+                railwayIdentity: $receipt.railwayIdentity,
+                verifiedAt: null,
+                operatorApprovalReference: "",
+                confirmation: "HUMAN_VERIFICATION_REQUIRED"
+              }
+            ' > independent-copy-machine-evidence.json
+
+      - name: Store protected non-secret review evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: production-scope-remediation-${{ inputs.mode }}-${{ github.run_id }}
+          path: |
+            remediation-response.json
+            independent-copy-machine-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove transient backup files
+        if: always() && inputs.mode == 'backup'
+        run: rm -f remediation-backup.zip remediation-backup.zip.gpg

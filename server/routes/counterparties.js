@@ -27,7 +27,9 @@ const {
 const {
   actorWithScope,
   assertOwnershipFieldsNotClientSupplied,
+  assertRecordMatchesActorScope,
   assignTrustedScope,
+  filterRecordsByActorScope,
   requireRequestActorScope,
 } = require('../lib/trusted-actor-scope');
 
@@ -163,14 +165,25 @@ function registerCounterpartyRoutes(router, deps) {
     nowIso,
   });
 
-  function readRoleProfileState(overrides = {}) {
-    return boundaryState({
+  function readRoleProfileState(overrides = {}, actorScope = null) {
+    const state = boundaryState({
       counterparties: overrides.counterparties || readData('counterparties') || [],
       clients: overrides.clients || readData('clients') || [],
       [ROLE_ASSIGNMENTS_COLLECTION]: readData(ROLE_ASSIGNMENTS_COLLECTION) || [],
       [SUPPLIER_PROFILES_COLLECTION]: readData(SUPPLIER_PROFILES_COLLECTION) || [],
       [CONTRACTOR_PROFILES_COLLECTION]: readData(CONTRACTOR_PROFILES_COLLECTION) || [],
     });
+    if (!actorScope) return state;
+    for (const collection of [
+      'counterparties',
+      'clients',
+      ROLE_ASSIGNMENTS_COLLECTION,
+      SUPPLIER_PROFILES_COLLECTION,
+      CONTRACTOR_PROFILES_COLLECTION,
+    ]) {
+      state[collection] = filterRecordsByActorScope(state[collection], actorScope);
+    }
+    return state;
   }
 
   router.get('/counterparties', requireAuth, requireRead('counterparties'), (req, res) => {
@@ -196,10 +209,16 @@ function registerCounterpartyRoutes(router, deps) {
       ));
     }
 
-    let rows = Array.isArray(readData('counterparties')) ? readData('counterparties') : [];
+    let actorScope;
+    try {
+      actorScope = requireRequestActorScope(req);
+    } catch (error) {
+      return sendCounterpartyError(res, error);
+    }
+    let rows = filterRecordsByActorScope(readData('counterparties') || [], actorScope);
     if (!includeArchived) rows = rows.filter(item => !item?.archivedAt && item?.status !== 'archived');
     if (role) {
-      const roleState = readRoleProfileState();
+      const roleState = readRoleProfileState({}, actorScope);
       rows = rows.filter(item => hasActiveCounterpartyRole(item, role, roleState));
     }
     if (type) rows = rows.filter(item => item?.type === type);
@@ -237,6 +256,11 @@ function registerCounterpartyRoutes(router, deps) {
         { id },
       ));
     }
+    try {
+      assertRecordMatchesActorScope(item, requireRequestActorScope(req));
+    } catch (error) {
+      return sendCounterpartyError(res, error);
+    }
     return res.json(item);
   });
 
@@ -247,7 +271,9 @@ function registerCounterpartyRoutes(router, deps) {
       if (!item) {
         throw counterpartyError('COUNTERPARTY_NOT_FOUND', 'Контрагент не найден.', 404, { id });
       }
-      const state = readRoleProfileState();
+      const actorScope = requireRequestActorScope(req);
+      assertRecordMatchesActorScope(item, actorScope);
+      const state = readRoleProfileState({}, actorScope);
       const assignments = state[ROLE_ASSIGNMENTS_COLLECTION]
         .filter(assignment => String(assignment?.counterpartyId || '') === id);
       const assignmentRoles = activeRolesForCounterparty(assignments, id);

@@ -1,0 +1,593 @@
+{
+  "planVersion": 1,
+  "planId": "production-scope-remediation-2026-08-25-head-office-memberships-v4",
+  "sourceDbPath": "/data/app.sqlite",
+  "tenantArchitecture": {
+    "status": "APPROVED",
+    "model": "company_is_tenant",
+    "invariant": "tenantId === companyId",
+    "authorityChain": "authenticated user ID -> exactly one active Membership -> active Company -> companyId/tenantId",
+    "independentTenantEntity": false,
+    "fallbackCompanySelection": false
+  },
+  "requiredHumanInput": {
+    "canonicalCompany": [],
+    "headOffice": [],
+    "authorization": [
+      "freshVerifiedProductionActiveUserInventory",
+      "verifiedCoherentPreApplyBackup",
+      "explicitPhaseAProductionApproval",
+      "separateExplicitPhaseBSmokeCleanupApproval"
+    ]
+  },
+  "expected": {
+    "dbIdentity": {
+      "applicationId": 0,
+      "pageSize": 4096,
+      "schemaFingerprint": "58fcb559e6f8d2244222d5140e052d42ed4e17d95e32a22fcef1f3ce5b88a894",
+      "userVersion": 0
+    },
+    "identityCounts": {
+      "canonical_companies": [0],
+      "canonical_branches": [0],
+      "company_memberships": [0],
+      "membership_branch_access": [0],
+      "role_templates": [0],
+      "role_template_capabilities": [0],
+      "membership_capability_assignments": [0],
+      "authorization_audit_events": [0],
+      "identity_bootstrap_runs": [0]
+    },
+    "collectionCounts": {
+      "counterparties": 2,
+      "counterparty_role_assignments": 2,
+      "clients": 1,
+      "client_objects": 3,
+      "users": 14
+    },
+    "collectionFingerprints": {
+      "counterparties": [
+        "311d6c0f8c0b37c023e2e9810e7bb61a59549ec3a1cd0492b091d9860b3f9ac7"
+      ],
+      "counterparty_role_assignments": [
+        "7839bf8adfb93e749717c96c79db990debb0f845b10bf9f3510b3b5af7268326"
+      ],
+      "clients": [
+        "e59ded7d0b594aedc607567e2c1c8fc96f32e23ea4f2fbdd3737da7793610d59"
+      ],
+      "client_objects": [
+        "6d040c797b0fa66e0068440bab390d4d44d2ff5277cbadb9f764dd9e7b1f66ad"
+      ],
+      "users": [
+        "9fd6c109f529e85de72e3d4d079ecdfadf45bf1f4b39304f07039aa25f8a4c09"
+      ]
+    }
+  },
+  "authority": {
+    "status": "PENDING_VERIFIED_PRODUCTION_DRY_RUN",
+    "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+    "tenantId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+    "canonicalCompany": {
+      "canonicalIdentityKey": "rentcore:company:v1|jurisdiction=RU|registry=INN|value=1660217548",
+      "jurisdiction": "RU",
+      "registry": "INN",
+      "registryValue": "1660217548",
+      "legalName": "ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ \"СКАЙТЕХ КОМПАНИ\"",
+      "shortName": "ООО \"СКАЙТЕХ КОМПАНИ\"",
+      "inn": "1660217548",
+      "kpp": "165501001",
+      "ogrn": "1141690077814",
+      "legalAddress": "420107, Республика Татарстан, г. Казань, ул. Островского, д. 107, помещ. 49",
+      "timezone": "Europe/Moscow",
+      "source": "owner-provided-authoritative-legal-identity-2026-08-25"
+    },
+    "headOffice": {
+      "id": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+      "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "canonicalIdentityKey": "rentcore:branch:v1|companyId=cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ|kind=HEAD_OFFICE",
+      "sha256Hex": "ac5ae6700174cea8a70e19b327d49bb3dbe119c944d7908f52162ce1a8a5eb71",
+      "base32Digest": "VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+      "displayName": "Головной офис",
+      "approvedAddressEvidence": "420107, Республика Татарстан, г. Казань, ул. Островского, д. 107, помещ. 49",
+      "timezone": "Europe/Moscow",
+      "isHeadOffice": true,
+      "status": "active",
+      "domainModelNote": "canonical_branches has no address or timezone columns. Address remains approved bootstrap evidence; timezone is stored as canonical_companies.receivablesTimezone."
+    },
+    "identityBootstrap": null,
+    "reason": "Company, Head Office, role/capability mapping, and three proposed Memberships are owner-approved. Executable bootstrap remains intentionally null because fresh production DB conflict detection, the complete active-user disposition list, coherent backup evidence, checksum, and explicit Phase A production approval are unavailable."
+  },
+  "actorMappings": [
+    {
+      "userId": "1775756913074",
+      "name": "Хабибрахманов Ришат Ринатович",
+      "action": "CREATE_MEMBERSHIP",
+      "membershipId": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q",
+      "membershipCanonicalIdentityKey": "rentcore:membership:v1|companyId=cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ|principalId=1775756913074",
+      "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "tenantId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "membershipRole": "company-administrator:v1",
+      "roleTemplateKey": "company-administrator",
+      "roleTemplateVersion": 1,
+      "status": "active",
+      "companyWideBranchAuthority": true,
+      "branchIds": [],
+      "capabilities": [
+        "branches.manage",
+        "companies.manage",
+        "members.manage"
+      ],
+      "candidateForProductionMembership": true,
+      "businessRole": "Администратор",
+      "reason": "Owner-approved Company Administrator. Company-scoped capabilities are bounded by this Membership's Company; no platform, cross-company, backup, or global-control capability exists in this mapping."
+    },
+    {
+      "userId": "1776673416137",
+      "name": "Мениса",
+      "action": "CREATE_MEMBERSHIP",
+      "membershipId": "mbr_EYVSFKJBNRTLDU2ZTONKV5QCK37QB7FUARBUM6ORAHDUTMD5UJPA",
+      "membershipCanonicalIdentityKey": "rentcore:membership:v1|companyId=cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ|principalId=1776673416137",
+      "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "tenantId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "membershipRole": "office-manager:v1",
+      "roleTemplateKey": "office-manager",
+      "roleTemplateVersion": 1,
+      "status": "active",
+      "companyWideBranchAuthority": false,
+      "branchIds": [
+        "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ"
+      ],
+      "capabilities": [],
+      "candidateForProductionMembership": true,
+      "businessRole": "Офис-менеджер",
+      "reason": "Owner-approved Office Manager restricted to Head Office. The canonical v1 catalog has no ordinary office CRUD capability; legacy operational RBAC remains authoritative and no finance/admin capability is inferred."
+    },
+    {
+      "userId": "production-smoke-admin",
+      "action": "UNRESOLVED",
+      "membershipId": null,
+      "companyId": null,
+      "tenantId": null,
+      "membershipRole": null,
+      "candidateForProductionMembership": false,
+      "recommendedDisposition": "NO_MEMBERSHIP_PENDING_SMOKE_REDESIGN",
+      "reason": "Temporarily retain the credential record fail-closed without Membership while CI dependency replacement is prepared. Existing workflows use PRODUCTION_ADMIN credentials, but repository evidence does not prove which account the masked secrets identify. Replace with a dedicated tenant-scoped least-privilege smoke actor, verify workflows, then deactivate this record; never use a personal owner account."
+    },
+    {
+      "userId": "1787547467703",
+      "name": "Айзат",
+      "action": "CREATE_MEMBERSHIP",
+      "membershipId": "mbr_S2S4CR7EHVLAAEXCFMBML6IUUPAA7V7RCRCPSPB5OEJVZFGINMEA",
+      "membershipCanonicalIdentityKey": "rentcore:membership:v1|companyId=cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ|principalId=1787547467703",
+      "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "tenantId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "membershipRole": "rental-manager:v1",
+      "roleTemplateKey": "rental-manager",
+      "roleTemplateVersion": 1,
+      "status": "active",
+      "companyWideBranchAuthority": false,
+      "branchIds": [
+        "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ"
+      ],
+      "capabilities": [],
+      "candidateForProductionMembership": true,
+      "businessRole": "Менеджер по аренде",
+      "reason": "Owner-approved Rental Manager restricted to Head Office. The canonical v1 catalog has no rental CRUD capability; legacy operational RBAC remains authoritative and no finance/admin capability is inferred."
+    }
+  ],
+  "canonicalRoleInventory": {
+    "catalogVersion": 1,
+    "source": "server/lib/platform-identity-schema.js",
+    "capabilities": [
+      { "key": "billing.period.close", "scopeKind": "branch" },
+      { "key": "billing.period.reopen", "scopeKind": "branch" },
+      { "key": "branches.manage", "scopeKind": "company" },
+      { "key": "companies.manage", "scopeKind": "company" },
+      { "key": "forecast.calculate", "scopeKind": "branch" },
+      { "key": "forecast.read", "scopeKind": "branch" },
+      { "key": "members.manage", "scopeKind": "company" },
+      { "key": "receivables.read", "scopeKind": "branch" },
+      { "key": "upd.conduct", "scopeKind": "branch" },
+      { "key": "upd.correct", "scopeKind": "branch" },
+      { "key": "upd.form", "scopeKind": "branch" }
+    ],
+    "existingAuthoritativeTemplateIds": [],
+    "existingTemplateEvidence": "No repository-defined production role templates exist; role_templates is runtime bootstrap state. Historical production evidence recorded zero templates, but fresh production verification is blocked.",
+    "operationalRbacBoundary": "Legacy user roles still govern ordinary application workflows. Canonical templates add only catalog capabilities and do not replace or widen legacy RBAC."
+  },
+  "proposedIdentityBootstrap": {
+    "executable": false,
+    "blockedBy": [
+      "NON_SSH_PRODUCTION_PREFLIGHT_NOT_YET_EXECUTED",
+      "FRESH_PRODUCTION_CONFLICT_SCAN_NOT_CAPTURED",
+      "ELIGIBLE_ACTIVE_USER_DISPOSITION_INCOMPLETE",
+      "COHERENT_BACKUP_NOT_VERIFIED",
+      "EXPLICIT_PHASE_A_APPROVAL_MISSING"
+    ],
+    "configVersion": 1,
+    "company": {
+      "id": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "displayName": "ООО \"СКАЙТЕХ КОМПАНИ\"",
+      "receivablesTimezone": "Europe/Moscow"
+    },
+    "branches": [
+      {
+        "id": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+        "displayName": "Головной офис",
+        "isHeadOffice": true,
+        "status": "active"
+      }
+    ],
+    "roleTemplates": [
+      {
+        "templateKey": "company-administrator",
+        "templateVersion": 1,
+        "displayName": "Company Administrator",
+        "capabilities": [
+          "branches.manage",
+          "companies.manage",
+          "members.manage"
+        ]
+      },
+      {
+        "templateKey": "office-manager",
+        "templateVersion": 1,
+        "displayName": "Office Manager",
+        "capabilities": []
+      },
+      {
+        "templateKey": "rental-manager",
+        "templateVersion": 1,
+        "displayName": "Rental Manager",
+        "capabilities": []
+      }
+    ],
+    "memberships": [
+      {
+        "id": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q",
+        "principalId": "1775756913074",
+        "status": "active",
+        "roleTemplateKey": "company-administrator",
+        "roleTemplateVersion": 1,
+        "companyWideBranchAuthority": true,
+        "branchIds": [],
+        "capabilityAssignments": []
+      },
+      {
+        "id": "mbr_EYVSFKJBNRTLDU2ZTONKV5QCK37QB7FUARBUM6ORAHDUTMD5UJPA",
+        "principalId": "1776673416137",
+        "status": "active",
+        "roleTemplateKey": "office-manager",
+        "roleTemplateVersion": 1,
+        "companyWideBranchAuthority": false,
+        "branchIds": [
+          "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ"
+        ],
+        "capabilityAssignments": []
+      },
+      {
+        "id": "mbr_S2S4CR7EHVLAAEXCFMBML6IUUPAA7V7RCRCPSPB5OEJVZFGINMEA",
+        "principalId": "1787547467703",
+        "status": "active",
+        "roleTemplateKey": "rental-manager",
+        "roleTemplateVersion": 1,
+        "companyWideBranchAuthority": false,
+        "branchIds": [
+          "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ"
+        ],
+        "capabilityAssignments": []
+      }
+    ],
+    "intentionallyUnmappedUserIds": null,
+    "approval": null
+  },
+  "recordMappings": [
+    {
+      "collection": "counterparties",
+      "id": "CP-1787305873918-cb43be",
+      "action": "UPDATE_SCOPE",
+      "expectedBefore": { "companyId": null, "tenantId": null },
+      "freshBeforeStatus": "NOT_CAPTURED_SSH_HOST_IDENTITY_NOT_VERIFIED",
+      "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "tenantId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "classification": "PRODUCTION_BUSINESS_DATA",
+      "proposedActionAfterApproval": "UPDATE_SCOPE",
+      "reason": "Stable links and owner input prove the real SK Alabuga customer chain and Skytech business ownership. The explicit scope uses the approved immutable canonical Company ID; no write is authorized."
+    },
+    {
+      "collection": "counterparties",
+      "id": "CP-1787585239479-4a34e4",
+      "action": "UNRESOLVED",
+      "companyId": null,
+      "tenantId": null,
+      "classification": "SMOKE_TEST_FIXTURE",
+      "proposedCleanup": "ARCHIVE_COUNTERPARTY_AND_DEACTIVATE_ROLE_AFTER_EXACT_DEPENDENCY_DRY_RUN",
+      "reason": "The label, synthetic INN/address, and audit chain prove a smoke fixture. It must not receive the production Company scope; cleanup requires separate approval."
+    },
+    {
+      "collection": "counterparty_role_assignments",
+      "id": "CPRA-19e67e15a554df5b2d434852",
+      "action": "UPDATE_SCOPE",
+      "expectedBefore": { "companyId": null, "tenantId": null },
+      "freshBeforeStatus": "NOT_CAPTURED_SSH_HOST_IDENTITY_NOT_VERIFIED",
+      "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "tenantId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "classification": "PRODUCTION_BUSINESS_DATA",
+      "proposedActionAfterApproval": "UPDATE_SCOPE",
+      "reason": "The stable Counterparty relation belongs to the owner-approved real SK Alabuga chain. The explicit scope uses the approved immutable canonical Company ID; no write is authorized."
+    },
+    {
+      "collection": "counterparty_role_assignments",
+      "id": "CPRA-206c0cc4343e162cbfd7dcf6",
+      "action": "UNRESOLVED",
+      "companyId": null,
+      "tenantId": null,
+      "classification": "SMOKE_TEST_FIXTURE",
+      "proposedCleanup": "DEACTIVATE_WITH_PARENT_COUNTERPARTY",
+      "reason": "This active role assignment belongs to the explicit smoke-fixture chain and must not receive the production Company scope."
+    },
+    {
+      "collection": "clients",
+      "id": "C-1787305873917-d5aa12",
+      "action": "UPDATE_SCOPE",
+      "expectedBefore": { "companyId": null, "tenantId": null },
+      "freshBeforeStatus": "NOT_CAPTURED_SSH_HOST_IDENTITY_NOT_VERIFIED",
+      "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "tenantId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "classification": "PRODUCTION_BUSINESS_DATA",
+      "proposedActionAfterApproval": "UPDATE_SCOPE",
+      "reason": "The real Client/Counterparty relationship and Skytech business ownership are owner-approved. The explicit scope uses the approved immutable canonical Company ID; no write is authorized."
+    },
+    {
+      "collection": "client_objects",
+      "id": "CO-1787567867426-2c27d0",
+      "action": "UNRESOLVED",
+      "companyId": null,
+      "tenantId": null,
+      "classification": "SMOKE_TEST_FIXTURE_AND_ARCHIVED_HISTORICAL_ARTIFACT",
+      "proposedCleanup": "DELETE_EXACT_ARCHIVED_FIXTURE_ONLY_IF_FRESH_DEPENDENCY_DRY_RUN_HAS_ZERO_BLOCKERS",
+      "reason": "Audit text identifies a PR #275 production smoke fixture. Its link to the real Client does not convert it into business master data, and it must not receive production scope automatically."
+    },
+    {
+      "collection": "client_objects",
+      "id": "CO-1787567881301-0301ec",
+      "action": "UPDATE_SCOPE",
+      "expectedBefore": { "companyId": null, "tenantId": null },
+      "freshBeforeStatus": "NOT_CAPTURED_SSH_HOST_IDENTITY_NOT_VERIFIED",
+      "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "tenantId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+      "classification": "PRODUCTION_BUSINESS_DATA",
+      "proposedActionAfterApproval": "UPDATE_SCOPE",
+      "reason": "Stable Client and Counterparty links prove the real SK Alabuga object chain. The explicit scope uses the approved immutable canonical Company ID; no write is authorized."
+    },
+    {
+      "collection": "client_objects",
+      "id": "CO-1787585252222-35e4d5",
+      "action": "UNRESOLVED",
+      "companyId": null,
+      "tenantId": null,
+      "classification": "SMOKE_TEST_FIXTURE_AND_ARCHIVED_ORPHAN",
+      "proposedCleanup": "EXACT_ID_HARD_DELETE_IN_SEPARATELY_APPROVED_CLEANUP_WHILE_RETAINING_AUDIT_HISTORY",
+      "reason": "Audit history proves an archived smoke fixture whose smoke Client was explicitly deleted. Do not relink, restore, silently unlink, silently delete, or assign production scope."
+    }
+  ],
+  "relationMappings": [
+    {
+      "collection": "client_objects",
+      "id": "CO-1787585252222-35e4d5",
+      "field": "clientId",
+      "action": "UNRESOLVED",
+      "before": "C-1787585239478-5b4168",
+      "after": null,
+      "reason": "The Client existed as a smoke fixture and was explicitly deleted. Recreate, relink, unlink, and delete are all prohibited without a separate owner decision."
+    }
+  ],
+  "proposedPhaseA": {
+    "status": "NON_EXECUTABLE_PENDING_FRESH_CONFLICT_SCAN_AND_APPROVAL",
+    "create": [
+      {
+        "type": "Company",
+        "id": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+        "before": "MUST_BE_ABSENT",
+        "after": { "displayName": "ООО \"СКАЙТЕХ КОМПАНИ\"", "receivablesTimezone": "Europe/Moscow", "status": "active" },
+        "reason": "Approved authoritative RU INN identity.",
+        "dependencies": ["fresh no-conflict checks for canonical ID and INN", "verified coherent backup", "explicit Phase A approval"]
+      },
+      {
+        "type": "Branch",
+        "id": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+        "before": "MUST_BE_ABSENT",
+        "after": { "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ", "displayName": "Головной офис", "isHeadOffice": true, "status": "active" },
+        "reason": "Approved single operational Head Office.",
+        "dependencies": ["Company create", "no active Head Office or Branch ID conflict"]
+      },
+      {
+        "type": "RoleTemplate",
+        "id": "company-administrator:v1",
+        "before": "MUST_BE_ABSENT",
+        "after": { "displayName": "Company Administrator", "capabilities": ["branches.manage", "companies.manage", "members.manage"] },
+        "reason": "Minimum existing company-scoped administrative capability set.",
+        "dependencies": ["catalog v1 exact-match", "no template-key/version conflict"]
+      },
+      {
+        "type": "RoleTemplate",
+        "id": "office-manager:v1",
+        "before": "MUST_BE_ABSENT",
+        "after": { "displayName": "Office Manager", "capabilities": [] },
+        "reason": "No canonical finance/admin privilege inferred from legacy Office Manager.",
+        "dependencies": ["catalog v1 exact-match", "no template-key/version conflict"]
+      },
+      {
+        "type": "RoleTemplate",
+        "id": "rental-manager:v1",
+        "before": "MUST_BE_ABSENT",
+        "after": { "displayName": "Rental Manager", "capabilities": [] },
+        "reason": "No canonical finance/admin privilege inferred from legacy Rental Manager.",
+        "dependencies": ["catalog v1 exact-match", "no template-key/version conflict"]
+      },
+      {
+        "type": "Membership",
+        "id": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q",
+        "before": "MUST_BE_ABSENT",
+        "after": { "principalId": "1775756913074", "roleTemplate": "company-administrator:v1", "status": "active", "companyWideBranchAuthority": true, "branchIds": [] },
+        "reason": "Approved Company Administrator membership.",
+        "dependencies": ["active eligible user exact-match", "Company", "role template", "no existing Membership for principal"]
+      },
+      {
+        "type": "Membership",
+        "id": "mbr_EYVSFKJBNRTLDU2ZTONKV5QCK37QB7FUARBUM6ORAHDUTMD5UJPA",
+        "before": "MUST_BE_ABSENT",
+        "after": { "principalId": "1776673416137", "roleTemplate": "office-manager:v1", "status": "active", "companyWideBranchAuthority": false, "branchIds": ["brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ"] },
+        "reason": "Approved Head-Office-only Office Manager membership.",
+        "dependencies": ["active eligible user exact-match", "Company", "Head Office", "role template", "no existing Membership for principal"]
+      },
+      {
+        "type": "Membership",
+        "id": "mbr_S2S4CR7EHVLAAEXCFMBML6IUUPAA7V7RCRCPSPB5OEJVZFGINMEA",
+        "before": "MUST_BE_ABSENT",
+        "after": { "principalId": "1787547467703", "roleTemplate": "rental-manager:v1", "status": "active", "companyWideBranchAuthority": false, "branchIds": ["brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ"] },
+        "reason": "Approved Head-Office-only Rental Manager membership.",
+        "dependencies": ["active eligible user exact-match", "Company", "Head Office", "role template", "no existing Membership for principal"]
+      },
+      {
+        "type": "MembershipBranchAccess",
+        "id": "mbr_EYVSFKJBNRTLDU2ZTONKV5QCK37QB7FUARBUM6ORAHDUTMD5UJPA->brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+        "before": "MUST_BE_ABSENT",
+        "after": { "status": "active" },
+        "reason": "Explicit Head Office authority; no automatic future branches.",
+        "dependencies": ["Membership", "Head Office"]
+      },
+      {
+        "type": "MembershipBranchAccess",
+        "id": "mbr_S2S4CR7EHVLAAEXCFMBML6IUUPAA7V7RCRCPSPB5OEJVZFGINMEA->brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+        "before": "MUST_BE_ABSENT",
+        "after": { "status": "active" },
+        "reason": "Explicit Head Office authority; no automatic future branches.",
+        "dependencies": ["Membership", "Head Office"]
+      }
+    ],
+    "update": [
+      "counterparties:CP-1787305873918-cb43be",
+      "counterparty_role_assignments:CPRA-19e67e15a554df5b2d434852",
+      "clients:C-1787305873917-d5aa12",
+      "client_objects:CO-1787567881301-0301ec"
+    ],
+    "wildcardBackfill": false
+  },
+  "proposedPhaseB": {
+    "status": "SEPARATE_APPROVAL_REQUIRED",
+    "includedInPhaseA": false,
+    "mutations": [
+      { "collection": "counterparties", "id": "CP-1787585239479-4a34e4", "action": "ARCHIVE_EXACT_ID", "precondition": "fresh dependency scan and exact current-state match" },
+      { "collection": "counterparty_role_assignments", "id": "CPRA-206c0cc4343e162cbfd7dcf6", "action": "DEACTIVATE_EXACT_ID", "precondition": "parent counterparty archived and no business dependency" },
+      { "collection": "client_objects", "id": "CO-1787567867426-2c27d0", "action": "DELETE_ARCHIVED_FIXTURE_EXACT_ID", "precondition": "fresh zero-dependency result and retained audit evidence" },
+      { "collection": "client_objects", "id": "CO-1787585252222-35e4d5", "action": "DELETE_ARCHIVED_ORPHAN_EXACT_ID", "precondition": "fresh zero-dependency result and retained audit evidence" },
+      { "collection": "clients", "id": "C-1787585239478-5b4168", "action": "NO_ACTION_DO_NOT_RESTORE", "precondition": "record remains absent" }
+    ]
+  },
+  "freshProductionAudit": {
+    "capturedAt": "2026-08-25T09:07:45Z",
+    "status": "BLOCKED_SSH_HOST_IDENTITY_NOT_VERIFIED",
+    "sshAttempted": false,
+    "host": "ssh.railway.com",
+    "hostKeyVerification": "No independently verifiable Railway-published host-key fingerprint or DNS SSHFP was available; local known_hosts contained no pinned entry.",
+    "unsafeOverridesUsed": false,
+    "railwayMetadata": {
+      "projectId": "1558b38d-bf16-4b50-9ee6-0871b7152116",
+      "environmentId": "62833109-61cb-4600-9200-d624d6537a05",
+      "serviceId": "b2016e92-3c50-4b00-800d-625a139b219c",
+      "serviceInstanceNodeId": "c65e56df-cc30-4f8f-bc5a-8d7390089a7c",
+      "deploymentId": "d0d3679d-9f0f-40f8-9f28-cbceaeac0209",
+      "deploymentInstanceId": "2df579d6-50d9-4b2e-8e41-ad851ed6c645",
+      "deploymentStatus": "SUCCESS",
+      "instanceStatus": "RUNNING",
+      "deployedCommit": "1c30e6f7cce61d9d2e42fcbec288e186e215a639",
+      "imageDigest": "sha256:b6c56cb373a9cc075e1ba75e6140fe25575068909c7344b3dbde9869053eb9ce",
+      "volumeId": "48b8768c-a8a9-4a87-8a4b-b980fff5d00c",
+      "mountPath": "/data",
+      "volumeState": "READY"
+    },
+    "volumeFileMetadata": {
+      "app.sqlite": { "sizeBytes": 11927552, "sha256": null },
+      "app.sqlite-wal": { "sizeBytes": 7453112, "sha256": null },
+      "app.sqlite-shm": { "sizeBytes": 32768, "sha256": null }
+    },
+    "databaseEvidence": {
+      "readOnlyConnection": "NOT_OPENED",
+      "pragmaQueryOnly": "NOT_CAPTURED",
+      "totalChanges": "NOT_CAPTURED",
+      "databaseIdentity": "NOT_CAPTURED",
+      "schemaFingerprint": "NOT_CAPTURED",
+      "stateFingerprint": "NOT_CAPTURED",
+      "identityCounts": "NOT_CAPTURED",
+      "collectionCounts": "NOT_CAPTURED",
+      "relationships": "NOT_CAPTURED"
+    }
+  },
+  "expectedPostState": {
+    "status": "TARGET_ONLY_NOT_RECONCILED_AGAINST_FRESH_PRODUCTION",
+    "canonicalCompanies": 1,
+    "activeCanonicalCompanies": 1,
+    "headOffices": 1,
+    "businessMemberships": 3,
+    "activeMembershipsPerApprovedBusinessActor": 1,
+    "membershipBranchAccessRows": 2,
+    "roleTemplates": 3,
+    "roleTemplateCapabilities": 3,
+    "scopedRealCounterparties": 1,
+    "scopedRealRoleAssignments": 1,
+    "scopedRealClients": 1,
+    "scopedRealActiveClientObjects": 1,
+    "smokeRecordsWithBusinessScope": 0,
+    "crossCompanyAnomalies": 0,
+    "tenantCompanyMismatch": 0,
+    "freshProductionDelta": "NOT_COMPUTABLE_SSH_HOST_IDENTITY_NOT_VERIFIED"
+  },
+  "backup": {
+    "verified": false,
+    "reference": null,
+    "sourceDbIdentity": null,
+    "timestamp": null,
+    "sizeBytes": null,
+    "sha256": null,
+    "reason": "A new coherent pre-remediation backup was not created because production writes are prohibited during Stage 1-10."
+  },
+  "canonicalCompanyIdStrategy": {
+    "status": "APPROVED",
+    "format": "cmp_<base32(sha256(canonicalIdentityKey))>",
+    "encoding": "RFC4648_BASE32_UPPERCASE_NO_PADDING",
+    "identity": {
+      "jurisdiction": "RU",
+      "registry": "INN",
+      "value": "1660217548"
+    },
+    "canonicalIdentityKey": "rentcore:company:v1|jurisdiction=RU|registry=INN|value=1660217548",
+    "sha256Hex": "f9026198f378c197e6a565035b0299cac846c58ae97e6fa6209c2c3ca4e6c419",
+    "base32Digest": "7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+    "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+    "tenantId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+    "properties": [
+      "opaque",
+      "deterministic",
+      "immutable",
+      "independentOfDisplayNameAndBrand",
+      "safeForMultipleCompanies"
+    ],
+    "rule": "Compute once from the owner-approved authoritative legal identifier, record the derivation evidence, approve the exact resulting ID, and never recompute it from later display-name or address changes."
+  },
+  "nonSshRemediationPath": {
+    "status": "LOCALLY_IMPLEMENTED_SEPARATE_APPLICATION_RELEASE_REQUIRED",
+    "report": "docs/ssh-independent-production-remediation-2026-08-25.md",
+    "runner": "server/lib/production-scope-remediation-runner.js",
+    "route": "server/routes/production-scope-remediation.js",
+    "workflow": ".github/workflows/production-scope-remediation.yml",
+    "modes": ["preflight", "backup", "apply", "verify"],
+    "sshRequired": false,
+    "productionPreflightExecuted": false,
+    "productionBackupCreated": false,
+    "productionApplyExecuted": false,
+    "productionVerifyExecuted": false
+  },
+  "productionWrites": "NONE",
+  "deploy": "NOT_PERFORMED"
+}

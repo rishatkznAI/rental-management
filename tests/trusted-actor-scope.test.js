@@ -11,6 +11,7 @@ import {
 const require = createRequire(import.meta.url);
 const {
   TENANT_MODEL,
+  assertCompleteActorScope,
   createTrustedActorScopeResolver,
 } = require('../server/lib/trusted-actor-scope.js');
 
@@ -118,4 +119,11 @@ test('trusted actor scope fails closed for missing, ambiguous, or inactive autho
   } finally {
     inactive.close();
   }
+});
+
+test('company is the tenant and an inconsistent injected scope fails closed', () => {
+  assert.throws(
+    () => assertCompleteActorScope({ companyId: 'company-a', tenantId: 'company-b' }),
+    error => error?.code === 'ACTOR_SCOPE_INCOMPLETE',
+  );
 });

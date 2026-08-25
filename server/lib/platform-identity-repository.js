@@ -527,6 +527,12 @@ function createPlatformIdentityRepository(db, options = {}) {
   const generateId = typeof options.generateId === 'function'
     ? options.generateId
     : prefix => `${prefix}-${crypto.randomUUID()}`;
+  const bootstrapTimestamp = typeof options.bootstrapNowIso === 'function'
+    ? options.bootstrapNowIso
+    : bootstrapNowIso;
+  const bootstrapId = typeof options.bootstrapGenerateId === 'function'
+    ? options.bootstrapGenerateId
+    : bootstrapGenerateId;
   const validatedActors = new WeakSet();
 
   function resolveTrustedActor(actorContext, companyId, {
@@ -947,7 +953,7 @@ function createPlatformIdentityRepository(db, options = {}) {
   function insertBootstrapAuditRow(event, timestamp) {
     return insertAuditRow({
       ...event,
-      id: bootstrapGenerateId('authorization-audit'),
+      id: bootstrapId('authorization-audit'),
       occurredAt: timestamp,
       createdAt: timestamp,
     });
@@ -1444,7 +1450,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       fail('PLATFORM_IDENTITY_DUPLICATE_BRANCH_GRANT', 'An active branch grant already exists.');
     }
     const grantId = bootstrap
-      ? bootstrapGenerateId('membership-branch')
+      ? bootstrapId('membership-branch')
       : generateId('membership-branch');
     db.prepare(`
       INSERT INTO ${MEMBERSHIP_BRANCH_ACCESS_TABLE} (
@@ -1603,7 +1609,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       fail('PLATFORM_IDENTITY_CAPABILITY_CONFLICT', 'An active assignment already exists for this capability.');
     }
     const assignmentId = bootstrap
-      ? bootstrapGenerateId('membership-capability')
+      ? bootstrapId('membership-capability')
       : generateId('membership-capability');
     db.prepare(`
       INSERT INTO ${MEMBERSHIP_CAPABILITY_ASSIGNMENTS_TABLE} (
@@ -1928,7 +1934,7 @@ function createPlatformIdentityRepository(db, options = {}) {
       }
 
       const reason = requiredText(approval.approvalReference, 'approval.approvalReference');
-      const timestamp = bootstrapNowIso();
+      const timestamp = bootstrapTimestamp();
       const validatedActor = Object.freeze({
         type: 'user',
         principalId: requiredId(approval.approvedBy, 'approval.approvedBy'),
@@ -1974,7 +1980,7 @@ function createPlatformIdentityRepository(db, options = {}) {
           'Applied authority does not match the approved bootstrap configuration.',
         );
       }
-      const completedAt = bootstrapNowIso();
+      const completedAt = bootstrapTimestamp();
       const summary = {
         authoritySnapshotVersion: AUTHORITY_SNAPSHOT_VERSION,
         authorityFingerprint: actualAuthorityFingerprint,
@@ -1991,7 +1997,7 @@ function createPlatformIdentityRepository(db, options = {}) {
         eligibleActiveUserIds: livePlan.eligibleActiveUserIds,
       };
       const run = {
-        id: requiredId(bootstrapGenerateId('identity-bootstrap'), 'runId'),
+        id: requiredId(bootstrapId('identity-bootstrap'), 'runId'),
         configVersion: requiredVersion(normalized.configVersion, 'configVersion'),
         configChecksum,
         schemaFingerprint: requiredText(livePlan.schemaFingerprint, 'schemaFingerprint'),

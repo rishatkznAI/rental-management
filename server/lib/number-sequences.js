@@ -169,15 +169,22 @@ function ensureNumberSequenceSchema(db) {
 function createNumberSequenceAllocator({
   db,
   scope = resolveServerNumberingScope(),
+  resolveScope = null,
   nowIso = () => new Date().toISOString(),
+  ensureSchema = true,
 } = {}) {
-  ensureNumberSequenceSchema(db);
+  if (ensureSchema) ensureNumberSequenceSchema(db);
   if (typeof db.pragma === 'function') db.pragma('busy_timeout = 10000');
 
-  const trustedScope = Object.freeze({
-    scopeType: normalizeScopePart(scope.scopeType, 'scopeType'),
-    scopeId: normalizeScopePart(scope.scopeId, 'scopeId'),
+  if (resolveScope !== null && typeof resolveScope !== 'function') {
+    throw numberingError('NUMBERING_SCOPE_RESOLVER_INVALID', 'Numbering scope resolver must be a function.');
+  }
+  const normalizeTrustedScope = candidate => Object.freeze({
+    scopeType: normalizeScopePart(candidate?.scopeType, 'scopeType'),
+    scopeId: normalizeScopePart(candidate?.scopeId, 'scopeId'),
   });
+  const staticScope = resolveScope ? null : normalizeTrustedScope(scope);
+  const currentScope = () => normalizeTrustedScope(resolveScope ? resolveScope() : staticScope);
   const findByEntity = db.prepare(`
     SELECT scope_type, scope_id, entity_type, entity_id, year, sequence_value, number, created_at
     FROM business_numbers
@@ -205,9 +212,10 @@ function createNumberSequenceAllocator({
     )
   `);
 
-  const allocateTransaction = db.transaction(({ entityType, entityId, year, now }) => {
+  const allocateTransaction = db.transaction(({ scopeType, scopeId, entityType, entityId, year, now }) => {
     const params = {
-      ...trustedScope,
+      scopeType,
+      scopeId,
       entityType,
       entityId,
       year,
@@ -225,8 +233,8 @@ function createNumberSequenceAllocator({
       number,
     });
     return {
-      scope_type: trustedScope.scopeType,
-      scope_id: trustedScope.scopeId,
+      scope_type: scopeType,
+      scope_id: scopeId,
       entity_type: entityType,
       entity_id: entityId,
       year,
@@ -247,6 +255,7 @@ function createNumberSequenceAllocator({
       ? yearFromIso(now)
       : normalizeSequenceYear(year);
     const row = allocateTransaction.immediate({
+      ...currentScope(),
       entityType: normalizedType,
       entityId: normalizedId,
       year: normalizedYear,
@@ -266,7 +275,7 @@ function createNumberSequenceAllocator({
 
   function find(entityType, entityId) {
     const row = findByEntity.get({
-      ...trustedScope,
+      ...currentScope(),
       entityType: normalizeEntityType(entityType),
       entityId: text(entityId),
     });
@@ -285,7 +294,7 @@ function createNumberSequenceAllocator({
   return Object.freeze({
     allocate,
     find,
-    scope: trustedScope,
+    scope: staticScope,
   });
 }
 

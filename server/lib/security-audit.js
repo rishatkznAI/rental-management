@@ -149,6 +149,11 @@ function createAuditEntry(reqOrUser, {
   if (!action || !entityType) return null;
   const user = reqOrUser?.user || reqOrUser || {};
   const headers = reqOrUser?.headers || {};
+  const companyId = String(reqOrUser?.actorScope?.companyId || user.companyId || '').trim();
+  const tenantId = String(reqOrUser?.actorScope?.tenantId || user.tenantId || '').trim();
+  const trustedScope = companyId && tenantId && companyId === tenantId
+    ? { companyId, tenantId }
+    : {};
   return {
     id: generateId('AUD'),
     userId: user.userId || user.id || null,
@@ -156,6 +161,7 @@ function createAuditEntry(reqOrUser, {
     role: user.userRole || user.role || null,
     rawRole: user.rawRole || user.role || null,
     normalizedRole: user.normalizedRole || user.userRole || user.role || null,
+    ...trustedScope,
     action,
     entityType,
     entityId: entityId || null,

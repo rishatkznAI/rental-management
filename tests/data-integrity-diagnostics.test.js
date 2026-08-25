@@ -135,7 +135,14 @@ test('data integrity diagnostics endpoint requires admin', async () => {
 });
 
 test('admin gets safe data integrity summary', async () => {
+  const state = baseState();
+  state.bot_sessions = [{
+    id: 'GLOBAL-PREAUTH-SESSION',
+    pendingAction: 'login_password',
+    password: 'must-not-cross-tenant-diagnostics',
+  }];
   const app = createApp({
+    state,
     requireAuth: (req, _res, next) => {
       req.user = { id: 'U-admin', role: 'Администратор' };
       next();
@@ -160,6 +167,8 @@ test('admin gets safe data integrity summary', async () => {
       'service',
       'usersBot',
     ]);
+    assert.equal(response.body.domains.usersBot.botSessions, undefined);
+    assert.doesNotMatch(response.text, /GLOBAL-PREAUTH-SESSION|must-not-cross-tenant-diagnostics/);
   });
 });
 

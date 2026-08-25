@@ -10,6 +10,7 @@ function registerAuthRoutes(app, deps) {
     needsPasswordRehash,
     createSession,
     resolveActorScope = () => null,
+    requireActorScopeOnLogin = false,
     requireAuth,
     destroySession,
     deleteSessionsForUserIds,
@@ -120,14 +121,7 @@ function registerAuthRoutes(app, deps) {
       const { user, error: loginError } = resolveUserByLogin(users, loginValue);
 
       if (loginError) {
-        recordFailedLogin(req, loginValue);
-        auditLog?.(req, {
-          action: 'login.fail',
-          entityType: 'auth',
-          entityId: normalizeLoginInput(loginValue) || null,
-          metadata: { reason: 'duplicate_login' },
-        });
-        return res.status(409).json({ ok: false, error: loginError });
+        return rejectLogin(req, res, loginValue, 401, { reason: 'ambiguous_login' });
       }
 
       if (!user) {
@@ -160,6 +154,19 @@ function registerAuthRoutes(app, deps) {
       }
 
       const actorScope = resolveActorScope(user.id);
+      if (requireActorScopeOnLogin && !actorScope) {
+        auditLog?.(req, {
+          action: 'login.fail',
+          entityType: 'auth',
+          entityId: user.id,
+          metadata: { reason: 'actor_scope_incomplete' },
+        });
+        return res.status(403).json({
+          ok: false,
+          code: 'ACTOR_SCOPE_INCOMPLETE',
+          error: 'Trusted company/tenant scope пользователя не настроен.',
+        });
+      }
       const token = createSession(user, actorScope);
       console.log(`[AUTH] Вход: ${user.name} (${user.role})`);
       auditLog?.({ ...req, actorScope, user: buildSessionUser(user, actorScope) }, {
@@ -287,6 +294,10 @@ function registerAuthRoutes(app, deps) {
   app.post('/api/auth/logout-user/:userId', requireAuth, (req, res) => {
     if (req.user?.userRole !== 'Администратор') {
       return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    const visibleUsers = readData('users') || [];
+    if (!visibleUsers.some(user => String(user?.id || '') === String(req.params.userId || ''))) {
+      return res.status(404).json({ ok: false, error: 'User not found' });
     }
     const count = deleteSessionsForUserIds([req.params.userId]);
     auditLog?.(req, {

@@ -70,6 +70,25 @@ test('number sequences are independent by entity, year and trusted scope', t => 
   assert.equal(tenantB.allocate({ entityType: 'RENTAL', entityId: 'R-B-1', year: 2026 }).number, 'RNT-26-000001');
 });
 
+test('dynamic trusted scope resolver isolates a shared allocator by actor company', t => {
+  const { db } = tempDatabase(t);
+  let companyId = 'COMPANY-A';
+  const service = createNumberSequenceAllocator({
+    db,
+    resolveScope: () => ({ scopeType: 'company', scopeId: companyId }),
+    nowIso: () => '2026-08-21T10:00:00.000Z',
+  });
+
+  assert.equal(service.scope, null);
+  assert.equal(service.allocate({ entityType: 'RENTAL', entityId: 'R-A-1' }).number, 'RNT-26-000001');
+  companyId = 'COMPANY-B';
+  assert.equal(service.allocate({ entityType: 'RENTAL', entityId: 'R-B-1' }).number, 'RNT-26-000001');
+  assert.equal(service.find('RENTAL', 'R-A-1'), null);
+  companyId = 'COMPANY-A';
+  assert.equal(service.find('RENTAL', 'R-A-1')?.scopeId, 'COMPANY-A');
+  assert.equal(service.allocate({ entityType: 'RENTAL', entityId: 'R-A-2' }).number, 'RNT-26-000002');
+});
+
 test('year rollover starts at one and does not disturb the prior-year counter', t => {
   const { db } = tempDatabase(t);
   const service = allocator(db);

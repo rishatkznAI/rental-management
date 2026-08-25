@@ -24,7 +24,7 @@ const {
 } = require('../server/lib/counterparty-role-profiles');
 
 const COMPANY = 'COMPANY-A';
-const TENANT = 'TENANT-A';
+const TENANT = 'COMPANY-A';
 const actor = {
   userId: 'U-ADMIN',
   userName: 'Администратор',
@@ -241,7 +241,7 @@ test('15. Cross-company mutation is forbidden', () => {
 
 test('16. Cross-tenant mutation is forbidden', () => {
   const store = makeStore();
-  const foreignActor = { ...actor, tenantId: 'TENANT-B' };
+  const foreignActor = { ...actor, tenantId: 'COMPANY-B' };
   assert.throws(() => store.service().deleteClient({ id: 'C-1', actor: foreignActor }), error => code(error, 'CLIENT_SCOPE_FORBIDDEN'));
 });
 

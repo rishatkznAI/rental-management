@@ -120,8 +120,11 @@ function createWialonIpsGateway({
       status: 'unknown',
       createdAt: receivedAt,
     };
+    const scopedEquipment = findEquipmentForDevice(current, parsed);
     const next = {
       ...current,
+      companyId: scopedEquipment?.companyId || current.companyId || null,
+      tenantId: scopedEquipment?.tenantId || current.tenantId || null,
       imei: parsed.imei,
       protocol: current.protocol || 'WIALON IPS TCP',
       status: 'online',
@@ -141,7 +144,7 @@ function createWialonIpsGateway({
     else devices.unshift(next);
     writeData('gsm_devices', devices);
 
-    const equipment = findEquipmentForDevice(next, parsed);
+    const equipment = scopedEquipment || findEquipmentForDevice(next, parsed);
     if (equipment) {
       const equipmentList = asArray(readData('equipment'));
       const equipmentIndex = equipmentList.findIndex(item => item.id === equipment.id);
@@ -196,6 +199,8 @@ function createWialonIpsGateway({
       deviceId: parsed.deviceId || parsed.imei,
       trackerId: parsed.deviceId || parsed.imei,
       equipmentId: equipment?.id || null,
+      companyId: equipment?.companyId || null,
+      tenantId: equipment?.tenantId || null,
       equipmentLabel: equipmentLabel(equipment),
       connectionId,
       deviceTime: parsed.recordTime || parsed.deviceTime || null,

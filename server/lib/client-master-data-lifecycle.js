@@ -436,6 +436,13 @@ function assertLifecycleScope({ actor, entityType, entity, ownerClient = null, o
       );
     }
   }
+  if (resolved.companyId !== resolved.tenantId) {
+    throw lifecycleError(
+      `${prefix}_SCOPE_CONFLICT`,
+      'Company и tenant сущности должны иметь один canonical ID.',
+      409,
+    );
+  }
   return resolved;
 }
 

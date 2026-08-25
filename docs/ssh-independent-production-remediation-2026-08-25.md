@@ -31,7 +31,7 @@ The route and workflow are pinned to all of the following:
 | SQLite source | `/data/app.sqlite` |
 | Canonical Company / tenant | `cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ` |
 | GitHub repository | `rishatkznAI/rental-management` |
-| Production API origin | `https://api.skytech-rent.ru` |
+| Production API origin | `https://rental-management-production-35bc.up.railway.app` |
 
 The protected workflow proves the volume ID through Railway's control plane and sends the request only to the repository-pinned HTTPS origin without following redirects. The running application independently proves the Railway project, environment, service, volume name, mount path, nonempty replica ID, exact database real path, and exact deployed commit SHA from Railway runtime variables. The signed request binds the control-plane volume ID and every other target field. A mismatch returns fail-closed before any runner is called.
 

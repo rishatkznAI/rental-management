@@ -958,7 +958,13 @@ test('manual workflow is production-protected, target-pinned, and has no deploy 
   assert.match(source, /62833109-61cb-4600-9200-d624d6537a05/);
   assert.match(source, /b2016e92-3c50-4b00-800d-625a139b219c/);
   assert.match(source, /48b8768c-a8a9-4a87-8a4b-b980fff5d00c/);
-  assert.match(source, /PRODUCTION_API_ORIGIN: https:\/\/api\.skytech-rent\.ru/);
+  assert.match(
+    source,
+    /PRODUCTION_API_ORIGIN: https:\/\/rental-management-production-35bc\.up\.railway\.app/,
+  );
+  assert.doesNotMatch(source, /api\.skytech-rent\.ru/);
+  assert.doesNotMatch(source, /--location\b/);
+  assert.doesNotMatch(source, /\bwrangler\b/);
   assert.match(source, /\(\$services \| length\) == 1/);
   assert.match(source, /\(\$volumes \| length\) == 1/);
   assert.match(source, /select\(\.volume\.name == \$volumeName\)/);

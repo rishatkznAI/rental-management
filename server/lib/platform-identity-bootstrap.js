@@ -35,6 +35,8 @@ function applyPlatformIdentityBootstrap(db, config, options = {}) {
 
   const repository = createPlatformIdentityRepository(db, {
     readUsers: () => readUsersDirectorySnapshot(db).users,
+    bootstrapNowIso: options.bootstrapNowIso,
+    bootstrapGenerateId: options.bootstrapGenerateId,
   });
   return repository.applyBootstrapPlan(plan);
 }

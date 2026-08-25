@@ -500,6 +500,14 @@ function requiredMasterDataScope(record, entityType) {
       { entityId: record?.id || null },
     );
   }
+  if (companyId !== tenantId) {
+    throw counterpartyError(
+      'ACTOR_SCOPE_INCOMPLETE',
+      `${entityType} companyId and tenantId must be the same canonical Company ID.`,
+      403,
+      { entityId: record?.id || null },
+    );
+  }
   return { companyId, tenantId };
 }
 

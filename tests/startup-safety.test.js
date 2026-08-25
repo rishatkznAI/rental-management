@@ -226,6 +226,47 @@ test('server start disables only business maintenance by default', async () => {
   assert.equal(warnings.some(message => message.includes(`${STARTUP_BUSINESS_MAINTENANCE_ENV}=apply`)), true);
 });
 
+test('production scope write freeze skips every startup mutation hook', async () => {
+  const state = {
+    rentals: [],
+    gantt_rentals: [],
+    payments: [],
+    payment_allocations: [],
+    documents: [],
+    crm_deals: [],
+    service: [],
+    warranty_claims: [],
+    app_settings: [],
+    knowledge_base_progress: [],
+  };
+  const events = await startAndClose({
+    state,
+    envValue: 'apply',
+    logger: { log: () => {}, warn: () => {}, error: () => {} },
+    configureDeps(deps) {
+      deps.productionScopeWriteFreezeEnabled = true;
+    },
+  });
+  for (const forbidden of [
+    'migrateJsonFilesToDb',
+    'cleanupExpiredSessions',
+    'seedDefaultUsers',
+    'ensureLegacyDefaultUsers',
+    'migrateReferenceCollections',
+    'migrateLegacyRepairFacts',
+    'backfillPaymentAllocations',
+    'applyAdminResetFromEnv',
+    'registerWebhook',
+    'startWebhookWatchdog',
+    'startBotPolling',
+    'startGprsGateway',
+    'startWialonIpsGateway',
+  ]) {
+    assert.equal(events.calls.includes(forbidden), false, forbidden);
+  }
+  assert.deepEqual(events.writes, []);
+});
+
 test('startup refuses to listen when active external Warranty factory relations are unresolved', async () => {
   const state = { warranty_claims: [{ id: 'W-blocked', status: 'factory_review' }] };
   const events = { calls: [], writes: [] };

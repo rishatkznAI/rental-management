@@ -40,7 +40,7 @@ function createState(overrides = {}) {
 function createApp(state = createState(), {
   actorScope = {
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
     membershipId: 'MEMBERSHIP-A',
     principalId: 'U-admin',
     source: 'test_active_company_membership',
@@ -48,20 +48,36 @@ function createApp(state = createState(), {
   denyWrite = false,
   auditLog = () => {},
 } = {}) {
-  for (const collection of ['counterparties', 'clients', 'client_objects']) {
+  for (const collection of [
+    'counterparties',
+    'counterparty_role_assignments',
+    'supplier_profiles',
+    'contractor_profiles',
+    'clients',
+    'client_objects',
+    'client_contracts',
+  ]) {
     for (const record of state[collection] || []) {
       record.companyId ||= 'COMPANY-A';
-      record.tenantId ||= 'TENANT-A';
+      record.tenantId ||= 'COMPANY-A';
     }
   }
   const app = express();
   app.use(express.json());
   const readData = name => {
     const rows = state[name] || [];
-    if (['counterparties', 'clients', 'client_objects'].includes(name)) {
+    if ([
+      'counterparties',
+      'counterparty_role_assignments',
+      'supplier_profiles',
+      'contractor_profiles',
+      'clients',
+      'client_objects',
+      'client_contracts',
+    ].includes(name)) {
       for (const record of rows) {
         record.companyId ||= 'COMPANY-A';
-        record.tenantId ||= 'TENANT-A';
+        record.tenantId ||= 'COMPANY-A';
       }
     }
     return rows;
@@ -81,7 +97,7 @@ function createApp(state = createState(), {
         userName: 'Админ',
         userRole: 'Администратор',
         companyId: 'COMPANY-A',
-        tenantId: 'TENANT-A',
+        tenantId: 'COMPANY-A',
       };
       req.actorScope = actorScope;
       next();
@@ -132,7 +148,7 @@ test('Counterparty API creates, reads and updates a stable entity with customer 
     assert.equal(created.body.id, 'CP-1');
     assert.equal(created.body.inn, '1655123456');
     assert.equal(created.body.companyId, 'COMPANY-A');
-    assert.equal(created.body.tenantId, 'TENANT-A');
+    assert.equal(created.body.tenantId, 'COMPANY-A');
     assert.deepEqual(created.body.roles, ['customer', 'supplier']);
     const stableId = created.body.id;
 
@@ -151,10 +167,10 @@ test('Counterparty API creates, reads and updates a stable entity with customer 
 
   assert.equal(state.counterparties.length, 1);
   assert.ok(state.counterparty_role_assignments.every(item => (
-    item.companyId === 'COMPANY-A' && item.tenantId === 'TENANT-A'
+    item.companyId === 'COMPANY-A' && item.tenantId === 'COMPANY-A'
   )));
   assert.ok(state.supplier_profiles.every(item => (
-    item.companyId === 'COMPANY-A' && item.tenantId === 'TENANT-A'
+    item.companyId === 'COMPANY-A' && item.tenantId === 'COMPANY-A'
   )));
 });
 
@@ -549,7 +565,7 @@ test('explicit Client mapping can add customer role to the same supplier Counter
   const supplier = {
     id: 'CP-supplier',
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
     ...legalEntity({ roles: ['supplier'] }),
     inn: '1655123456',
     status: 'active',
@@ -561,7 +577,7 @@ test('explicit Client mapping can add customer role to the same supplier Counter
     client: {
       id: 'C-1',
       companyId: 'COMPANY-A',
-      tenantId: 'TENANT-A',
+      tenantId: 'COMPANY-A',
       counterpartyId: supplier.id,
       company: supplier.shortName,
       legalName: supplier.legalName,
@@ -584,7 +600,7 @@ test('Client customer notes remain profile-specific and never overwrite Counterp
     client: {
       id: 'C-notes',
       companyId: 'COMPANY-A',
-      tenantId: 'TENANT-A',
+      tenantId: 'COMPANY-A',
       company: 'ООО Профиль',
       inn: '1655123456',
       notes: 'Условия работы только для customer profile',
@@ -613,7 +629,7 @@ test('foundation repairs customer role for an explicitly linked Client without c
   const supplier = {
     id: 'CP-explicit',
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
     ...legalEntity({ roles: ['supplier'] }),
     inn: '1655123456',
     status: 'active',
@@ -626,7 +642,7 @@ test('foundation repairs customer role for an explicitly linked Client without c
     clients: [{
       id: 'C-explicit',
       companyId: 'COMPANY-A',
-      tenantId: 'TENANT-A',
+      tenantId: 'COMPANY-A',
       counterpartyId: supplier.id,
       company: supplier.shortName,
       legalName: supplier.legalName,
@@ -744,7 +760,7 @@ test('Client creation never attaches by matching name or INN', () => {
   const existing = {
     id: 'CP-existing',
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
     ...legalEntity({ roles: ['supplier'] }),
     inn: '1655123456',
     status: 'active',
@@ -757,7 +773,7 @@ test('Client creation never attaches by matching name or INN', () => {
     client: {
       id: 'C-new',
       companyId: 'COMPANY-A',
-      tenantId: 'TENANT-A',
+      tenantId: 'COMPANY-A',
       company: 'ООО Ромашка',
       inn: '1655123456',
     },
@@ -776,7 +792,7 @@ test('deterministic scoped Client migration is idempotent and never rewrites oth
     clients: [{
       id: 'C-legacy',
       companyId: 'COMPANY-A',
-      tenantId: 'TENANT-A',
+      tenantId: 'COMPANY-A',
       company: 'ООО Легаси',
       inn: '7700654321',
       email: 'legacy@example.test',

@@ -135,6 +135,7 @@ const {
   getAppDisabledConfig,
   getBotDisabledConfig,
   getGsmDisabledConfig,
+  isProductionScopeWriteFreezeEnabled,
   isCanonicalReceivablesReadApiEnabled,
   isForecastReceivablesReadApiEnabled,
   sendAppDisabled,
@@ -177,6 +178,15 @@ const {
   createTrustedActorScopeResolver,
   resolveOptionalActorScope,
 } = require('./lib/trusted-actor-scope');
+const {
+  createTenantDataBoundary,
+  currentTenantContext,
+  runWithDeniedTenantScope,
+  runWithTenantActorScope,
+} = require('./lib/tenant-data-boundary');
+const {
+  assertTenantRelationships,
+} = require('./lib/tenant-relationship-guard');
 const { registerCrmActivityRoutes } = require('./routes/crm-activities');
 const { registerDebtCollectionPlanRoutes } = require('./routes/debt-collection-plans');
 const { registerDeliveryRoutes } = require('./routes/deliveries');
@@ -195,6 +205,9 @@ const { registerServiceRoutes } = require('./routes/service');
 const { registerStaffRoutes } = require('./routes/staff');
 const { registerSystemRoutes } = require('./routes/system');
 const { registerSkytechCleanResetRoutes } = require('./routes/skytech-clean-reset');
+const {
+  registerProductionScopeRemediationRoutes,
+} = require('./routes/production-scope-remediation');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
 const { registerCanonicalReceivablesReadRoutes } = require('./routes/canonical-receivables-read');
 const { registerForecastReceivablesReadRoutes } = require('./routes/forecast-receivables-read');
@@ -222,7 +235,6 @@ const {
 } = require('./lib/business-numbering');
 const {
   createNumberSequenceAllocator,
-  resolveServerNumberingScope,
 } = require('./lib/number-sequences');
 const {
   DB_PATH,
@@ -403,6 +415,7 @@ const DELIVERY_BOT_WEBHOOK_PATH = '/bot/webhook/delivery';
 const appDisabledConfig = getAppDisabledConfig();
 const botDisabledConfig = getBotDisabledConfig();
 const gsmDisabledConfig = getGsmDisabledConfig();
+const productionScopeWriteFreezeEnabled = isProductionScopeWriteFreezeEnabled();
 
 function normalizeBotToken(value) {
   return String(value || '').trim();
@@ -448,18 +461,51 @@ function logMaxBotRuntimeConfig() {
 
 logMaxBotRuntimeConfig();
 
+function readRawData(name) {
+  return getData(name);
+}
+
+function writeRawData(name, data) {
+  return setData(name, data);
+}
+
+function writeRawDataBatch(entries) {
+  return setDataBatch(entries);
+}
+
+const tenantDataBoundary = createTenantDataBoundary({
+  db: ensureDb(),
+  readRawData,
+  writeRawData,
+  writeRawDataBatch,
+  assertRelationships: assertTenantRelationships,
+});
+
+function readData(name) {
+  return tenantDataBoundary.readData(name);
+}
+
 const numberSequenceAllocator = createNumberSequenceAllocator({
   db: ensureDb(),
-  scope: resolveServerNumberingScope(process.env),
+  ensureSchema: !productionScopeWriteFreezeEnabled,
+  resolveScope: () => {
+    const context = currentTenantContext();
+    if (context?.kind !== 'tenant_actor') {
+      const error = new Error('Trusted tenant actor scope is required for business numbering.');
+      error.code = 'ACTOR_SCOPE_INCOMPLETE';
+      error.status = 403;
+      throw error;
+    }
+    return {
+      scopeType: 'company',
+      scopeId: context.actorScope.companyId,
+    };
+  },
 });
 const businessNumbering = createBusinessNumberingService({
   allocator: numberSequenceAllocator,
   readData,
 });
-
-function readData(name) {
-  return getData(name);
-}
 
 function writeData(name, data) {
   const numberedEntries = businessNumbering.preparePersistenceEntries([{ name, value: data }]);
@@ -474,7 +520,7 @@ function writeData(name, data) {
   assertPaymentAllocationPersistenceEntriesSafe(finalEntries, { readData });
   businessNumbering.preparePersistenceEntries(finalEntries);
   const [entry] = finalEntries;
-  setData(entry.name, entry.value);
+  tenantDataBoundary.writeData(entry.name, entry.value);
 }
 
 function writeDataBatch(entries) {
@@ -486,7 +532,7 @@ function writeDataBatch(entries) {
   const finalEntries = canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData });
   assertPaymentAllocationPersistenceEntriesSafe(finalEntries, { readData });
   businessNumbering.preparePersistenceEntries(finalEntries);
-  setDataBatch(finalEntries);
+  tenantDataBoundary.writeDataBatch(finalEntries);
 }
 
 const accessControl = createAccessControl({ readData });
@@ -610,10 +656,12 @@ function destroySession(token) {
 }
 
 // Чистим протухшие сессии каждый час
-const sessionCleanupTimer = setInterval(() => {
-  cleanupExpiredSessions();
-}, 3600_000);
-sessionCleanupTimer.unref?.();
+if (!productionScopeWriteFreezeEnabled) {
+  const sessionCleanupTimer = setInterval(() => {
+    cleanupExpiredSessions();
+  }, 3600_000);
+  sessionCleanupTimer.unref?.();
+}
 
 // ── RBAC ──────────────────────────────────────────────────────────────────────
 
@@ -748,7 +796,9 @@ function requireAuth(req, res, next) {
   if (!session) {
     return res.status(401).json({ ok: false, error: 'Session expired or invalid' });
   }
-  const users = readData('users') || [];
+  // Authentication is the sole caller allowed to inspect the credential root
+  // before actor scope exists. Directory endpoints use tenant-scoped readData.
+  const users = readRawData('users') || [];
   const currentUser = users.find(item => item.id === session.userId);
   if (!currentUser || currentUser.status !== 'Активен') {
     destroySession(token);
@@ -771,12 +821,24 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ ok: false, error: 'Carrier account is available in MAX bot only' });
   }
   const liveActorScope = resolveOptionalActorScope(resolveTrustedActorScope, currentUser.id);
+  if (!liveActorScope) {
+    return res.status(403).json({
+      ok: false,
+      code: 'ACTOR_SCOPE_INCOMPLETE',
+      error: 'Trusted company/tenant scope пользователя не настроен.',
+    });
+  }
   const storedActorScope = session.actorScope;
   const actorScopeChanged = Boolean(storedActorScope && liveActorScope) && (
     storedActorScope.companyId !== liveActorScope.companyId
     || storedActorScope.tenantId !== liveActorScope.tenantId
     || storedActorScope.membershipId !== liveActorScope.membershipId
+    || Number(storedActorScope.membershipVersion) !== Number(liveActorScope.membershipVersion)
   );
+  if (actorScopeChanged) {
+    destroySession(token);
+    return res.status(401).json({ ok: false, error: 'Session scope changed; sign in again.' });
+  }
   req.actorScope = actorScopeChanged ? null : liveActorScope;
   const { actorScope: _storedActorScope, ...sessionIdentity } = session;
   req.user = {
@@ -797,7 +859,7 @@ function requireAuth(req, res, next) {
       tenantId: req.actorScope.tenantId,
     } : {}),
   };
-  next();
+  return runWithTenantActorScope(req.actorScope, next);
 }
 
 function requireWrite(collection) {
@@ -818,6 +880,17 @@ function requireRole(...roles) {
     }
     next();
   };
+}
+
+function requirePlatformOperator(_req, res) {
+  // Platform backups and infrastructure diagnostics are intentionally not
+  // reachable through a tenant user session. Operators use the external
+  // infrastructure/CLI plane with its own credentials and audit trail.
+  return res.status(403).json({
+    ok: false,
+    code: 'PLATFORM_OPERATOR_REQUIRED',
+    error: 'This operation is reserved for the external platform operations plane.',
+  });
 }
 
 function canReadCollection(req, collection) {
@@ -1054,8 +1127,9 @@ function requireAdmin(req, res, next) {
 
 function sanitizeUser(user) {
   if (!user) return user;
-  const { password, ...safeUser } = user;
-  return safeUser;
+  return Object.fromEntries(Object.entries(user).filter(([key]) => (
+    !/(password|passhash|token|secret|session|cookie|authorization|api[_-]?key)/i.test(key)
+  )));
 }
 
 function publicUserView(user) {
@@ -1377,19 +1451,6 @@ const clientMasterDataLifecycle = createClientMasterDataLifecycleService({
   nowIso,
 });
 
-registerCounterpartyRoutes(apiRouter, {
-  readData,
-  writeData,
-  writeDataBatch,
-  requireAuth,
-  requireRead,
-  requireWrite,
-  generateId,
-  nowIso,
-  auditLog,
-  clientMasterDataLifecycle,
-});
-
 const COLLECTIONS = [
   'equipment',
   'equipment_downtimes',
@@ -1437,6 +1498,7 @@ registerAuthRoutes(app, {
   needsPasswordRehash,
   createSession,
   resolveActorScope: principalId => resolveOptionalActorScope(resolveTrustedActorScope, principalId),
+  requireActorScopeOnLogin: true,
   requireAuth,
   destroySession,
   deleteSessionsForUserIds,
@@ -1461,9 +1523,42 @@ registerSkytechCleanResetRoutes(apiRouter, {
   getGsmDisabledConfig: () => gsmDisabledConfig,
 });
 
+// This disabled-by-default operations surface never runs remediation at startup.
+// It is registered before conservation middleware only so separately approved,
+// token-gated backup/apply/verify requests remain reachable while writes are frozen.
+registerProductionScopeRemediationRoutes(apiRouter, {
+  dbPath: DB_PATH,
+  ensureDb,
+  readData: readRawData,
+  createSqliteBackup,
+  collections: JSON_COLLECTIONS,
+  buildInfo: getBuildInfo,
+  getConservationState: () => ({
+    appDisabled: appDisabledConfig.disabled,
+    botDisabled: botDisabledConfig.disabled,
+    gsmDisabled: gsmDisabledConfig.disabled,
+    storageWriteGuardEnabled: productionScopeWriteFreezeEnabled,
+    cleanResetDisabled: process.env.SKYTECH_CLEAN_RESET_ENABLED !== 'true',
+    adminResetDisabled: !String(process.env.ADMIN_RESET_PASSWORD || ''),
+  }),
+});
+
 apiRouter.use(createAppDisabledMiddleware({
   getConfig: () => appDisabledConfig,
 }));
+
+registerCounterpartyRoutes(apiRouter, {
+  readData,
+  writeData,
+  writeDataBatch,
+  requireAuth,
+  requireRead,
+  requireWrite,
+  generateId,
+  nowIso,
+  auditLog,
+  clientMasterDataLifecycle,
+});
 
 apiRouter.use(registerClientMasterDataRoutes({
   lifecycle: clientMasterDataLifecycle,
@@ -1856,6 +1951,9 @@ const {
   auditLog,
   serviceAuditLog,
   notificationService: botNotifications,
+  resolveActorScope: principalId => resolveOptionalActorScope(resolveTrustedActorScope, principalId),
+  readAuthUsers: () => readRawData('users') || [],
+  withActorScope: runWithTenantActorScope,
 });
 
 const managerBotHandlers = createBotHandlers({
@@ -1890,6 +1988,9 @@ const managerBotHandlers = createBotHandlers({
   auditLog,
   serviceAuditLog,
   notificationService: botNotifications,
+  resolveActorScope: principalId => resolveOptionalActorScope(resolveTrustedActorScope, principalId),
+  readAuthUsers: () => readRawData('users') || [],
+  withActorScope: runWithTenantActorScope,
 });
 
 const deliveryBotHandlers = createBotHandlers({
@@ -1925,6 +2026,9 @@ const deliveryBotHandlers = createBotHandlers({
   auditLog,
   serviceAuditLog,
   notificationService: botNotifications,
+  resolveActorScope: principalId => resolveOptionalActorScope(resolveTrustedActorScope, principalId),
+  readAuthUsers: () => readRawData('users') || [],
+  withActorScope: runWithTenantActorScope,
 });
 
 function getMoscowDateParts(date = new Date()) {
@@ -1963,10 +2067,21 @@ async function sendRentalManagerMorningDigests() {
     if (!user.replyTarget) continue;
     if (user.lastManagerDigestDate === dateKey) continue;
 
+    const actorScope = user.userId
+      ? resolveOptionalActorScope(resolveTrustedActorScope, user.userId)
+      : null;
+    if (
+      !actorScope
+      || user.companyId !== actorScope.companyId
+      || user.tenantId !== actorScope.tenantId
+    ) continue;
+
     try {
-      await sendMessage(user.replyTarget, buildManagerMorningSummaryMessage(user), {
-        attachments: getDefaultKeyboardForRole(user.userRole),
-      });
+      await runWithTenantActorScope(actorScope, () => sendMessage(
+        user.replyTarget,
+        buildManagerMorningSummaryMessage(user),
+        { attachments: getDefaultKeyboardForRole(user.userRole) },
+      ));
       botUsers[phone] = {
         ...user,
         lastManagerDigestDate: dateKey,
@@ -1995,10 +2110,23 @@ async function runBotNotificationSchedulerTick(reason = 'interval') {
   if (botDisabledConfig.disabled) {
     return { ok: true, disabled: true, events: 0 };
   }
-  const result = await botNotifications.runScheduledNotifications();
-  if (result?.events) {
-    console.log(`[BOT] notification scheduler ${reason}: events=${result.events}`);
+  const scopes = new Map();
+  for (const user of Object.values(readRawData('bot_users') || {})) {
+    if (!user?.userId) continue;
+    const scope = resolveOptionalActorScope(resolveTrustedActorScope, user.userId);
+    if (!scope || user.companyId !== scope.companyId || user.tenantId !== scope.tenantId) continue;
+    scopes.set(scope.companyId, scope);
   }
+  let events = 0;
+  for (const scope of scopes.values()) {
+    const result = await runWithTenantActorScope(
+      scope,
+      () => botNotifications.runScheduledNotifications(),
+    );
+    events += Number(result?.events) || 0;
+  }
+  if (events) console.log(`[BOT] notification scheduler ${reason}: events=${events}`);
+  return { ok: true, events, tenants: scopes.size };
 }
 
 startBotNotificationScheduler({
@@ -2009,6 +2137,7 @@ startBotNotificationScheduler({
 const BOT_ACTIVITY_LIMIT = 2000;
 
 function recordBotDisabledActivity({ webhookPath = '', updateTypes = [], updatesCount = 0 } = {}) {
+  if (productionScopeWriteFreezeEnabled) return;
   const activity = getBotActivity();
   activity.unshift({
     id: generateId('botact'),
@@ -2036,6 +2165,22 @@ function trimBotAuditText(value, maxLength = 160) {
 function toBotNumber(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function resolveBotActorScope(phone) {
+  const linked = (readRawData('bot_users') || {})[String(phone || '')] || null;
+  if (!linked?.userId) return null;
+  const scope = resolveOptionalActorScope(resolveTrustedActorScope, linked.userId);
+  if (!scope) return null;
+  if (linked.companyId !== scope.companyId || linked.tenantId !== scope.tenantId) return null;
+  return scope;
+}
+
+function runWithBotActorScope(phone, operation) {
+  const scope = resolveBotActorScope(phone);
+  return scope
+    ? runWithTenantActorScope(scope, operation)
+    : runWithDeniedTenantScope(operation);
 }
 
 function syncBotConnection(phone, senderId, previousUser = null) {
@@ -2080,26 +2225,35 @@ function recordBotActivity({
   user = null,
 }) {
   const phoneKey = String(phone || '');
-  const linkedUser = user || getBotUsers()[phoneKey] || null;
+  const rawLinkedUser = user || (readRawData('bot_users') || {})[phoneKey] || null;
+  const actorScope = rawLinkedUser?.userId
+    ? resolveOptionalActorScope(resolveTrustedActorScope, rawLinkedUser.userId)
+    : null;
+  if (
+    !actorScope
+    || rawLinkedUser.companyId !== actorScope.companyId
+    || rawLinkedUser.tenantId !== actorScope.tenantId
+  ) {
+    return null;
+  }
   const timestamp = nowIso();
-
-  appendBotActivity({
-    id: generateId('botact'),
-    botId: 'max',
-    phone: phoneKey || null,
-    maxUserId: linkedUser?.maxUserId ?? toBotNumber(phoneKey) ?? toBotNumber(senderId?.user_id),
-    userId: linkedUser?.userId || null,
-    userName: linkedUser?.userName || null,
-    userRole: linkedUser?.userRole || null,
-    role: linkedUser?.role || null,
-    carrierId: linkedUser?.carrierId || null,
-    email: linkedUser?.email || null,
-    eventType,
-    action: trimBotAuditText(action),
-    details: details ? trimBotAuditText(details, 220) : null,
-    timestamp,
-    createdAt: timestamp,
-  });
+  return runWithTenantActorScope(actorScope, () => appendBotActivity({
+      id: generateId('botact'),
+      botId: 'max',
+      phone: phoneKey || null,
+      maxUserId: rawLinkedUser?.maxUserId ?? toBotNumber(phoneKey) ?? toBotNumber(senderId?.user_id),
+      userId: rawLinkedUser?.userId || null,
+      userName: rawLinkedUser?.userName || null,
+      userRole: rawLinkedUser?.userRole || null,
+      role: rawLinkedUser?.role || null,
+      carrierId: rawLinkedUser?.carrierId || null,
+      email: rawLinkedUser?.email || null,
+      eventType,
+      action: trimBotAuditText(action),
+      details: details ? trimBotAuditText(details, 220) : null,
+      timestamp,
+      createdAt: timestamp,
+    }));
 }
 
 function describeBotMessage(text, session = {}, attachments = []) {
@@ -2163,64 +2317,73 @@ function describeBotCallback(payload) {
 }
 
 async function auditedHandleBotStarted(senderId, phone, payload) {
-  recordBotActivity({
-    phone,
-    senderId,
-    eventType: 'session_started',
-    action: 'Пользователь открыл бота',
-    details: payload ? `Payload: ${payload}` : null,
-  });
-  return handleBotStarted(senderId, phone, payload);
-}
-
-async function auditedHandleCommand(senderId, phone, text, messageMeta, uiContext) {
-  const phoneKey = String(phone || '');
-  const session = getBotSessions()[phoneKey] || {};
-  const beforeUser = getBotUsers()[phoneKey] || null;
-  const event = describeBotMessage(text, session, messageMeta?.attachments);
-
-  recordBotActivity({
-    phone,
-    senderId,
-    eventType: event.eventType,
-    action: event.action,
-    details: event.details,
-    user: beforeUser,
-  });
-
-  const result = await handleCommand(senderId, phone, text, messageMeta, uiContext);
-  const afterUser = syncBotConnection(phone, senderId, beforeUser);
-
-  if (afterUser?.userId && (!beforeUser || beforeUser.userId !== afterUser.userId)) {
+  return runWithBotActorScope(phone, async () => {
     recordBotActivity({
       phone,
       senderId,
-      eventType: 'authorization',
-      action: beforeUser ? 'Пользователь переподключил бота' : 'Пользователь подключил бота',
-      details: afterUser.userName ? `Сотрудник: ${afterUser.userName}` : null,
-      user: afterUser,
+      eventType: 'session_started',
+      action: 'Пользователь открыл бота',
+      details: payload ? `Payload: ${payload}` : null,
     });
-  }
+    return handleBotStarted(senderId, phone, payload);
+  });
+}
 
-  return result;
+async function auditedHandleCommand(senderId, phone, text, messageMeta, uiContext) {
+  return runWithBotActorScope(phone, async () => {
+    const phoneKey = String(phone || '');
+    const session = getBotSessions()[phoneKey] || {};
+    const beforeUser = getBotUsers()[phoneKey] || null;
+    const event = describeBotMessage(text, session, messageMeta?.attachments);
+
+    recordBotActivity({
+      phone,
+      senderId,
+      eventType: event.eventType,
+      action: event.action,
+      details: event.details,
+      user: beforeUser,
+    });
+
+    const result = await handleCommand(senderId, phone, text, messageMeta, uiContext);
+    const afterScope = resolveBotActorScope(phone);
+    const afterUser = afterScope
+      ? runWithTenantActorScope(afterScope, () => syncBotConnection(phone, senderId, beforeUser))
+      : null;
+
+    if (afterUser?.userId && (!beforeUser || beforeUser.userId !== afterUser.userId)) {
+      recordBotActivity({
+        phone,
+        senderId,
+        eventType: 'authorization',
+        action: beforeUser ? 'Пользователь переподключил бота' : 'Пользователь подключил бота',
+        details: afterUser.userName ? `Сотрудник: ${afterUser.userName}` : null,
+        user: afterUser,
+      });
+    }
+
+    return result;
+  });
 }
 
 async function auditedHandleCallback(senderId, phone, payload, callbackContext) {
-  const beforeUser = getBotUsers()[String(phone || '')] || null;
-  const event = describeBotCallback(payload);
+  return runWithBotActorScope(phone, async () => {
+    const beforeUser = getBotUsers()[String(phone || '')] || null;
+    const event = describeBotCallback(payload);
 
-  recordBotActivity({
-    phone,
-    senderId,
-    eventType: event.eventType,
-    action: event.action,
-    details: event.details,
-    user: beforeUser,
+    recordBotActivity({
+      phone,
+      senderId,
+      eventType: event.eventType,
+      action: event.action,
+      details: event.details,
+      user: beforeUser,
+    });
+
+    const result = await handleCallback(senderId, phone, payload, callbackContext);
+    syncBotConnection(phone, senderId, beforeUser);
+    return result;
   });
-
-  const result = await handleCallback(senderId, phone, payload, callbackContext);
-  syncBotConnection(phone, senderId, beforeUser);
-  return result;
 }
 
 const pollingBotUpdateProcessor = createBotUpdateProcessor({
@@ -2834,6 +2997,7 @@ registerSystemRoutes(app, {
   webhookUrl: WEBHOOK_URL,
   requireAuth,
   requireAdmin,
+  requirePlatformOperator,
   fetchImpl: fetch,
   auditLog,
   analyzeGanttRentalLinks,
@@ -2888,6 +3052,7 @@ startServer({
     startWialonIpsGateway: () => wialonIpsGateway.start(),
     dbPath: DB_PATH,
     botToken: BOT_TOKEN,
+    productionScopeWriteFreezeEnabled,
     readData,
     writeData,
     normalizeClientLinks,

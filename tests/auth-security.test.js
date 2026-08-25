@@ -124,7 +124,7 @@ test('inactive user cannot login', async () => {
   assert.deepEqual(res.payload, { ok: false, error: 'Неверный логин или пароль' });
 });
 
-test('duplicate email local part blocks login', async () => {
+test('duplicate email local part blocks login without disclosing directory ambiguity', async () => {
   process.env.LOGIN_FAILURE_DELAY_MS = '0';
   const state = {
     users: [
@@ -136,11 +136,8 @@ test('duplicate email local part blocks login', async () => {
 
   const res = await runLogin(login, { login: 'manager', password: 'right' });
 
-  assert.equal(res.statusCode, 409);
-  assert.deepEqual(res.payload, {
-    ok: false,
-    error: 'Найдено несколько пользователей с таким логином. Обратитесь к администратору',
-  });
+  assert.equal(res.statusCode, 401);
+  assert.deepEqual(res.payload, { ok: false, error: 'Неверный логин или пароль' });
 });
 
 test('frontend login is unavailable for bot-only carrier accounts', async () => {

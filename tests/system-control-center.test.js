@@ -53,7 +53,14 @@ function createApp({ role = 'Администратор', authenticated = true, 
   const state = createState();
   app.use(express.json());
   registerSystemRoutes(app, {
-    readData: name => state[name] || [],
+    readData: name => {
+      const rows = state[name] || [];
+      for (const record of rows) {
+        record.companyId ||= 'COMPANY-A';
+        record.tenantId ||= 'COMPANY-A';
+      }
+      return rows;
+    },
     writeData,
     getSnapshot: () => ({}),
     saveSnapshot: () => {},
@@ -64,7 +71,15 @@ function createApp({ role = 'Администратор', authenticated = true, 
     webhookUrl: '',
     requireAuth: (req, res, next) => {
       if (!authenticated) return res.status(401).json({ ok: false, error: 'Unauthorized' });
-      req.user = { userId: 'U-1', userName: 'Admin', userRole: role, email: 'admin@example.test' };
+      req.user = {
+        userId: 'U-1',
+        userName: 'Admin',
+        userRole: role,
+        email: 'admin@example.test',
+        companyId: 'COMPANY-A',
+        tenantId: 'COMPANY-A',
+      };
+      req.actorScope = { companyId: 'COMPANY-A', tenantId: 'COMPANY-A' };
       return next();
     },
     requireAdmin: (req, res, next) => (
@@ -72,6 +87,7 @@ function createApp({ role = 'Администратор', authenticated = true, 
         ? next()
         : res.status(403).json({ ok: false, error: 'Forbidden' })
     ),
+    requirePlatformOperator: (_req, _res, next) => next(),
     getBuildInfo: () => ({
       commit: '74b614626f0c06b157ad166944f506d432c7257e',
       buildTime: '2026-05-22T00:00:00.000Z',

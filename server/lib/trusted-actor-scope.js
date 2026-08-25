@@ -43,6 +43,11 @@ function assertCompleteActorScope(scope) {
   const companyId = scopeText(scope?.companyId);
   const tenantId = scopeText(scope?.tenantId);
   if (!companyId || !tenantId) incomplete();
+  if (companyId !== tenantId) {
+    incomplete('Company и tenant actor scope должны иметь один canonical ID.', {
+      tenantModel: TENANT_MODEL,
+    });
+  }
   return Object.freeze({
     ...scope,
     companyId,
@@ -139,6 +144,14 @@ function assignTrustedScope(record, scope) {
   };
 }
 
+function filterRecordsByActorScope(records, scope) {
+  const trusted = assertCompleteActorScope(scope);
+  return (Array.isArray(records) ? records : []).filter(record => (
+    scopeText(record?.companyId) === trusted.companyId
+    && scopeText(record?.tenantId) === trusted.tenantId
+  ));
+}
+
 function assertRecordMatchesActorScope(record, scope, {
   code = 'MASTER_DATA_SCOPE_FORBIDDEN',
   unknownCode = 'MASTER_DATA_SCOPE_UNKNOWN',
@@ -181,6 +194,7 @@ module.exports = {
   assertRecordMatchesActorScope,
   assignTrustedScope,
   createTrustedActorScopeResolver,
+  filterRecordsByActorScope,
   isScopedMasterDataCollection,
   requireRequestActorScope,
   resolveOptionalActorScope,

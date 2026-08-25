@@ -36,6 +36,7 @@ const {
   getClientInnNormalized,
   normalizeClientInnFields,
 } = require('./lib/client-inn');
+const { isProductionScopeWriteFreezeEnabled } = require('./lib/feature-flags');
 
 const DEFAULT_DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = process.env.DB_PATH
@@ -104,6 +105,8 @@ const JSON_COLLECTIONS = [
   'service_audit_log',
   'service_work_catalog',
   'spare_parts_catalog',
+  'service_work_names',
+  'spare_part_names',
   'planner_items',
   'service_vehicles',
   'vehicle_trips',
@@ -119,11 +122,29 @@ const JSON_COLLECTIONS = [
 
 let dbInstance = null;
 
+function assertProductionWriteAllowed(operation = 'database write', env = process.env) {
+  if (!isProductionScopeWriteFreezeEnabled(env)) return true;
+  const error = new Error(`Blocked ${operation}: production scope remediation write freeze is active.`);
+  error.code = 'PRODUCTION_SCOPE_WRITE_FREEZE_ACTIVE';
+  throw error;
+}
+
 function ensureDb() {
   if (dbInstance) return dbInstance;
 
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const db = new Database(DB_PATH);
+  const writeFreezeEnabled = isProductionScopeWriteFreezeEnabled();
+  if (writeFreezeEnabled && !fs.existsSync(DB_PATH)) {
+    const error = new Error('Production database must already exist when the remediation write freeze is active.');
+    error.code = 'FROZEN_PRODUCTION_DATABASE_MISSING';
+    throw error;
+  }
+  if (!writeFreezeEnabled) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const db = new Database(DB_PATH, writeFreezeEnabled ? { fileMustExist: true } : undefined);
+  if (writeFreezeEnabled) {
+    db.pragma('foreign_keys = ON');
+    dbInstance = db;
+    return db;
+  }
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(`
@@ -198,7 +219,12 @@ function replaceClientInnIndex(db, clients) {
   for (const client of clients) {
     const innNormalized = getClientInnNormalized(client);
     if (!innNormalized) continue;
-    replace.run(innNormalized, String(client.id || ''), client.company || client.name || '');
+    const companyId = String(client?.companyId || '').trim();
+    const tenantId = String(client?.tenantId || '').trim();
+    const scopeKey = companyId && tenantId && companyId === tenantId
+      ? `tenant:${companyId}`
+      : 'legacy-unscoped';
+    replace.run(`${scopeKey}|${innNormalized}`, String(client.id || ''), client.company || client.name || '');
   }
 }
 
@@ -218,6 +244,7 @@ function checkClientInnDuplicates(clients, { throwOnDuplicates = true } = {}) {
 }
 
 function syncClientInnIndex({ throwOnDuplicates = true } = {}) {
+  assertProductionWriteAllowed('client INN index synchronization');
   const db = ensureDb();
   const clients = getData('clients');
   if (!Array.isArray(clients)) return { ok: true, duplicates: [] };
@@ -233,6 +260,7 @@ function syncClientInnIndex({ throwOnDuplicates = true } = {}) {
 }
 
 function setData(name, value) {
+  assertProductionWriteAllowed(`collection write (${String(name || 'unknown')})`);
   const db = ensureDb();
   const previousValue = name === 'clients' ? getData('clients') : null;
   const nextValue = name === 'clients' && Array.isArray(value)
@@ -285,6 +313,7 @@ function setData(name, value) {
 }
 
 function setDataBatch(entries) {
+  assertProductionWriteAllowed('collection batch write');
   const normalizedEntries = Array.isArray(entries)
     ? entries.map(entry => ({ name: entry?.name, value: entry?.value }))
     : [];
@@ -301,6 +330,7 @@ function setDataBatch(entries) {
 }
 
 function migrateJsonFilesToDb() {
+  assertProductionWriteAllowed('legacy JSON migration');
   const db = ensureDb();
   const hasRows = db.prepare('SELECT COUNT(*) AS count FROM app_data').get().count > 0;
   if (hasRows) return;
@@ -324,6 +354,7 @@ function cloneCollectionIfMissing(targetName, sourceName, mapItem = value => val
 }
 
 function saveSession(token, value, expiresAt) {
+  assertProductionWriteAllowed('session write');
   const db = ensureDb();
   db.prepare(`
     INSERT INTO app_sessions (token, json, created_at, expires_at)
@@ -352,11 +383,13 @@ function getSession(token) {
 }
 
 function deleteSession(token) {
+  assertProductionWriteAllowed('session deletion');
   const db = ensureDb();
   db.prepare('DELETE FROM app_sessions WHERE token = ?').run(token);
 }
 
 function deleteSessionsForUserIds(userIds) {
+  assertProductionWriteAllowed('user session deletion');
   const ids = Array.isArray(userIds)
     ? [...new Set(userIds.map(value => String(value || '').trim()).filter(Boolean))]
     : [];
@@ -384,11 +417,13 @@ function deleteSessionsForUserIds(userIds) {
 }
 
 function cleanupExpiredSessions(now = Date.now()) {
+  assertProductionWriteAllowed('expired session cleanup');
   const db = ensureDb();
   db.prepare('DELETE FROM app_sessions WHERE expires_at <= ?').run(now);
 }
 
 function resetAppData(collections = JSON_COLLECTIONS) {
+  assertProductionWriteAllowed('application data reset');
   const db = ensureDb();
   const names = Array.isArray(collections) && collections.length > 0
     ? [...new Set(collections.map(name => String(name || '').trim()).filter(Boolean))]
@@ -418,6 +453,7 @@ function countActiveSessions(now = Date.now()) {
 }
 
 module.exports = {
+  assertProductionWriteAllowed,
   DB_PATH,
   cloneCollectionIfMissing,
   countActiveSessions,

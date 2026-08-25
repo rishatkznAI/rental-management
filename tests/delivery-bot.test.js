@@ -29,6 +29,11 @@ const {
 } = require('../server/routes/bot.js');
 
 function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
+  const actorScope = Object.freeze({
+    companyId: 'COMPANY-A',
+    tenantId: 'COMPANY-A',
+    membershipId: 'MEMBERSHIP-A',
+  });
   const state = {
     bot_users: {
       '100': {
@@ -36,6 +41,8 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
         userName: 'Руслан',
         userRole: 'Менеджер по аренде',
         email: 'manager@example.test',
+        companyId: 'COMPANY-A',
+        tenantId: 'COMPANY-A',
         replyTarget: { user_id: 100, chat_id: null },
       },
     },
@@ -47,9 +54,19 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
         name: 'Быстрая доставка',
         status: 'active',
         maxCarrierKey: '100',
+        systemUserId: 'U-carrier',
+        companyId: 'COMPANY-A',
+        tenantId: 'COMPANY-A',
       },
     ],
-    users: [],
+    users: [{
+      id: 'U-carrier',
+      name: 'Водитель перевозчика',
+      email: 'carrier@example.test',
+      role: 'Перевозчик',
+      status: 'Активен',
+      carrierId: 'carrier-1',
+    }],
     counterparties: [
       { id: 'CP-C-1', legalName: 'ООО Клиент', shortName: 'ООО Клиент', status: 'active', roles: ['customer'] },
       { id: 'CP-K-1', legalName: 'Быстрая доставка', shortName: 'Быстрая доставка', status: 'active', roles: ['contractor'] },
@@ -96,6 +113,9 @@ function createMemoryBot(preferCarrierAutoLogin = false, overrides = {}) {
       state[name] = value;
     },
     verifyPassword: overrides.verifyPassword || (() => false),
+    resolveActorScope: overrides.resolveActorScope || (userId => userId ? actorScope : null),
+    readAuthUsers: overrides.readAuthUsers || (() => state.users),
+    withActorScope: overrides.withActorScope || ((_scope, operation) => operation()),
     getBotUsers: () => state.bot_users,
     saveBotUsers: (value) => {
       state.bot_users = value;
@@ -517,18 +537,16 @@ test('regular start returns delivery menu for an authorized carrier session', as
   assert.match(messages.at(-1).text, /доставки/);
 });
 
-test('dedicated delivery start returns menu for an authorized carrier', async () => {
+test('dedicated delivery start rejects MAX-key-only carrier auto-login without an authenticated bot user', async () => {
   const { state, messages, handlers } = createMemoryBot(true);
   state.bot_users = {};
 
   await handlers.handleCommand({ user_id: 100 }, '100', '/start');
 
-  assert.equal(state.bot_users['100'].userRole, 'Перевозчик');
-  assert.match(messages.at(-1).text, /Перевозчик/);
+  assert.equal(state.bot_users['100'], undefined);
+  assert.match(messages.at(-1).text, /не привязан к перевозчику/);
   const menu = messages.at(-1).options.attachments.find((item) => item.type === 'inline_keyboard');
-  assert.equal(menu.payload.buttons[0][0].text, '🚚 Мои доставки');
-  assert.equal(menu.payload.buttons[0][1].text, '🔄 Обновить');
-  assert.equal(menu.payload.buttons[1][0].text, '❓ Помощь');
+  assert.equal(menu.payload.buttons.flat().some(item => item.text === 'Войти'), true);
 });
 
 test('unknown command reports an error before authorization', async () => {
@@ -844,7 +862,7 @@ test('manager login flow greets manager with rental manager menu', async () => {
   assert.equal(menu.payload.buttons[1][1].text, 'Новая доставка');
 });
 
-test('manager login flow blocks duplicate login local part', async () => {
+test('manager login flow rejects duplicate login local part without existence disclosure', async () => {
   const { state, messages, handlers } = createMemoryBot(false, {
     verifyPassword: (password, stored) => password === stored,
   });
@@ -873,7 +891,8 @@ test('manager login flow blocks duplicate login local part', async () => {
   await handlers.handleCommand({ user_id: 200 }, '200', 'manager');
   await handlers.handleCommand({ user_id: 200 }, '200', 'secret');
 
-  assert.match(messages.at(-1).text, /Найдено несколько пользователей с таким логином/);
+  assert.match(messages.at(-1).text, /Неверный логин или пароль/);
+  assert.doesNotMatch(messages.at(-1).text, /несколько пользователей/);
   assert.equal(state.bot_users['200'], undefined);
 });
 
@@ -1032,6 +1051,8 @@ test('carrier system user login links MAX user to delivery carrier', async () =>
     name: 'Быстрая доставка',
     status: 'active',
     systemUserId: 'U-carrier',
+    companyId: 'COMPANY-A',
+    tenantId: 'COMPANY-A',
   }];
   state.users = [{
     id: 'U-carrier',

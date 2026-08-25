@@ -23,7 +23,7 @@ function counterparty(id, roles) {
   return {
     id,
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
     type: 'legal_entity',
     legalName: `ООО ${id}`,
     shortName: id,

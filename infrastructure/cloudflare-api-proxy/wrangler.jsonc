@@ -1,0 +1,13 @@
+{
+  "name": "rentcore-api-proxy",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-17",
+  "account_id": "5f16161abe33d42d9f89cb1f3deb5591",
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "api.skytech-rent.ru",
+      "custom_domain": true
+    }
+  ]
+}

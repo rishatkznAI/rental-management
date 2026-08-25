@@ -20,6 +20,7 @@ const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { registerBotRoutes } = require('../server/routes/bot.js');
 const { registerStaffRoutes } = require('../server/routes/staff.js');
 const { registerManagerMyPlanRoutes } = require('../server/routes/manager-my-plan.js');
+const { TENANT_OWNED_ARRAY_COLLECTIONS } = require('../server/lib/tenant-data-boundary.js');
 
 const WARRANTY_MECHANIC_ROLE = 'Механик по гарантии';
 const WARRANTY_MECHANIC_ROLE_ALIASES = ['warranty_mechanic', 'mechanic_warranty', 'warrantyMechanic', 'mechanicWarranty', 'warranty-mechanic', 'mechanic-warranty', 'механик по гарантии'];
@@ -149,13 +150,7 @@ function createState() {
 function createSecurityApp(state = createState()) {
   for (const user of state.users || []) {
     user.companyId ||= 'COMPANY-A';
-    user.tenantId ||= 'TENANT-A';
-  }
-  for (const collection of ['counterparties', 'clients', 'client_objects']) {
-    for (const record of state[collection] || []) {
-      record.companyId ||= 'COMPANY-A';
-      record.tenantId ||= 'TENANT-A';
-    }
+    user.tenantId ||= 'COMPANY-A';
   }
   const app = express();
   app.use(express.json());
@@ -176,11 +171,12 @@ function createSecurityApp(state = createState()) {
   ]);
   const readData = name => {
     const rows = state[name] || [];
-    if (['counterparties', 'clients', 'client_objects'].includes(name)) {
-      for (const record of rows) {
-        record.companyId ||= 'COMPANY-A';
-        record.tenantId ||= 'TENANT-A';
-      }
+    if (TENANT_OWNED_ARRAY_COLLECTIONS.includes(name)) {
+      return rows.map(record => ({
+        ...record,
+        companyId: record.companyId || 'COMPANY-A',
+        tenantId: record.tenantId || 'COMPANY-A',
+      }));
     }
     return rows;
   };
@@ -554,19 +550,19 @@ test('/api/clients creates clients with normalized INN and rejects duplicate INN
     assert.equal(created.status, 201);
     assert.equal(created.body.innNormalized, '1655123456');
     assert.equal(created.body.companyId, 'COMPANY-A');
-    assert.equal(created.body.tenantId, 'TENANT-A');
+    assert.equal(created.body.tenantId, 'COMPANY-A');
     assert.ok(created.body.counterpartyId);
     assert.equal(state.counterparties.length, initialCounterpartyCount + 1);
     const createdCounterparty = state.counterparties.find(item => item.id === created.body.counterpartyId);
     assert.ok(createdCounterparty);
     assert.deepEqual(createdCounterparty.roles, ['customer']);
     assert.equal(createdCounterparty.companyId, 'COMPANY-A');
-    assert.equal(createdCounterparty.tenantId, 'TENANT-A');
+    assert.equal(createdCounterparty.tenantId, 'COMPANY-A');
     const customerAssignment = state.counterparty_role_assignments.find(item => (
       item.counterpartyId === created.body.counterpartyId && item.roleCode === 'customer'
     ));
     assert.equal(customerAssignment.companyId, 'COMPANY-A');
-    assert.equal(customerAssignment.tenantId, 'TENANT-A');
+    assert.equal(customerAssignment.tenantId, 'COMPANY-A');
 
     const duplicate = await request(baseUrl, 'POST', '/api/clients', 'admin-token', clientPayload({
       company: 'ООО Бета',
@@ -625,7 +621,7 @@ test('generic scoped create assigns trusted scope and rejects ownership fields b
 
     for (const record of [client.body, object.body, contract.body]) {
       assert.equal(record.companyId, 'COMPANY-A');
-      assert.equal(record.tenantId, 'TENANT-A');
+      assert.equal(record.tenantId, 'COMPANY-A');
     }
 
     const objectCount = state.client_objects.length;
@@ -652,7 +648,7 @@ test('generic bulk creation cannot persist an unscoped Client or Contract', asyn
     })]);
     assert.equal(clients.status, 200, JSON.stringify(clients.body));
     assert.equal(state.clients[0].companyId, 'COMPANY-A');
-    assert.equal(state.clients[0].tenantId, 'TENANT-A');
+    assert.equal(state.clients[0].tenantId, 'COMPANY-A');
 
     const contracts = await request(baseUrl, 'PUT', '/api/client_contracts', 'admin-token', [{
       id: 'CC-bulk-scope',
@@ -662,7 +658,7 @@ test('generic bulk creation cannot persist an unscoped Client or Contract', asyn
     }]);
     assert.equal(contracts.status, 200, JSON.stringify(contracts.body));
     assert.equal(state.client_contracts[0].companyId, 'COMPANY-A');
-    assert.equal(state.client_contracts[0].tenantId, 'TENANT-A');
+    assert.equal(state.client_contracts[0].tenantId, 'COMPANY-A');
   });
 });
 
@@ -2800,21 +2796,22 @@ test('payments API guards existing allocations against identity mutation, replac
       gantt_rentals: state.gantt_rentals,
     }, beforeCrossPatch);
 
+    const withoutTenantScope = ({ companyId: _companyId, tenantId: _tenantId, ...record }) => record;
     const sameCounterpartyBulk = await request(baseUrl, 'PUT', '/api/payments', 'admin-token', [
-      { ...state.payments[0], clientId: 'C-A1', counterpartyId: 'CP-A' },
-      state.payments[1],
+      { ...withoutTenantScope(state.payments[0]), clientId: 'C-A1', counterpartyId: 'CP-A' },
+      withoutTenantScope(state.payments[1]),
     ]);
     assert.equal(sameCounterpartyBulk.status, 200, JSON.stringify(sameCounterpartyBulk.body));
 
     for (const replacement of [
       [
-        { ...state.payments[0], clientId: 'C-B', counterpartyId: 'CP-B' },
-        state.payments[1],
+        { ...withoutTenantScope(state.payments[0]), clientId: 'C-B', counterpartyId: 'CP-B' },
+        withoutTenantScope(state.payments[1]),
       ],
-      [state.payments[1]],
+      [withoutTenantScope(state.payments[1])],
       [
-        { ...state.payments[0], clientId: 'C-B', counterpartyId: 'CP-B' },
-        { ...state.payments[1], comment: 'otherwise safe row' },
+        { ...withoutTenantScope(state.payments[0]), clientId: 'C-B', counterpartyId: 'CP-B' },
+        { ...withoutTenantScope(state.payments[1]), comment: 'otherwise safe row' },
       ],
     ]) {
       const before = structuredClone({
@@ -3757,7 +3754,7 @@ test('/api/manager/my-plan is read-only and does not expose secret-like fields',
     manager: 'Руслан',
     passwordHash: 'hidden',
     companyId: 'COMPANY-A',
-    tenantId: 'TENANT-A',
+    tenantId: 'COMPANY-A',
   }];
   const before = JSON.stringify(state);
 

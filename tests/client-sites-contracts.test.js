@@ -7,6 +7,7 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { isTenantOwnedCollection } = require('../server/lib/tenant-data-boundary.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
 const { registerClientMasterDataRoutes } = require('../server/routes/client-master-data.js');
 const { createClientMasterDataLifecycleService } = require('../server/lib/client-master-data-lifecycle.js');
@@ -33,26 +34,48 @@ function makeCrudApp(initial = {}) {
     service: [],
     ...initial,
   };
-  for (const collection of ['counterparties', 'clients', 'client_objects']) {
+  for (const collection of [
+    'counterparties',
+    'counterparty_role_assignments',
+    'supplier_profiles',
+    'contractor_profiles',
+    'clients',
+    'client_objects',
+    'client_contracts',
+  ]) {
     for (const record of state[collection] || []) {
       record.companyId ||= 'COMPANY-A';
-      record.tenantId ||= 'TENANT-A';
+      record.tenantId ||= 'COMPANY-A';
     }
   }
   const app = express();
   app.use(express.json());
   const readData = name => {
     const rows = state[name] || [];
-    if (['counterparties', 'clients', 'client_objects'].includes(name)) {
+    if ([
+      'counterparties',
+      'counterparty_role_assignments',
+      'supplier_profiles',
+      'contractor_profiles',
+      'clients',
+      'client_objects',
+      'client_contracts',
+    ].includes(name)) {
       for (const record of rows) {
         record.companyId ||= 'COMPANY-A';
-        record.tenantId ||= 'TENANT-A';
+        record.tenantId ||= 'COMPANY-A';
       }
     }
     return rows;
   };
   const writeData = (name, value) => {
-    state[name] = value;
+    state[name] = isTenantOwnedCollection(name) && Array.isArray(value)
+      ? value.map(record => ({
+          ...record,
+          companyId: record.companyId || 'COMPANY-A',
+          tenantId: record.tenantId || 'COMPANY-A',
+        }))
+      : value;
   };
   const writeDataBatch = entries => {
     for (const entry of entries || []) writeData(entry.name, entry.value);
@@ -70,7 +93,7 @@ function makeCrudApp(initial = {}) {
       userName: 'Администратор',
       userRole: 'Администратор',
       companyId: req.get('x-company-id') || 'COMPANY-A',
-      tenantId: req.get('x-tenant-id') || 'TENANT-A',
+      tenantId: req.get('x-tenant-id') || 'COMPANY-A',
     };
     req.actorScope = {
       companyId: req.user.companyId,
@@ -552,7 +575,7 @@ test('ClientContract PATCH edits business fields in place and preserves identity
       notes: 'Исходное примечание',
       status: 'active',
       companyId: 'COMPANY-A',
-      tenantId: 'TENANT-A',
+      tenantId: 'COMPANY-A',
       createdAt,
     }],
     rentals: [{ id: 'R-1', clientId: 'C-1', contractId: 'CC-1' }],
@@ -561,7 +584,7 @@ test('ClientContract PATCH edits business fields in place and preserves identity
     deliveries: [{ id: 'DEL-1', clientId: 'C-1', contractId: 'CC-1' }],
     payment_allocations: [{ id: 'PA-1', clientId: 'C-1', contractId: 'CC-1' }],
   });
-  const scopedHeaders = { 'x-company-id': 'COMPANY-A', 'x-tenant-id': 'TENANT-A' };
+  const scopedHeaders = { 'x-company-id': 'COMPANY-A', 'x-tenant-id': 'COMPANY-A' };
   const linkedSnapshots = Object.fromEntries(
     ['rentals', 'documents', 'service', 'deliveries', 'payment_allocations']
       .map(name => [name, structuredClone(state[name])]),
@@ -581,7 +604,7 @@ test('ClientContract PATCH edits business fields in place and preserves identity
     assert.equal(updated.body.number, 'CTR-26-000002');
     assert.equal(updated.body.createdAt, createdAt);
     assert.equal(updated.body.companyId, 'COMPANY-A');
-    assert.equal(updated.body.tenantId, 'TENANT-A');
+    assert.equal(updated.body.tenantId, 'COMPANY-A');
     assert.equal(updated.body.date, '2026-02-20');
     assert.equal(updated.body.title, 'Обновлённый договор');
     assert.equal(updated.body.objectId, 'CO-2');
@@ -616,7 +639,7 @@ test('ClientContract PATCH edits business fields in place and preserves identity
       { businessNumber: 'CTR-99-999999' },
       { createdAt: '2099-01-01T00:00:00.000Z' },
       { companyId: 'COMPANY-B' },
-      { tenantId: 'TENANT-B' },
+      { tenantId: 'COMPANY-B' },
     ]) {
       const rejected = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', payload, scopedHeaders);
       assert.equal(rejected.status, 409);
@@ -628,16 +651,16 @@ test('ClientContract PATCH edits business fields in place and preserves identity
 
     const crossCompany = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', {
       title: 'Чужое изменение',
-    }, { 'x-company-id': 'COMPANY-B', 'x-tenant-id': 'TENANT-A' });
+    }, { 'x-company-id': 'COMPANY-B', 'x-tenant-id': 'COMPANY-A' });
     assert.equal(crossCompany.status, 403);
-    assert.equal(crossCompany.body.code, 'CLIENT_CONTRACT_SCOPE_FORBIDDEN');
+    assert.equal(crossCompany.body.code, 'ACTOR_SCOPE_INCOMPLETE');
     assert.equal(state.client_contracts[0].title, 'Обновлённый договор');
 
     const crossTenant = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', {
       title: 'Чужое tenant-изменение',
-    }, { 'x-company-id': 'COMPANY-A', 'x-tenant-id': 'TENANT-B' });
+    }, { 'x-company-id': 'COMPANY-A', 'x-tenant-id': 'COMPANY-B' });
     assert.equal(crossTenant.status, 403);
-    assert.equal(crossTenant.body.code, 'CLIENT_CONTRACT_SCOPE_FORBIDDEN');
+    assert.equal(crossTenant.body.code, 'ACTOR_SCOPE_INCOMPLETE');
     assert.equal(state.client_contracts[0].title, 'Обновлённый договор');
 
     const archived = await request(baseUrl, 'PATCH', '/api/client_contracts/CC-1', {

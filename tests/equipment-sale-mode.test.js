@@ -446,7 +446,7 @@ test('sale quote actions create commercial offer documents instead of contracts'
   assert.match(documentsSource, /salesSettings\.packageCommentTemplate\.text/);
   assert.match(documentsSource, /sectionsOrder: QuoteTemplateSection\[\]/);
   assert.match(documentsSource, /sectionHtml: Record<QuoteTemplateSection, string>/);
-  assert.match(systemRoutesSource, /sales_section_settings/);
+  assert.match(systemRoutesSource, /function getSafePublicSettings\(\)[\s\S]*return \[\];/);
   assert.doesNotMatch(documentsSource, /type: 'contract'[\s\S]{0,300}handleCreateCommercialOffer/);
   assert.doesNotMatch(documentsSource, /documentType: 'contract'[\s\S]{0,300}handleCreateCommercialOffer/);
   assert.doesNotMatch(documentsSource, /salePrice2/);

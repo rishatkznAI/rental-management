@@ -753,14 +753,14 @@ test('Stage H patch reconciles old and new equipment projections and canonical s
     assert.equal(state.equipment.find(item => item.id === 'EQ-2').returnDate, '2026-05-18');
 
     const extended = await request(baseUrl, 'POST', `/api/rentals/${created.body.id}/extend`, {
-      newEndDate: '2026-08-24',
+      newEndDate: '2099-08-24',
       reason: 'Клиент продлил работы',
       confirmedByClient: true,
       invoiceSentToClient: true,
     });
     assert.equal(extended.status, 200, JSON.stringify(extended.body));
-    assert.equal(state.gantt_rentals[0].endDate, '2026-08-24');
-    assert.equal(state.equipment.find(item => item.id === 'EQ-2').returnDate, '2026-08-24');
+    assert.equal(state.gantt_rentals[0].endDate, '2099-08-24');
+    assert.equal(state.equipment.find(item => item.id === 'EQ-2').returnDate, '2099-08-24');
   });
 });
 

@@ -217,6 +217,14 @@ function ownerScope(counterparty) {
       { counterpartyId: relationId(counterparty?.id) || null },
     );
   }
+  if (companyId !== tenantId) {
+    throw counterpartyError(
+      'COUNTERPARTY_SCOPE_CONFLICT',
+      'Counterparty companyId and tenantId must identify the same canonical Company.',
+      409,
+      { counterpartyId: relationId(counterparty?.id) || null },
+    );
+  }
   return { companyId, tenantId };
 }
 

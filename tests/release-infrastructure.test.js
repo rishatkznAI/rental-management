@@ -13,6 +13,7 @@ import {
 } from '../scripts/railway-backend-release.mjs';
 import { classifyReleaseOutcome } from '../scripts/release-outcome.mjs';
 import { classifyReleaseChangedFiles } from '../scripts/release-classifier.mjs';
+import { resolveFrontendScriptUrls } from '../scripts/release-preflight.mjs';
 
 const workflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
 const backendReleaseSource = readFileSync(new URL('../scripts/railway-backend-release.mjs', import.meta.url), 'utf8');
@@ -244,6 +245,16 @@ test('release outcome distinguishes verified and unverified exact rollouts', () 
     frontendCommit: expected.commit,
     gateStatus: 'failure',
   }).status, 'RELEASE_UNVERIFIED');
+});
+
+test('frontend SHA collection follows the final document origin and ignores third-party scripts', () => {
+  const html = `
+    <script type="module" src="/assets/index-target.js"></script>
+    <script defer src="https://static.cloudflareinsights.com/beacon.min.js"></script>
+  `;
+  assert.deepEqual(resolveFrontendScriptUrls(html, 'https://skytech-rent.ru/'), [
+    'https://skytech-rent.ru/assets/index-target.js',
+  ]);
 });
 
 test('production workflow orders backend before frontend and keeps failures fail closed', () => {

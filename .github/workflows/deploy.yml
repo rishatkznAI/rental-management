@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Production Release
 
 on:
   push:
@@ -19,6 +19,8 @@ on:
       - 'scripts/release-preflight.mjs'
       - 'scripts/frontend-build-marker.mjs'
       - 'scripts/backend-release-marker.mjs'
+      - 'scripts/railway-backend-release.mjs'
+      - 'scripts/release-outcome.mjs'
       - 'e2e/helpers/auth.ts'
       - 'e2e/helpers/api.ts'
       - 'e2e/helpers/releaseSmoke.ts'
@@ -31,6 +33,7 @@ on:
       - 'tests/release-preflight.test.js'
       - 'tests/release-classifier.test.js'
       - 'tests/release-smoke-conservation.test.js'
+      - 'tests/release-infrastructure.test.js'
       - 'docs/*release*.md'
       - 'docs/**/*release*.md'
       - 'docs/*deploy*.md'
@@ -55,12 +58,10 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: production-release
+  cancel-in-progress: false
 
 jobs:
   classify-release:
@@ -231,21 +232,113 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
 
-  deploy:
-    name: Deploy and production gate
+  backend-deploy:
+    name: Deploy Railway backend
     needs:
       - classify-release
       - basic-ci
       - playwright-smoke
+    if: needs.classify-release.outputs.requires_backend == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    permissions:
+      contents: read
+    outputs:
+      deployment_id: ${{ steps.backend.outputs.deployment_id }}
+      backend_commit: ${{ steps.backend.outputs.backend_commit }}
+      backend_release_type: ${{ steps.backend.outputs.backend_release_type }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Validate Railway release configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$RAILWAY_PROJECT_TOKEN"
+          test -n "$RAILWAY_PROJECT_ID"
+          test -n "$RAILWAY_ENVIRONMENT_ID"
+          test -n "$RAILWAY_SERVICE_ID"
+          test -n "$PRODUCTION_API_URL"
+        env:
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+          RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+          RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+
+      - name: Deploy exact commit and verify Railway backend
+        id: backend
+        run: node scripts/railway-backend-release.mjs
+        env:
+          EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_TYPE: ${{ needs.classify-release.outputs.release_type }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+          RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
+          RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
+          RAILWAY_SERVICE_NAME: ${{ vars.RAILWAY_SERVICE_NAME || 'rental-management' }}
+          RAILWAY_EXPECTED_REPOSITORY: ${{ github.repository }}
+          RAILWAY_EXPECTED_BRANCH: main
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+
+  frontend-deploy:
+    name: Deploy GitHub Pages frontend
+    needs:
+      - classify-release
+      - basic-ci
+      - playwright-smoke
+      - backend-deploy
+    if: >-
+      always() &&
+      needs.basic-ci.result == 'success' &&
+      needs.playwright-smoke.result == 'success' &&
+      needs.classify-release.outputs.release_type != 'backend' &&
+      (needs.classify-release.outputs.requires_backend != 'true' || needs.backend-deploy.result == 'success')
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
 
+  production-gate:
+    name: Production release gate
+    needs:
+      - classify-release
+      - basic-ci
+      - playwright-smoke
+      - backend-deploy
+      - frontend-deploy
+    if: >-
+      always() &&
+      needs.basic-ci.result == 'success' &&
+      needs.playwright-smoke.result == 'success' &&
+      (
+        (needs.classify-release.outputs.release_type == 'backend' && needs.backend-deploy.result == 'success') ||
+        (
+          needs.classify-release.outputs.release_type != 'backend' &&
+          needs.frontend-deploy.result == 'success' &&
+          (needs.classify-release.outputs.requires_backend != 'true' || needs.backend-deploy.result == 'success')
+        )
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -266,6 +359,7 @@ jobs:
         run: npx playwright install --with-deps
 
       - name: Wait for GitHub Pages propagation
+        if: needs.classify-release.outputs.release_type != 'backend'
         run: sleep 30
 
       - name: Write release changed file scope
@@ -285,6 +379,7 @@ jobs:
           CHANGED_FILES_FILE: ${{ runner.temp }}/release-changed-files.txt
 
       - name: Verify public frontend build marker
+        if: needs.classify-release.outputs.release_type != 'backend'
         run: node scripts/frontend-build-marker.mjs --frontend-url "$PRODUCTION_FRONTEND_URL" --expected-commit "$EXPECTED_RELEASE_COMMIT" --api-url "$PRODUCTION_API_URL"
         env:
           PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
@@ -332,3 +427,35 @@ jobs:
           name: production-playwright-test-results
           path: test-results/
           if-no-files-found: ignore
+
+  release-outcome:
+    name: Report production release outcome
+    needs:
+      - classify-release
+      - basic-ci
+      - playwright-smoke
+      - backend-deploy
+      - frontend-deploy
+      - production-gate
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Record exact public release state
+        run: node scripts/release-outcome.mjs
+        env:
+          EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_TYPE: ${{ needs.classify-release.outputs.release_type }}
+          PRODUCTION_GATE_STATUS: ${{ needs.production-gate.result }}
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}

@@ -30,6 +30,8 @@ const DEPLOY_TOOLING_PATTERNS = [
   /^scripts\/release-preflight\.mjs$/,
   /^scripts\/frontend-build-marker\.mjs$/,
   /^scripts\/backend-release-marker\.mjs$/,
+  /^scripts\/railway-backend-release\.mjs$/,
+  /^scripts\/release-outcome\.mjs$/,
   /^scripts\/finance-smoke-equipment-discovery\.mjs$/,
   /^e2e\/helpers\/(?:api|auth|releaseSmoke)\.ts$/,
   /^e2e\/clean-production-zero-state-audit\.spec\.ts$/,

@@ -312,18 +312,21 @@ On failed staging smoke, stop the production release, inspect GitHub Actions art
 
 ## Backend Deploy
 
-1. Confirm Railway service root is `server`.
-2. Confirm Railway start command comes from `server/railway.toml`: `node scripts/start-with-release-type.cjs`.
-3. Confirm Railway healthcheck path is `/health`.
-4. Confirm persistent volume is mounted and `DB_PATH` points to the volume.
-5. For full-stack releases, set Railway runtime release metadata before backend deploy: `RELEASE_TYPE=full-stack`. Backend-only Railway Git deploys default to `RAILWAY_RELEASE_TYPE=backend` through `server/scripts/start-with-release-type.cjs`.
-6. Deploy the backend.
-7. Verify:
+1. Confirm the target is an exact 40-character SHA on `main`.
+2. Dispatch the standard `Production Release` workflow with `backend` or `full-stack`; do not use Railway dashboard redeploy, restart, or `railway up`.
+3. Confirm the protected GitHub `production` Environment approval and its scoped `RAILWAY_PROJECT_TOKEN`.
+4. Confirm the configured project/environment/service IDs point to the production backend.
+5. Let the workflow verify connected repository, service root `server`, start command `node scripts/start-with-release-type.cjs`, and healthcheck `/health` before it calls the exact-SHA Railway API mutation.
+6. Confirm the returned deployment reached `SUCCESS` and its project/environment/service IDs and `meta.commitHash` exactly match the requested target.
+7. Confirm the persistent volume remains mounted and `DB_PATH` points to the volume; the release job does not mutate either setting.
+8. Verify:
    - `GET https://rental-management-production-35bc.up.railway.app/health`
+   - `GET https://rental-management-production-35bc.up.railway.app/health/ready`
    - `GET https://rental-management-production-35bc.up.railway.app/api/version`
-8. Confirm `/health` and `/api/version` show the expected backend release type, not `unknown`.
-9. Record backend commit, build time and deployment id when available.
-10. During conservation, do not disable deploys only to preserve the pause. Production deployment is allowed; production usage must remain blocked by `APP_DISABLED`, `BOT_DISABLED`, and GSM disable flags.
+9. Confirm the public backend commit is the exact target and release type is `backend` or `full-stack`, never `unknown`.
+10. For `full-stack`, confirm Pages did not start before the backend gate passed.
+11. Record the exact backend/frontend commits and deployment ID from the job summary. Treat `PARTIAL_RELEASE` and `RELEASE_UNVERIFIED` as failed releases; there is no automatic rollback.
+12. During conservation, do not disable deploys only to preserve the pause. Production deployment is allowed; production usage must remain blocked by `APP_DISABLED`, `BOT_DISABLED`, and GSM disable flags.
 
 ## Frontend Deploy
 

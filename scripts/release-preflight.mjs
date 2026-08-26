@@ -658,7 +658,7 @@ function extractScriptUrls(html) {
   return urls;
 }
 
-async function readFrontendBundle(frontendUrl) {
+export async function readFrontendBundle(frontendUrl) {
   const cacheBust = `releasePreflight=${Date.now()}`;
   const separator = frontendUrl.includes('?') ? '&' : '?';
   const { response, text: html } = await fetchText(`${frontendUrl}${separator}${cacheBust}`, {

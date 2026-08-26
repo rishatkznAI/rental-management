@@ -13,6 +13,9 @@ const E2E_COMPANY_ID = 'e2e-company';
 const E2E_MEMBERSHIP_ID = 'e2e-admin-membership';
 const E2E_PRINCIPAL_ID = 'U-reset-admin';
 const E2E_TEMPLATE_KEY = 'e2e-admin-template';
+const E2E_USER_FIXTURE_ID = 'U-e2e-membership-user-fixture';
+const E2E_USER_FIXTURE_MEMBERSHIP_ID = 'e2e-user-fixture-membership';
+const E2E_USER_FIXTURE_EMAIL = 'membership-user-fixture@e2e.invalid';
 
 function legacyPasswordHash(password) {
   const value = crypto.createHash('sha256')
@@ -32,7 +35,9 @@ function seedE2eActorScope() {
   const users = (getData('users') || [])
     .filter(user => (
       String(user?.id || '') !== E2E_PRINCIPAL_ID
+      && String(user?.id || '') !== E2E_USER_FIXTURE_ID
       && String(user?.email || '').trim().toLowerCase() !== email
+      && String(user?.email || '').trim().toLowerCase() !== E2E_USER_FIXTURE_EMAIL
     ));
   users.push({
     id: E2E_PRINCIPAL_ID,
@@ -41,6 +46,15 @@ function seedE2eActorScope() {
     role: 'Администратор',
     status: 'Активен',
     password: legacyPasswordHash(password),
+    tokenVersion: 0,
+  });
+  users.push({
+    id: E2E_USER_FIXTURE_ID,
+    name: 'E2E Membership User Fixture',
+    email: E2E_USER_FIXTURE_EMAIL,
+    role: 'Менеджер по аренде',
+    status: 'Активен',
+    password: legacyPasswordHash('e2e-fixture-password'),
     tokenVersion: 0,
   });
   setData('users', users);
@@ -107,11 +121,34 @@ function seedE2eActorScope() {
   ) {
     throw new Error('Existing E2E membership does not match the trusted actor-scope contract.');
   }
+
+  const userFixtureMembership = repository.getMembership(E2E_USER_FIXTURE_MEMBERSHIP_ID);
+  if (!userFixtureMembership) {
+    repository.createMembership({
+      id: E2E_USER_FIXTURE_MEMBERSHIP_ID,
+      companyId: E2E_COMPANY_ID,
+      principalId: E2E_USER_FIXTURE_ID,
+      status: 'active',
+      roleTemplateKey: E2E_TEMPLATE_KEY,
+      roleTemplateVersion: 1,
+      companyWideBranchAuthority: true,
+      branchIds: [],
+      actorContext,
+      reason: 'playwright-e2e-user-fixture-bootstrap',
+    });
+  } else if (
+    userFixtureMembership.status !== 'active'
+    || userFixtureMembership.companyId !== E2E_COMPANY_ID
+    || userFixtureMembership.principalId !== E2E_USER_FIXTURE_ID
+  ) {
+    throw new Error('Existing E2E user fixture membership does not match the trusted actor-scope contract.');
+  }
 }
 
 module.exports = {
   E2E_COMPANY_ID,
   E2E_MEMBERSHIP_ID,
   E2E_PRINCIPAL_ID,
+  E2E_USER_FIXTURE_ID,
   seedE2eActorScope,
 };

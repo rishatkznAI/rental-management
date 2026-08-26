@@ -81,6 +81,8 @@ type UserRecord = {
   status: string;
 };
 
+const E2E_USER_FIXTURE_ID = 'U-e2e-membership-user-fixture';
+
 type GanttRentalRecord = {
   id: string;
   client: string;
@@ -251,20 +253,13 @@ export async function ensureUser(
   expect(getRes.ok()).toBeTruthy();
   const users = (await getRes.json()) as UserRecord[];
   const existing = users.find(item => item.email === user.email);
-  if (existing) {
-    const patchRes = await api.patch(`/api/users/${existing.id}`, {
-      data: {
-        name: user.name,
-        role: user.role,
-        status: 'Активен',
-        password,
-      },
-    });
-    expect(patchRes.ok()).toBeTruthy();
-    return { email: user.email, password };
-  }
-
-  const createRes = await api.post('/api/users', {
+  const fixture = users.find(item => item.id === E2E_USER_FIXTURE_ID);
+  const target = existing || fixture;
+  expect(
+    target,
+    'The membership-backed E2E user fixture must be provisioned by the test server bootstrap.',
+  ).toBeTruthy();
+  const patchRes = await api.patch(`/api/users/${target!.id}`, {
     data: {
       name: user.name,
       email: user.email,
@@ -273,7 +268,7 @@ export async function ensureUser(
       password,
     },
   });
-  expect(createRes.ok()).toBeTruthy();
+  expect(patchRes.ok(), `update E2E user fixture: ${patchRes.status()} ${await patchRes.text()}`).toBeTruthy();
   return { email: user.email, password };
 }
 

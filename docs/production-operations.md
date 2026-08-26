@@ -18,8 +18,8 @@ The protected production branch is `main`.
 - Required check context for branch protection: `lightweight-pr-check`.
 - Do not use `Lightweight PR Check / lightweight-pr-check` as the required context. GitHub branch protection must use the actual check context, not the workflow display name or a combined workflow/job label.
 - Do not use `--admin` to bypass branch protection unless there is a separate explicit decision to do so.
-- Railway backend autodeploy runs after a PR is merged into `main` when backend watch paths changed.
-- A manual Railway deploy is not needed in the normal merge-to-main scenario.
+- Railway's connected GitHub source may create autodeploys after qualifying `main` changes, but that legacy trigger is not the reviewed production release proof.
+- The standard reviewed backend/full-stack release is the `Production Release` workflow dispatched at the exact target SHA on `main`. Do not use a manual Railway dashboard redeploy as a substitute.
 
 ## Railway Backend
 
@@ -44,7 +44,16 @@ Required or recommended Railway variables:
 - `WEBHOOK_URL` when MAX webhook transport is enabled
 - `MAX_WEBHOOK_SECRET`
 
-Railway provides `RAILWAY_GIT_COMMIT_SHA`, but it does not classify the release scope. The repository-controlled Railway start command runs `server/scripts/start-with-release-type.cjs`, which sets `RAILWAY_RELEASE_TYPE=backend` for Railway Git deploys when no explicit release type is present. Full-stack releases should still pass `RELEASE_TYPE=full-stack` or `RELEASE_PREFLIGHT_RELEASE_TYPE=full-stack` when the backend deploy flow knows the release is full-stack. The backend reads release metadata in this order: `RELEASE_TYPE`, `RELEASE_PREFLIGHT_RELEASE_TYPE`, `RAILWAY_RELEASE_TYPE`, `server/release-marker.json`, then `unknown`.
+Required GitHub `production` Environment configuration for the standard release workflow:
+
+- secret `RAILWAY_PROJECT_TOKEN`, created as a Railway project token scoped to the production environment;
+- variables `RAILWAY_PROJECT_ID`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_SERVICE_ID`;
+- optional variable `RAILWAY_SERVICE_NAME` (default `rental-management`);
+- required release reviewer(s), according to the owner's approval policy.
+
+The workflow calls the Railway public GraphQL API with the project-token-only `Project-Access-Token` header. Before deploying, it proves the token scope and connected service contract. It then invokes `serviceInstanceDeployV2` with the exact GitHub `commitSha`, polls the returned deployment ID, checks exact deployment metadata, and requires the public health/version gates. It never falls back to latest-source, upload, redeploy, restart, or an alternate service.
+
+Railway provides `RAILWAY_GIT_COMMIT_SHA`, but it does not classify the combined release scope. The repository-controlled Railway start command runs `server/scripts/start-with-release-type.cjs`, which sets `RAILWAY_RELEASE_TYPE=backend` for Git-backed backend deploys when no explicit stable release type exists. The workflow input remains the authoritative combined `full-stack` intent. Do not change a production Railway variable per release only to relabel the backend. The backend reads release metadata in this order: `RELEASE_TYPE`, `RELEASE_PREFLIGHT_RELEASE_TYPE`, `RAILWAY_RELEASE_TYPE`, `server/release-marker.json`, then `unknown`.
 
 Generate `MAX_WEBHOOK_SECRET` as a long random value in Railway. Do not paste it into chat, docs, logs, commits, or screenshots. After enabling it, verify that MAX webhook registration logs redact the secret and that bot events are still received.
 

@@ -12,7 +12,7 @@ Use this for staging and production releases. Do not paste secrets into logs, is
 - URL/commit/API preflight: `scripts/release-preflight.mjs`
 - GitHub Actions:
   - Staging smoke: `.github/workflows/staging-smoke.yml`
-  - GitHub Pages production deploy and production gate: `.github/workflows/deploy.yml`
+  - Standard production backend/frontend release and production gate: `.github/workflows/deploy.yml`
 
 ## Required GitHub Secrets
 
@@ -29,6 +29,16 @@ Production:
 - `PRODUCTION_FRONTEND_URL`
 - `PRODUCTION_ADMIN_EMAIL`
 - `PRODUCTION_ADMIN_PASSWORD`
+- `RAILWAY_PROJECT_TOKEN` in the protected GitHub `production` Environment. Use a Railway project token scoped to the production environment; do not use an account-wide token.
+
+Production GitHub Environment variables:
+
+- `RAILWAY_PROJECT_ID`
+- `RAILWAY_ENVIRONMENT_ID`
+- `RAILWAY_SERVICE_ID`
+- `RAILWAY_SERVICE_NAME` (optional; defaults to `rental-management`)
+
+The `production` Environment should require the release approver(s) selected by the owner. The backend job has only `contents: read`; it receives the Railway project token only after the Environment approval. The frontend job separately receives only `pages: write`, `id-token: write`, and `contents: read` in the existing `github-pages` Environment. Never expose the Railway token as an output, command argument, artifact, or log value.
 
 The workflows validate that these values exist, but never print secret values. Smoke logs may print URLs and HTTP status codes, not passwords or tokens.
 
@@ -113,10 +123,10 @@ Release status words are strict:
 
 Do not say the demo can be shown while the public frontend marker is missing or still points at an older commit.
 
-The GitHub Pages deploy workflow runs in two ways:
+The production release workflow runs in two ways:
 
 - automatically on `push` to `main` when frontend/build-relevant files change;
-- manually through `workflow_dispatch` with an explicit `release_type`.
+- manually through `workflow_dispatch` on `main` with an explicit `release_type`. Use this standard path for `backend` and `full-stack` releases.
 
 Automatic `main` deploys classify the changed files before publishing:
 
@@ -124,13 +134,14 @@ Automatic `main` deploys classify the changed files before publishing:
 - `deploy-tooling`: `.github/workflows/deploy.yml`, release preflight/marker scripts, production smoke helper/spec files, root `tests/*.test.js` coverage, and release/deploy/smoke/preflight docs. Root tests do not count as frontend runtime; backend, data, secret, arbitrary script, and runtime frontend changes remain outside this scope.
 - Backend or deploy-critical files, including `server/**`, non-build `scripts/**`, most workflow changes, Railway/Docker/env files, and server package files, block the automatic Pages deploy with a workflow summary explaining which files require a backend or full-stack release.
 
-The production GitHub Pages deploy workflow requires:
+The production workflow requires:
 
 - successful install/test/build;
 - `git diff --check`;
 - production frontend build with `VITE_API_URL=$PRODUCTION_API_URL`;
 - local Playwright smoke before deploy;
-- successful GitHub Pages deploy;
+- for `backend` and `full-stack`, an approved, exact-SHA Railway backend deploy before any frontend deploy;
+- successful GitHub Pages deploy for every type except `backend`;
 - production preflight after deploy:
   - frontend URL reachable;
   - backend `/health`;
@@ -148,10 +159,17 @@ If the post-deploy gate fails, the workflow is failed and the release is not con
 
 Production release order:
 
-1. Deploy production backend through the Railway/external backend flow. The Railway start wrapper sets `RAILWAY_RELEASE_TYPE=backend` for Git-backed backend deploys when no explicit release metadata exists; set `RELEASE_TYPE=full-stack` for a full-stack release before the backend deploy when the release owner needs the backend to report `full-stack`.
-2. Deploy production frontend through GitHub Pages.
-3. Run production preflight.
-4. Run production smoke.
+1. Dispatch `Production Release` from the exact target commit on `main` and select `backend` or `full-stack`.
+2. Complete the protected `production` Environment approval. A rejected or absent approval performs no backend mutation and blocks a full-stack frontend deploy.
+3. The backend job validates `GITHUB_SHA`, repository, `refs/heads/main`, release type, Railway project/environment/service IDs, connected GitHub repository, root directory, healthcheck path, and start command.
+4. The job calls Railway's GraphQL `serviceInstanceDeployV2` with the exact `commitSha`. There is no `latestCommit`, `railway up`, redeploy, restart, or dashboard fallback.
+5. The job polls only the returned deployment ID. It requires Railway `SUCCESS`, exact project/environment/service IDs, and exact `meta.commitHash` before checking the public runtime.
+6. The backend gate requires `200` plus `ok=true` from `/health`, `/health/ready`, and `/api/version`; `/api/version` must report the exact 40-character target commit and a known backend release type. Deployment polling is bounded to 20 minutes at 10-second intervals. Runtime probes use at most 30 attempts, begin at 5 seconds, back off every three attempts to a 30-second cap, and give each parallel probe 15 seconds. Exhaustion returns `BACKEND_HEALTH_GATE_FAILED`.
+7. For `full-stack`, and only after the backend gate passes, deploy the already-tested Pages artifact. For `backend`, skip Pages.
+8. Run the unified production preflight, frontend marker gate when applicable, targeted GET smoke, and production login smoke.
+9. The final read-only outcome job records exact public backend and frontend commits. If only one full-stack target matches, it writes `PARTIAL_RELEASE`; if both match but verification failed, it writes `RELEASE_UNVERIFIED`. Either condition leaves the workflow red and requires an explicit follow-up decision—there is no automatic rollback.
+
+Railway Git deployments set `RAILWAY_GIT_COMMIT_SHA`, and the repository start wrapper reports the backend service release type as `backend` unless an explicit stable Railway release-type variable exists. The workflow's immutable `release_type=full-stack` is the authoritative orchestration intent for the combined release; do not mutate production Railway variables merely to relabel one deployment.
 
 ## 401 On `/api/auth/login`
 

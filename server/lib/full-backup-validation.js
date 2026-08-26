@@ -1,7 +1,11 @@
+const crypto = require('crypto');
 const fs = require('fs');
+const path = require('path');
 const {
   crc32,
-  fileRangeCrc32Sync,
+  crc32Finalize,
+  crc32Seed,
+  crc32Update,
   normalizeZipPath,
 } = require('./zip-store');
 
@@ -10,6 +14,47 @@ const CENTRAL_SIGNATURE = 0x02014b50;
 const LOCAL_SIGNATURE = 0x04034b50;
 const MAX_END_SEARCH = 65_557;
 const MAX_CENTRAL_DIRECTORY = 32 * 1024 * 1024;
+
+function fileIdentity(stat) {
+  return {
+    dev: String(stat.dev),
+    ino: String(stat.ino),
+    size: String(stat.size),
+    mtimeMs: String(stat.mtimeMs),
+    ctimeMs: String(stat.ctimeMs),
+  };
+}
+
+function sameFileIdentity(left, right) {
+  return JSON.stringify(fileIdentity(left)) === JSON.stringify(fileIdentity(right));
+}
+
+function openBoundArchive(archive) {
+  const pathState = fs.lstatSync(archive.filePath);
+  if (!pathState.isFile() || pathState.isSymbolicLink() || pathState.nlink !== 1) {
+    throw new Error('Verified backup ZIP path is unsafe.');
+  }
+  const fd = fs.openSync(archive.filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  const descriptorState = fs.fstatSync(fd);
+  if (
+    !descriptorState.isFile()
+    || descriptorState.nlink !== 1
+    || !sameFileIdentity(pathState, descriptorState)
+    || (archive.fileIdentity && JSON.stringify(fileIdentity(descriptorState)) !== JSON.stringify(archive.fileIdentity))
+  ) {
+    fs.closeSync(fd);
+    throw new Error('Verified backup ZIP identity changed.');
+  }
+  return { fd, before: descriptorState };
+}
+
+function assertBoundArchiveUnchanged(archive, fd, before) {
+  const after = fs.fstatSync(fd);
+  const pathAfter = fs.lstatSync(archive.filePath);
+  if (!sameFileIdentity(before, after) || !sameFileIdentity(before, pathAfter)) {
+    throw new Error('Verified backup ZIP changed while reading.');
+  }
+}
 
 function readExactly(fd, length, position) {
   const buffer = Buffer.allocUnsafe(length);
@@ -22,11 +67,29 @@ function readExactly(fd, length, position) {
   return buffer;
 }
 
+function crc32Range(fd, position, length) {
+  const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, Math.max(1, length)));
+  let seed = crc32Seed();
+  let consumed = 0;
+  while (consumed < length) {
+    const requested = Math.min(buffer.length, length - consumed);
+    const bytesRead = fs.readSync(fd, buffer, 0, requested, position + consumed);
+    if (bytesRead === 0) throw new Error('Verified backup ZIP entry ended unexpectedly.');
+    seed = crc32Update(seed, buffer.subarray(0, bytesRead));
+    consumed += bytesRead;
+  }
+  return crc32Finalize(seed);
+}
+
 function inspectStoredZipArchive(filePath) {
-  const stat = fs.statSync(filePath);
-  if (!stat.isFile() || stat.size < 22) throw new Error('Verified backup is not a ZIP archive.');
-  const fd = fs.openSync(filePath, 'r');
+  const pathState = fs.lstatSync(filePath);
+  if (!pathState.isFile() || pathState.isSymbolicLink() || pathState.nlink !== 1 || pathState.size < 22) {
+    throw new Error('Verified backup is not a safe ZIP archive.');
+  }
+  const fd = fs.openSync(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  const stat = fs.fstatSync(fd);
   try {
+    if (!sameFileIdentity(pathState, stat)) throw new Error('Verified backup ZIP identity changed.');
     const tailSize = Math.min(stat.size, MAX_END_SEARCH);
     const tail = readExactly(fd, tailSize, stat.size - tailSize);
     let endOffset = -1;
@@ -87,7 +150,12 @@ function inspectStoredZipArchive(filePath) {
     if (cursor !== central.length || entries.size !== entryCount) {
       throw new Error('Verified backup ZIP entry count is invalid.');
     }
-    return { filePath, size: stat.size, centralOffset, entries };
+    const after = fs.fstatSync(fd);
+    const pathAfter = fs.lstatSync(filePath);
+    if (!sameFileIdentity(stat, after) || !sameFileIdentity(stat, pathAfter)) {
+      throw new Error('Verified backup ZIP changed while being inspected.');
+    }
+    return { filePath, fileIdentity: fileIdentity(after), size: stat.size, centralOffset, entries };
   } finally {
     fs.closeSync(fd);
   }
@@ -96,7 +164,7 @@ function inspectStoredZipArchive(filePath) {
 function inspectStoredZipEntryLocal(archive, name) {
   const entry = archive?.entries?.get(name);
   if (!entry) throw new Error(`Verified backup ZIP is missing ${name}.`);
-  const fd = fs.openSync(archive.filePath, 'r');
+  const { fd, before } = openBoundArchive(archive);
   try {
     const local = readExactly(fd, 30, entry.localOffset);
     if (local.readUInt32LE(0) !== LOCAL_SIGNATURE) throw new Error(`Verified backup ZIP local entry ${name} is invalid.`);
@@ -116,27 +184,112 @@ function inspectStoredZipEntryLocal(archive, name) {
     if (!Number.isSafeInteger(dataOffset) || dataOffset < 0 || dataOffset + entry.size > archive.centralOffset) {
       throw new Error(`Verified backup ZIP local entry ${name} overlaps the central directory.`);
     }
+    assertBoundArchiveUnchanged(archive, fd, before);
     return { entry, dataOffset };
   } finally {
     fs.closeSync(fd);
   }
 }
 
+function hashStoredZipEntry(archive, name) {
+  const { entry, dataOffset } = inspectStoredZipEntryLocal(archive, name);
+  const { fd, before } = openBoundArchive(archive);
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, Math.max(1, entry.size)));
+  let position = 0;
+  try {
+    while (position < entry.size) {
+      const requested = Math.min(buffer.length, entry.size - position);
+      const bytesRead = fs.readSync(fd, buffer, 0, requested, dataOffset + position);
+      if (bytesRead === 0) throw new Error(`Verified backup ZIP entry ${name} ended unexpectedly.`);
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    assertBoundArchiveUnchanged(archive, fd, before);
+    return hash.digest('hex');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function extractStoredZipEntry(archive, name, targetPath) {
+  const { entry, dataOffset } = inspectStoredZipEntryLocal(archive, name);
+  validateStoredZipEntry(archive, name);
+  const { fd: sourceFd, before } = openBoundArchive(archive);
+  let targetFd;
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, Math.max(1, entry.size)));
+  let position = 0;
+  try {
+    if (typeof fs.statfsSync === 'function') {
+      const filesystem = fs.statfsSync(path.dirname(targetPath));
+      const available = Number(filesystem.bavail) * Number(filesystem.bsize);
+      if (!Number.isFinite(available) || available < entry.size + 16 * 1024 * 1024) {
+        throw new Error(`Verified backup ZIP entry ${name} has insufficient extraction space.`);
+      }
+    }
+    targetFd = fs.openSync(
+      targetPath,
+      fs.constants.O_WRONLY
+        | fs.constants.O_CREAT
+        | fs.constants.O_EXCL
+        | (fs.constants.O_NOFOLLOW || 0),
+      0o600,
+    );
+    fs.fchmodSync(targetFd, 0o600);
+    while (position < entry.size) {
+      const requested = Math.min(buffer.length, entry.size - position);
+      const bytesRead = fs.readSync(sourceFd, buffer, 0, requested, dataOffset + position);
+      if (bytesRead === 0) throw new Error(`Verified backup ZIP entry ${name} ended unexpectedly.`);
+      let written = 0;
+      while (written < bytesRead) {
+        written += fs.writeSync(targetFd, buffer, written, bytesRead - written, position + written);
+      }
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    fs.fsyncSync(targetFd);
+    const targetState = fs.fstatSync(targetFd);
+    assertBoundArchiveUnchanged(archive, sourceFd, before);
+    if (!targetState.isFile() || targetState.nlink !== 1 || targetState.size !== entry.size) {
+      throw new Error(`Verified backup ZIP entry ${name} was not extracted exactly.`);
+    }
+    return { size: entry.size, sha256: hash.digest('hex') };
+  } catch (error) {
+    if (targetFd !== undefined) {
+      try { fs.closeSync(targetFd); } catch { /* original error wins */ }
+      targetFd = undefined;
+    }
+    try { fs.rmSync(targetPath, { force: true }); } catch { /* original error wins */ }
+    throw error;
+  } finally {
+    if (targetFd !== undefined) fs.closeSync(targetFd);
+    fs.closeSync(sourceFd);
+  }
+}
+
 function validateStoredZipEntry(archive, name) {
   const { entry, dataOffset } = inspectStoredZipEntryLocal(archive, name);
-  if (fileRangeCrc32Sync(archive.filePath, dataOffset, entry.size) !== entry.checksum) {
-    throw new Error(`Verified backup ZIP entry ${name} failed CRC-32 validation.`);
+  const { fd, before } = openBoundArchive(archive);
+  try {
+    if (crc32Range(fd, dataOffset, entry.size) !== entry.checksum) {
+      throw new Error(`Verified backup ZIP entry ${name} failed CRC-32 validation.`);
+    }
+    assertBoundArchiveUnchanged(archive, fd, before);
+    return entry;
+  } finally {
+    fs.closeSync(fd);
   }
-  return entry;
 }
 
 function readStoredZipEntry(archive, name, { maxBytes = 256 * 1024 * 1024 } = {}) {
   const { entry, dataOffset } = inspectStoredZipEntryLocal(archive, name);
   if (entry.size > maxBytes) throw new Error(`Verified backup ZIP entry ${name} exceeds the safety limit.`);
-  const fd = fs.openSync(archive.filePath, 'r');
+  const { fd, before } = openBoundArchive(archive);
   try {
     const data = readExactly(fd, entry.size, dataOffset);
     if (crc32(data) !== entry.checksum) throw new Error(`Verified backup ZIP entry ${name} failed CRC-32 validation.`);
+    assertBoundArchiveUnchanged(archive, fd, before);
     return data;
   } finally {
     fs.closeSync(fd);
@@ -171,6 +324,8 @@ function inspectFullBackupArchive(filePath) {
 module.exports = {
   inspectFullBackupArchive,
   inspectStoredZipArchive,
+  extractStoredZipEntry,
+  hashStoredZipEntry,
   readStoredZipEntry,
   validateStoredZipEntry,
 };

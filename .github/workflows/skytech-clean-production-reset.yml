@@ -1,143 +1,1675 @@
-name: Skytech Clean Production Reset
+name: Skytech Preliminary Production Backup
 
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: Guarded reset operation
+      expected_deployed_sha:
+        description: Exact 40-character commit currently deployed to production
         required: true
-        type: choice
-        options:
-          - dry-run
-          - backup
-          - verify
-          - apply
-          - purge-quarantine
-      confirmation:
-        description: Exact confirmation token required by apply/purge
-        required: false
-        type: string
-      backup_filename:
-        description: Verified skytech-pre-clean-reset-*.zip filename
-        required: false
-        type: string
-      backup_sha256:
-        description: Verified backup SHA-256
-        required: false
-        type: string
-      pre_reset_audit:
-        description: Must be pass for production apply
-        required: false
-        default: fail
-        type: choice
-        options:
-          - fail
-          - pass
-      quarantine:
-        description: Exact quarantine basename for purge
-        required: false
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
-  group: skytech-clean-production-reset
+  group: production-release
   cancel-in-progress: false
 
 jobs:
-  reset-operation:
-    name: ${{ inputs.mode }}
+  preliminary-backup:
+    name: backup-only
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Two independent <=75m workers plus artifact transfer/crypto/revalidation reserve.
+    timeout-minutes: 240
+    environment: production
+    env:
+      EXPECTED_REPOSITORY: rishatkznAI/rental-management
+      EXPECTED_REF: refs/heads/main
+      RAILWAY_PROJECT_ID: 1558b38d-bf16-4b50-9ee6-0871b7152116
+      RAILWAY_ENVIRONMENT_ID: 62833109-61cb-4600-9200-d624d6537a05
+      RAILWAY_ENVIRONMENT_NAME: production
+      RAILWAY_SERVICE_ID: b2016e92-3c50-4b00-800d-625a139b219c
+      RAILWAY_SERVICE_NAME: rental-management
+      RAILWAY_SOURCE_BRANCH: main
+      RAILWAY_SOURCE_ROOT_DIRECTORY: /server
+      RAILWAY_CONFIG_FILE: /server/railway.toml
+      RAILWAY_HEALTHCHECK_PATH: /health
+      RAILWAY_START_COMMAND: node scripts/start-with-release-type.cjs
+      RAILWAY_VOLUME_ID: 48b8768c-a8a9-4a87-8a4b-b980fff5d00c
+      RAILWAY_VOLUME_NAME: rental-management-volume
+      RAILWAY_VOLUME_MOUNT_PATH: /data
+      PRODUCTION_API_ORIGIN: https://rental-management-production-35bc.up.railway.app
     steps:
-      - name: Validate production reset secrets
+      - name: Bind this run to the reviewed repository, ref, and commit
         env:
-          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
-          SKYTECH_CLEAN_RESET_TOKEN: ${{ secrets.SKYTECH_CLEAN_RESET_TOKEN }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        shell: bash
         run: |
-          test -n "$PRODUCTION_API_URL"
-          test "${#SKYTECH_CLEAN_RESET_TOKEN}" -ge 32
+          set -euo pipefail
+          [[ "$EXPECTED_DEPLOYED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$GITHUB_REF" = "$EXPECTED_REF"
+          test "$GITHUB_SHA" = "$EXPECTED_DEPLOYED_SHA"
+          test "$GITHUB_WORKFLOW_SHA" = "$GITHUB_SHA"
+          test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_REPOSITORY/.github/workflows/skytech-clean-production-reset.yml@$EXPECTED_REF"
 
-      - name: Validate operation inputs
-        env:
-          MODE: ${{ inputs.mode }}
-          CONFIRMATION: ${{ inputs.confirmation }}
-          BACKUP_FILENAME: ${{ inputs.backup_filename }}
-          BACKUP_SHA256: ${{ inputs.backup_sha256 }}
-          PRE_RESET_AUDIT: ${{ inputs.pre_reset_audit }}
-          QUARANTINE: ${{ inputs.quarantine }}
-        run: |
-          if [[ "$MODE" == "apply" ]]; then
-            test "$CONFIRMATION" = "SKYTECH_CLEAN_PRODUCTION_RESET"
-            [[ "$BACKUP_FILENAME" =~ ^skytech-pre-clean-reset-[0-9]{8}T[0-9]{6}Z\.zip$ ]]
-            [[ "$BACKUP_SHA256" =~ ^[a-f0-9]{64}$ ]]
-            test "$PRE_RESET_AUDIT" = "pass"
-          fi
-          if [[ "$MODE" == "purge-quarantine" ]]; then
-            test "$CONFIRMATION" = "SKYTECH_PURGE_RESET_QUARANTINE"
-            [[ "$BACKUP_FILENAME" =~ ^skytech-pre-clean-reset-[0-9]{8}T[0-9]{6}Z\.zip$ ]]
-            [[ "$BACKUP_SHA256" =~ ^[a-f0-9]{64}$ ]]
-            [[ "$QUARANTINE" =~ ^\.skytech-reset-quarantine-[0-9]{8}T[0-9]{6,9}Z$ ]]
-          fi
-
-      - name: Run guarded production operation
-        env:
-          MODE: ${{ inputs.mode }}
-          CONFIRMATION: ${{ inputs.confirmation }}
-          BACKUP_FILENAME: ${{ inputs.backup_filename }}
-          BACKUP_SHA256: ${{ inputs.backup_sha256 }}
-          PRE_RESET_AUDIT: ${{ inputs.pre_reset_audit }}
-          QUARANTINE: ${{ inputs.quarantine }}
-          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
-          SKYTECH_CLEAN_RESET_TOKEN: ${{ secrets.SKYTECH_CLEAN_RESET_TOKEN }}
-        run: |
-          base_url="${PRODUCTION_API_URL%/}/api/admin/skytech-clean-reset"
-          if [[ "$MODE" == "dry-run" || "$MODE" == "verify" ]]; then
-            curl --fail-with-body --silent --show-error \
-              --header "X-Skytech-Reset-Token: $SKYTECH_CLEAN_RESET_TOKEN" \
-              "$base_url/$MODE" > reset-response.json
-          elif [[ "$MODE" == "backup" ]]; then
-            curl --fail-with-body --silent --show-error \
-              --request POST \
-              --header "X-Skytech-Reset-Token: $SKYTECH_CLEAN_RESET_TOKEN" \
-              "$base_url/backup" > reset-response.json
-          elif [[ "$MODE" == "apply" ]]; then
-            jq -n \
-              --arg confirmation "$CONFIRMATION" \
-              --arg backupFilename "$BACKUP_FILENAME" \
-              --arg backupSha256 "$BACKUP_SHA256" \
-              --arg preResetAudit "$PRE_RESET_AUDIT" \
-              '{confirmation:$confirmation,backupFilename:$backupFilename,backupSha256:$backupSha256,preResetAudit:$preResetAudit}' \
-              > reset-request.json
-            curl --fail-with-body --silent --show-error \
-              --request POST \
-              --header 'Content-Type: application/json' \
-              --header "X-Skytech-Reset-Token: $SKYTECH_CLEAN_RESET_TOKEN" \
-              --data-binary @reset-request.json \
-              "$base_url/apply" > reset-response.json
-          else
-            jq -n \
-              --arg confirmation "$CONFIRMATION" \
-              --arg backupFilename "$BACKUP_FILENAME" \
-              --arg backupSha256 "$BACKUP_SHA256" \
-              --arg quarantine "$QUARANTINE" \
-              '{confirmation:$confirmation,backupFilename:$backupFilename,backupSha256:$backupSha256,quarantine:$quarantine}' \
-              > reset-request.json
-            curl --fail-with-body --silent --show-error \
-              --request POST \
-              --header 'Content-Type: application/json' \
-              --header "X-Skytech-Reset-Token: $SKYTECH_CLEAN_RESET_TOKEN" \
-              --data-binary @reset-request.json \
-              "$base_url/purge-quarantine" > reset-response.json
-          fi
-          jq -e '.ok == true' reset-response.json
-          jq . reset-response.json
-
-      - name: Upload non-secret reset evidence
-        uses: actions/upload-artifact@v6
+      - name: Check out the exact reviewed commit without persisted credentials
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:
-          name: skytech-clean-reset-${{ inputs.mode }}-${{ github.run_id }}
-          path: reset-response.json
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Verify the checked-out commit and create the idempotency nonce
+        env:
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const material = [
+            process.env.GITHUB_REPOSITORY,
+            process.env.GITHUB_RUN_ID,
+            process.env.EXPECTED_DEPLOYED_SHA,
+          ].join(':');
+          const hexadecimal = crypto.createHash('sha256').update(material).digest('hex').slice(0, 32).split('');
+          hexadecimal[12] = '4';
+          hexadecimal[16] = ((Number.parseInt(hexadecimal[16], 16) & 0x3) | 0x8).toString(16);
+          const value = [
+            hexadecimal.slice(0, 8).join(''),
+            hexadecimal.slice(8, 12).join(''),
+            hexadecimal.slice(12, 16).join(''),
+            hexadecimal.slice(16, 20).join(''),
+            hexadecimal.slice(20, 32).join(''),
+          ].join('-');
+          if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value)) {
+            throw new Error('derived request nonce is not a lowercase RFC4122 variant/version UUID');
+          }
+          const filename = path.join(process.env.RUNNER_TEMP, 'skytech-pre-compatibility-backup-request-nonce');
+          fs.writeFileSync(filename, `${value}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+          NODE
+          nonce_file="$RUNNER_TEMP/skytech-pre-compatibility-backup-request-nonce"
+          test "$(stat -c '%a' "$nonce_file")" = "600"
+          [[ "$(cat "$nonce_file")" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+
+      - name: Install pinned Railway CLI
+        shell: bash
+        run: npm install --global @railway/cli@4.60.0
+
+      - name: Prove one exact active Railway deployment and one running replica before backup
+        env:
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RAILWAY_TOKEN" != *$'\n'* && "$RAILWAY_TOKEN" != *$'\r'* ]]
+          test -n "$RAILWAY_TOKEN"
+          echo "::add-mask::$RAILWAY_TOKEN"
+          target_dir="$RUNNER_TEMP/skytech-clean-reset-target"
+          mkdir -p "$target_dir"
+          chmod 700 "$target_dir"
+          cd "$target_dir"
+          railway link \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID"
+          railway status --json > railway-status-before.json
+          cd "$GITHUB_WORKSPACE"
+          RAILWAY_CONTROL_PLANE_OUTPUT="$GITHUB_WORKSPACE/railway-control-plane-before.json" \
+            node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import {
+            RELEASE_TARGET_QUERY,
+            deploymentCommit,
+            railwayGraphql,
+            validateRailwayEffectiveConfig,
+            validateRailwayTargetIdentity,
+          } from './scripts/railway-backend-release.mjs';
+
+          const configAwareReleaseTargetQuery = RELEASE_TARGET_QUERY.replace(
+            '    service(id: $serviceId) {',
+            `    environment(id: $environmentId) {
+              id
+              name
+              unmergedChangesCount
+              config(decryptVariables: false)
+            }
+            environmentStagedChanges(environmentId: $environmentId) {
+              patch(decryptVariables: false)
+            }
+            service(id: $serviceId) {`,
+          );
+          if (configAwareReleaseTargetQuery === RELEASE_TARGET_QUERY) {
+            throw new Error('Railway release query could not be extended with effective environment config');
+          }
+          const data = await railwayGraphql({
+            token: process.env.RAILWAY_TOKEN,
+            query: configAwareReleaseTargetQuery,
+            variables: {
+              environmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+              serviceId: process.env.RAILWAY_SERVICE_ID,
+            },
+          });
+          const identity = validateRailwayTargetIdentity(data, {
+            projectId: process.env.RAILWAY_PROJECT_ID,
+            environmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+            serviceId: process.env.RAILWAY_SERVICE_ID,
+            serviceName: process.env.RAILWAY_SERVICE_NAME,
+            repository: process.env.EXPECTED_REPOSITORY,
+          });
+          const effectiveRuntime = validateRailwayEffectiveConfig(data, {
+            projectId: process.env.RAILWAY_PROJECT_ID,
+            environmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+            serviceId: process.env.RAILWAY_SERVICE_ID,
+            serviceName: process.env.RAILWAY_SERVICE_NAME,
+            repository: process.env.EXPECTED_REPOSITORY,
+            rootDirectory: process.env.RAILWAY_SOURCE_ROOT_DIRECTORY,
+            configFile: process.env.RAILWAY_CONFIG_FILE,
+            healthcheckPath: process.env.RAILWAY_HEALTHCHECK_PATH,
+            startCommand: process.env.RAILWAY_START_COMMAND,
+          }, fs.readFileSync('server/railway.toml', 'utf8'));
+          if (identity.activeDeployments.length !== 1) {
+            throw new Error('exactly one active Railway deployment is required');
+          }
+          const deployment = identity.activeDeployments[0];
+          const objectValue = value => {
+            if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+            if (typeof value !== 'string' || !value.trim()) return {};
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+          };
+          const environment = data?.environment;
+          if (!environment || typeof environment !== 'object' || Array.isArray(environment)) {
+            throw new Error('target Railway environment was not returned');
+          }
+          const stagedChanges = data?.environmentStagedChanges;
+          if (!stagedChanges || typeof stagedChanges !== 'object' || Array.isArray(stagedChanges)) {
+            throw new Error('Railway staged-changes proof was not returned');
+          }
+          const stagedPatch = stagedChanges.patch;
+          if (!stagedPatch || typeof stagedPatch !== 'object' || Array.isArray(stagedPatch)) {
+            throw new Error('Railway staged patch is not a JSON object');
+          }
+          const stagedPatchStructuralChangeCount = Object.keys(stagedPatch).length;
+          if (stagedPatchStructuralChangeCount !== 0) {
+            throw new Error('Railway staged patch contains structural changes');
+          }
+          const stagedPatchCanonical = JSON.stringify(stagedPatch);
+          if (stagedPatchCanonical !== '{}') {
+            throw new Error('Railway staged patch is not canonical-empty');
+          }
+          const stagedPatchFingerprint = crypto.createHash('sha256')
+            .update(stagedPatchCanonical)
+            .digest('hex');
+          const metadata = objectValue(deployment.meta);
+          const deployConfig = objectValue(objectValue(metadata.serviceManifest).deploy);
+          let deploymentMetadataReplicaCount;
+          if (deployConfig.multiRegionConfig !== undefined && deployConfig.multiRegionConfig !== null) {
+            const counts = Object.values(objectValue(deployConfig.multiRegionConfig)).map(value => value === null
+              ? 0
+              : Number(value?.numReplicas));
+            if (counts.some(value => !Number.isSafeInteger(value) || value < 0)) {
+              throw new Error('Railway deployment-metadata replica configuration is invalid');
+            }
+            deploymentMetadataReplicaCount = counts.reduce((total, value) => total + value, 0);
+          } else if (typeof deployConfig?.region === 'string' && deployConfig.region.trim()) {
+            deploymentMetadataReplicaCount = deployConfig.numReplicas === undefined
+              ? 1
+              : Number(deployConfig.numReplicas);
+          } else {
+            throw new Error('Railway replica count is not proven by deployment metadata');
+          }
+          const effectiveEnvironmentConfig = objectValue(environment.config);
+          const effectiveServices = objectValue(effectiveEnvironmentConfig.services);
+          const effectiveServiceConfig = objectValue(effectiveServices[process.env.RAILWAY_SERVICE_ID]);
+          const effectiveSource = objectValue(effectiveServiceConfig.source);
+          const effectiveSourceCommitSha = String(effectiveSource.commitSha || '').trim().toLowerCase();
+          if (effectiveSourceCommitSha && !/^[a-f0-9]{40}$/.test(effectiveSourceCommitSha)) {
+            throw new Error('effective source commitSha is not an exact lowercase SHA');
+          }
+          const effectiveDeploy = objectValue(effectiveServiceConfig.deploy);
+          const effectiveDeployStartCommand = String(effectiveDeploy.startCommand || '').trim();
+          const effectiveDeployHealthcheckPath = String(effectiveDeploy.healthcheckPath || '').trim();
+          const effectiveDeployPreDeployCommandIsAbsent = effectiveDeploy.preDeployCommand === undefined
+            || effectiveDeploy.preDeployCommand === null
+            || (typeof effectiveDeploy.preDeployCommand === 'string'
+              && effectiveDeploy.preDeployCommand.trim() === '');
+          const effectiveMultiRegionConfig = objectValue(effectiveDeploy.multiRegionConfig);
+          const effectiveRegionEntries = Object.entries(effectiveMultiRegionConfig)
+            .sort(([left], [right]) => left.localeCompare(right));
+          if (effectiveRegionEntries.length === 0) {
+            throw new Error('effective Railway multi-region replica configuration is empty');
+          }
+          const canonicalRegionReplicas = {};
+          for (const [region, regionConfigValue] of effectiveRegionEntries) {
+            const regionConfig = objectValue(regionConfigValue);
+            const count = Number(regionConfig.numReplicas);
+            if (!region.trim() || !Number.isSafeInteger(count) || count < 0) {
+              throw new Error('effective Railway multi-region replica configuration is invalid');
+            }
+            canonicalRegionReplicas[region] = { numReplicas: count };
+          }
+          const effectiveConfigDesiredReplicaCount = Object.values(canonicalRegionReplicas)
+            .reduce((total, region) => total + region.numReplicas, 0);
+          const effectiveVolumeMounts = objectValue(effectiveServiceConfig.volumeMounts);
+          const effectiveVolumeMountIds = Object.keys(effectiveVolumeMounts).sort();
+          const effectiveVolumeMount = objectValue(effectiveVolumeMounts[process.env.RAILWAY_VOLUME_ID]);
+          // This schema field is nullable: null is unknown, never evidence of an empty change set.
+          // Require numeric zero and independently require the secret-safe staged patch to be {}.
+          const checks = [
+            [environment.id === process.env.RAILWAY_ENVIRONMENT_ID, 'effective config environment ID mismatch'],
+            [environment.name === process.env.RAILWAY_ENVIRONMENT_NAME, 'effective config environment name mismatch'],
+            [environment.unmergedChangesCount === 0, 'Railway unmerged-change count is not numeric zero'],
+            [stagedPatchStructuralChangeCount === 0, 'Railway staged patch change count is not zero'],
+            [stagedPatchCanonical === '{}', 'Railway staged patch is not canonical-empty'],
+            [deployment.projectId === identity.projectId, 'active deployment project mismatch'],
+            [deployment.environmentId === identity.environmentId, 'active deployment environment mismatch'],
+            [deployment.serviceId === identity.serviceId, 'active deployment service mismatch'],
+            [String(deployment.status || '').trim().toUpperCase() === 'SUCCESS', 'active deployment is not successful'],
+            [deploymentCommit(deployment) === process.env.EXPECTED_DEPLOYED_SHA, 'active deployment commit mismatch'],
+            [deploymentMetadataReplicaCount === 1, 'deployment-metadata replica count is not exactly one'],
+            [Object.keys(effectiveServices).length > 0, 'effective Railway services config is empty'],
+            [Object.hasOwn(effectiveServices, process.env.RAILWAY_SERVICE_ID), 'target service is absent from effective config'],
+            [effectiveSource.repo === process.env.EXPECTED_REPOSITORY, 'effective source repository mismatch'],
+            [effectiveSource.branch === process.env.RAILWAY_SOURCE_BRANCH, 'effective source branch mismatch'],
+            [!effectiveSourceCommitSha || effectiveSourceCommitSha === process.env.EXPECTED_DEPLOYED_SHA, 'effective source commitSha mismatch'],
+            [effectiveSource.rootDirectory === process.env.RAILWAY_SOURCE_ROOT_DIRECTORY, 'effective source root mismatch'],
+            [effectiveSource.image === undefined || effectiveSource.image === null || effectiveSource.image === '', 'effective source unexpectedly uses an image'],
+            [!effectiveDeployStartCommand || effectiveDeployStartCommand === process.env.RAILWAY_START_COMMAND, 'effective deploy start command mismatch'],
+            [!effectiveDeployHealthcheckPath || effectiveDeployHealthcheckPath === process.env.RAILWAY_HEALTHCHECK_PATH, 'effective deploy healthcheck path mismatch'],
+            [effectiveDeployPreDeployCommandIsAbsent, 'effective deploy pre-deploy command must be absent'],
+            [effectiveConfigDesiredReplicaCount === 1, 'effective-config desired replica count is not exactly one'],
+            [effectiveVolumeMountIds.length === 1, 'effective config must contain exactly one volume mount'],
+            [effectiveVolumeMountIds[0] === process.env.RAILWAY_VOLUME_ID, 'effective config volume ID mismatch'],
+            [effectiveVolumeMount.mountPath === process.env.RAILWAY_VOLUME_MOUNT_PATH, 'effective config volume mount path mismatch'],
+          ];
+          const failed = checks.find(([ok]) => !ok);
+          if (failed) throw new Error(failed[1]);
+          const effectiveConfigProjection = {
+            environment: {
+              id: environment.id,
+              name: environment.name,
+              unmergedChangesCount: 0,
+            },
+            service: {
+              id: process.env.RAILWAY_SERVICE_ID,
+              source: {
+                repo: effectiveSource.repo,
+                branch: effectiveSource.branch,
+                commitSha: effectiveSourceCommitSha || null,
+                rootDirectory: effectiveSource.rootDirectory,
+                image: null,
+              },
+              runtimeAuthority: {
+                configFile: effectiveRuntime.configFile,
+                healthcheckPath: effectiveRuntime.healthcheckPath,
+                startCommand: effectiveRuntime.startCommand,
+                configAuthority: effectiveRuntime.configAuthority,
+              },
+              deploy: {
+                startCommand: effectiveDeployStartCommand || null,
+                healthcheckPath: effectiveDeployHealthcheckPath || null,
+                preDeployCommand: null,
+                multiRegionConfig: canonicalRegionReplicas,
+                desiredReplicaCount: effectiveConfigDesiredReplicaCount,
+              },
+              volumeMounts: {
+                [process.env.RAILWAY_VOLUME_ID]: {
+                  mountPath: effectiveVolumeMount.mountPath,
+                },
+              },
+            },
+          };
+          const effectiveConfigFingerprint = crypto.createHash('sha256')
+            .update(JSON.stringify(effectiveConfigProjection))
+            .digest('hex');
+          fs.writeFileSync(process.env.RAILWAY_CONTROL_PLANE_OUTPUT, `${JSON.stringify({
+            projectId: identity.projectId,
+            environmentId: identity.environmentId,
+            serviceId: identity.serviceId,
+            serviceName: identity.serviceName,
+            repository: process.env.GITHUB_REPOSITORY,
+            sourceRepositoryNormalized: identity.repository,
+            activeDeploymentCount: identity.activeDeployments.length,
+            activeDeploymentId: deployment.id,
+            activeDeploymentStatus: String(deployment.status).trim().toUpperCase(),
+            deployedSha: deploymentCommit(deployment),
+            deploymentMetadataReplicaCount,
+            effectiveConfigDesiredReplicaCount,
+            effectiveConfigProjection,
+            effectiveConfigFingerprint,
+            stagedChangesEmpty: true,
+            stagedPatchStructuralChangeCount,
+            stagedPatchFingerprint,
+          }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+          NODE
+          status_file="$RUNNER_TEMP/skytech-clean-reset-target/railway-status-before.json"
+          test "$(jq -r '.id' "$status_file")" = "$RAILWAY_PROJECT_ID"
+          jq -e \
+            --arg environment "$RAILWAY_ENVIRONMENT_ID" \
+            --arg service "$RAILWAY_SERVICE_ID" \
+            --arg volume "$RAILWAY_VOLUME_ID" \
+            --arg volumeName "$RAILWAY_VOLUME_NAME" \
+            --arg mountPath "$RAILWAY_VOLUME_MOUNT_PATH" \
+            --arg sha "$EXPECTED_DEPLOYED_SHA" \
+            --argjson controlPlane "$(cat railway-control-plane-before.json)" '
+              ([.environments.edges[].node | select(.id == $environment)]) as $environments
+              | ($environments | length) == 1
+                and (
+                  $environments[0] as $environmentNode
+                  | ([
+                      $environmentNode.serviceInstances.edges[].node
+                      | select(.serviceId == $service)
+                    ]) as $services
+                  | ([
+                      $environmentNode.volumeInstances.edges[].node
+                      | select(.volume.id == $volume)
+                    ]) as $volumeAttachments
+                  | ([
+                      $environmentNode.volumeInstances.edges[].node
+                      | select(.serviceId == $service)
+                      | select(.volume.id == $volume)
+                      | select(.volume.name == $volumeName)
+                      | select(.mountPath == $mountPath)
+                      | select(.state == "READY")
+                    ]) as $volumes
+                  | ($services | length) == 1
+                    and ($volumeAttachments | length) == 1
+                    and ($volumes | length) == 1
+                    and $controlPlane.activeDeploymentCount == 1
+                    and $controlPlane.deploymentMetadataReplicaCount == 1
+                    and $controlPlane.effectiveConfigDesiredReplicaCount == 1
+                    and $controlPlane.stagedChangesEmpty == true
+                    and $controlPlane.stagedPatchStructuralChangeCount == 0
+                    and ($controlPlane.stagedPatchFingerprint | test("^[a-f0-9]{64}$"))
+                    and $services[0].latestDeployment.id == $controlPlane.activeDeploymentId
+                    and $services[0].latestDeployment.status == "SUCCESS"
+                    and $services[0].latestDeployment.meta.commitHash == $sha
+                    and $controlPlane.deployedSha == $sha
+                    and (($services[0].latestDeployment.instances | type) == "array")
+                    and (($services[0].latestDeployment.instances | length) == 1)
+                    and $services[0].latestDeployment.instances[0].status == "RUNNING"
+                    and (([
+                      $services[0].latestDeployment.instances[]
+                      | select(.status != "RUNNING")
+                    ] | length) == 0)
+                    and (($services[0].latestDeployment.instances[0].id | type) == "string")
+                    and (($services[0].latestDeployment.instances[0].id | length) > 0)
+                )
+            ' "$status_file" > /dev/null
+          jq -cS \
+            --arg environment "$RAILWAY_ENVIRONMENT_ID" \
+            --arg service "$RAILWAY_SERVICE_ID" \
+            --arg volume "$RAILWAY_VOLUME_ID" \
+            --argjson controlPlane "$(cat railway-control-plane-before.json)" '
+              . as $root
+              | ([.environments.edges[].node | select(.id == $environment)] | .[0]) as $environmentNode
+              | ([
+                  $environmentNode.serviceInstances.edges[].node
+                  | select(.serviceId == $service)
+                ] | .[0]) as $serviceNode
+              | ([
+                  $environmentNode.volumeInstances.edges[].node
+                  | select(.serviceId == $service)
+                  | select(.volume.id == $volume)
+                ] | .[0]) as $volumeNode
+              | {
+                  projectId: $root.id,
+                  environmentId: $environment,
+                  serviceId: $service,
+                  serviceName: $controlPlane.serviceName,
+                  repository: $controlPlane.repository,
+                  volumeId: $volumeNode.volume.id,
+                  volumeName: $volumeNode.volume.name,
+                  volumeMountPath: $volumeNode.mountPath,
+                  volumeState: $volumeNode.state,
+                  volumeAttachmentCount: ([$environmentNode.volumeInstances.edges[].node | select(.volume.id == $volume)] | length),
+                  activeDeploymentCount: $controlPlane.activeDeploymentCount,
+                  deploymentMetadataReplicaCount: $controlPlane.deploymentMetadataReplicaCount,
+                  effectiveConfigDesiredReplicaCount: $controlPlane.effectiveConfigDesiredReplicaCount,
+                  effectiveConfigProjection: $controlPlane.effectiveConfigProjection,
+                  effectiveConfigFingerprint: $controlPlane.effectiveConfigFingerprint,
+                  stagedChangesEmpty: $controlPlane.stagedChangesEmpty,
+                  stagedPatchStructuralChangeCount: $controlPlane.stagedPatchStructuralChangeCount,
+                  stagedPatchFingerprint: $controlPlane.stagedPatchFingerprint,
+                  deploymentId: $serviceNode.latestDeployment.id,
+                  deploymentStatus: $serviceNode.latestDeployment.status,
+                  deployedSha: $serviceNode.latestDeployment.meta.commitHash,
+                  deploymentInstanceCount: ($serviceNode.latestDeployment.instances | length),
+                  nonRunningInstanceCount: ([$serviceNode.latestDeployment.instances[] | select(.status != "RUNNING")] | length),
+                  replicaId: $serviceNode.latestDeployment.instances[0].id,
+                  replicaStatus: $serviceNode.latestDeployment.instances[0].status
+                }
+            ' "$status_file" > railway-target-before.json
+
+      - name: Bind the API runtime and replica to the Railway singleton
+        env:
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          curl --proto '=https' --tlsv1.2 \
+            --fail-with-body --silent --show-error \
+            --connect-timeout 15 --max-time 60 \
+            --header 'Accept: application/json' \
+            "$PRODUCTION_API_ORIGIN/api/version" > api-runtime-before.json
+          jq -e \
+            --arg sha "$EXPECTED_DEPLOYED_SHA" \
+            --argjson railway "$(cat railway-target-before.json)" '
+              .ok == true
+              and .build.commitFull == $sha
+              and .build.deployment.railwayDeploymentId == $railway.deploymentId
+              and .build.deployment.railwayReplicaId == $railway.replicaId
+              and .build.deployment.railwayEnvironment == "production"
+              and .build.deployment.railwayService == "rental-management"
+              and (.build.startedAt | type == "string" and length > 0)
+              and .app.disabled == true
+            ' api-runtime-before.json > /dev/null
+          jq -cS '{
+            commitFull: .build.commitFull,
+            deploymentId: .build.deployment.railwayDeploymentId,
+            replicaId: .build.deployment.railwayReplicaId,
+            environment: .build.deployment.railwayEnvironment,
+            service: .build.deployment.railwayService,
+            startedAt: .build.startedAt,
+            appDisabled: .app.disabled
+          }' api-runtime-before.json > api-runtime-identity-before.json
+
+      - name: Invoke the guarded idempotent preliminary backup
+        env:
+          PRELIMINARY_BACKUP_TOKEN: ${{ secrets.SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PRELIMINARY_BACKUP_TOKEN" != *$'\n'* && "$PRELIMINARY_BACKUP_TOKEN" != *$'\r'* ]]
+          test "${#PRELIMINARY_BACKUP_TOKEN}" -ge 32
+          echo "::add-mask::$PRELIMINARY_BACKUP_TOKEN"
+          nonce_file="$RUNNER_TEMP/skytech-pre-compatibility-backup-request-nonce"
+          request_nonce="$(cat "$nonce_file")"
+          [[ "$request_nonce" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          protected_headers="$RUNNER_TEMP/skytech-pre-compatibility-backup-curl-headers"
+          start_response="$RUNNER_TEMP/skytech-pre-compatibility-backup-start-response.json"
+          poll_response="$RUNNER_TEMP/skytech-pre-compatibility-backup-poll-response.json"
+          test ! -e reset-response.json
+          trap 'rm -f "$protected_headers" "$start_response" "$poll_response"' EXIT
+          printf '%s: %s\n%s: %s\n' \
+            'X-Skytech-Pre-Compatibility-Backup-Token' "$PRELIMINARY_BACKUP_TOKEN" \
+            'X-Skytech-Pre-Compatibility-Backup-Nonce' "$request_nonce" \
+            > "$protected_headers"
+          chmod 600 "$protected_headers"
+          test "$(stat -c '%a' "$protected_headers")" = "600"
+          start_http_status="$(curl --proto '=https' --tlsv1.2 \
+            --silent --show-error \
+            --connect-timeout 15 --max-time 60 \
+            --request POST \
+            --header "@$protected_headers" \
+            --output "$start_response" \
+            --write-out '%{http_code}' \
+            "$PRODUCTION_API_ORIGIN/api/admin/skytech-pre-compatibility-backup" \
+          )"
+          test "$start_http_status" = "202"
+          invocation_id="$(jq -er \
+            --arg requestNonce "$request_nonce" '
+              select(
+                .ok == true
+                and .status == "RUNNING"
+                and .requestNonce == $requestNonce
+                and (.invocationId | test("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+              )
+              | .invocationId
+            ' "$start_response")"
+          initial_invocation_file="$RUNNER_TEMP/skytech-pre-compatibility-backup-initial-invocation"
+          test ! -e "$initial_invocation_file"
+          printf '%s\n' "$invocation_id" > "$initial_invocation_file"
+          chmod 600 "$initial_invocation_file"
+          printf '%s: %s\n' \
+            'X-Skytech-Pre-Compatibility-Backup-Invocation-Id' "$invocation_id" \
+            >> "$protected_headers"
+          poll_deadline="$((SECONDS + 4800))"
+          while (( SECONDS < poll_deadline )); do
+            poll_http_status="$(curl --proto '=https' --tlsv1.2 \
+              --silent --show-error \
+              --connect-timeout 15 --max-time 60 \
+              --request GET \
+              --header "@$protected_headers" \
+              --output "$poll_response" \
+              --write-out '%{http_code}' \
+              "$PRODUCTION_API_ORIGIN/api/admin/skytech-pre-compatibility-backup/status")"
+            if [[ "$poll_http_status" == "200" ]]; then
+              jq -e \
+                --arg invocationId "$invocation_id" \
+                --arg requestNonce "$request_nonce" '
+                  .ok == true
+                  and .invocationId == $invocationId
+                  and .backup.requestNonce == $requestNonce
+                  and (.workerStatusCode == 200 or .workerStatusCode == 201)
+                ' "$poll_response" > /dev/null
+              mv "$poll_response" reset-response.json
+              break
+            fi
+            test "$poll_http_status" = "202"
+            jq -e \
+              --arg invocationId "$invocation_id" \
+              --arg requestNonce "$request_nonce" '
+                .ok == true
+                and .status == "RUNNING"
+                and .invocationId == $invocationId
+                and .requestNonce == $requestNonce
+              ' "$poll_response" > /dev/null
+            sleep 10
+          done
+          test -s reset-response.json
+          rm -f "$protected_headers"
+          trap - EXIT
+          jq -e \
+            --arg requestNonce "$request_nonce" '
+              .ok == true
+              and .backup.requestNonce == $requestNonce
+              and (.backup.operationId | test("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+              and .backup.databaseIncludedAs == "database/app.sqlite"
+              and (.backup.filename | test("^skytech-pre-clean-reset-[0-9]{8}T[0-9]{6}Z\\.zip$"))
+              and (.backup.sha256 | test("^[a-f0-9]{64}$"))
+              and (.backup.size | type == "number" and . > 0)
+              and (.backup.generatedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"))
+              and (.backup.collectionCounts | type == "object")
+              and .backup.databaseIntegrity == "ok"
+              and .backup.databaseForeignKeyViolations == 0
+              and .backup.skippedFilesCount == 0
+              and (.backup.includedFilesCount | type == "number" and . >= 0)
+              and (.backup.businessFileCount | type == "number" and . >= 0)
+              and (.backup.businessFileInventorySha256 | test("^[a-f0-9]{64}$"))
+              and (.backup.databaseFileSha256 | test("^[a-f0-9]{64}$"))
+              and (.backup.databaseFileSize | type == "number" and . > 0)
+              and (.backup.logicalDatabaseSha256 | test("^[a-f0-9]{64}$"))
+              and .backup.receiptFilename == "skytech-pre-compatibility-backup-receipt.json"
+              and (.backup.receiptSha256 | test("^[a-f0-9]{64}$"))
+              and (.backup.sourceStateBefore | type == "object")
+              and (.backup.sourceStateAfter | type == "object")
+              and .backup.sourceStateBefore.database == .backup.sourceStateAfter.database
+              and .backup.sourceStateBefore.wal == .backup.sourceStateAfter.wal
+            ' reset-response.json > /dev/null
+
+      - name: Download and verify the plaintext backup and durable receipt from Railway
+        env:
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$RAILWAY_TOKEN" != *$'\n'* && "$RAILWAY_TOKEN" != *$'\r'* ]]
+          test -n "$RAILWAY_TOKEN"
+          echo "::add-mask::$RAILWAY_TOKEN"
+          filename="$(jq -er '.backup.filename' reset-response.json)"
+          expected_sha="$(jq -er '.backup.sha256' reset-response.json)"
+          expected_size="$(jq -er '.backup.size' reset-response.json)"
+          receipt_filename="$(jq -er '.backup.receiptFilename' reset-response.json)"
+          receipt_sha="$(jq -er '.backup.receiptSha256' reset-response.json)"
+          [[ "$filename" =~ ^skytech-pre-clean-reset-[0-9]{8}T[0-9]{6}Z\.zip$ ]]
+          [[ "$expected_sha" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$expected_size" =~ ^[1-9][0-9]*$ ]]
+          test "$receipt_filename" = "skytech-pre-compatibility-backup-receipt.json"
+          [[ "$receipt_sha" =~ ^[a-f0-9]{64}$ ]]
+          cd "$RUNNER_TEMP/skytech-clean-reset-target"
+          railway volume files --volume "$RAILWAY_VOLUME_ID" download \
+            "/backups/$filename" "$GITHUB_WORKSPACE/skytech-clean-reset-backup.zip" --overwrite
+          railway volume files --volume "$RAILWAY_VOLUME_ID" download \
+            "/backups/$receipt_filename" "$GITHUB_WORKSPACE/skytech-clean-reset-backup-receipt.json" --overwrite
+          cd "$GITHUB_WORKSPACE"
+          chmod 600 skytech-clean-reset-backup.zip skytech-clean-reset-backup-receipt.json
+          test "$(sha256sum skytech-clean-reset-backup.zip | awk '{print $1}')" = "$expected_sha"
+          test "$(stat -c '%s' skytech-clean-reset-backup.zip)" = "$expected_size"
+          test "$(sha256sum skytech-clean-reset-backup-receipt.json | awk '{print $1}')" = "$receipt_sha"
+          unzip -tqq skytech-clean-reset-backup.zip
+          request_nonce="$(cat "$RUNNER_TEMP/skytech-pre-compatibility-backup-request-nonce")"
+          jq -e \
+            --arg requestNonce "$request_nonce" \
+            --arg deployedSha "$EXPECTED_DEPLOYED_SHA" \
+            --argjson response "$(jq -c '.backup' reset-response.json)" \
+            --argjson railway "$(cat railway-target-before.json)" \
+            --argjson apiRuntime "$(cat api-runtime-identity-before.json)" '
+              .receiptVersion == 1
+              and .purpose == "pre-schema-compatibility-production-backup"
+              and .status == "COMPLETE"
+              and .requestNonce == $requestNonce
+              and .requestNonce == $response.requestNonce
+              and .operationId == $response.operationId
+              and (.createdAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"))
+              and .archive.filename == $response.filename
+              and .archive.sha256 == $response.sha256
+              and .archive.size == $response.size
+              and .archive.generatedAt == $response.generatedAt
+              and .archive.databaseIncludedAs == $response.databaseIncludedAs
+              and .archive.collectionCounts == $response.collectionCounts
+              and .archive.includedFilesCount == $response.includedFilesCount
+              and .archive.skippedFilesCount == 0
+              and .archive.businessFileCount == $response.businessFileCount
+              and .archive.businessFileInventorySha256 == $response.businessFileInventorySha256
+              and .archive.databaseFileSha256 == $response.databaseFileSha256
+              and .archive.databaseFileSize == $response.databaseFileSize
+              and .archive.databaseIntegrity == "ok"
+              and .archive.databaseForeignKeyViolations == 0
+              and .archive.logicalDatabaseSha256 == $response.logicalDatabaseSha256
+              and (.source.identity.dev | test("^[0-9]+$"))
+              and (.source.identity.ino | test("^[0-9]+$"))
+              and .source.identity.realPath == "/data/app.sqlite"
+              and .source.queryOnly == true
+              and .source.totalChangesBefore == 0
+              and .source.totalChangesAfter == 0
+              and .source.durableStateUnchanged == true
+              and .source.before == $response.sourceStateBefore
+              and .source.after == $response.sourceStateAfter
+              and .source.before.database == .source.after.database
+              and .source.before.wal == .source.after.wal
+              and .runtime.commitFull == $deployedSha
+              and .runtime.commitFull == $apiRuntime.commitFull
+              and .runtime.startedAt == $apiRuntime.startedAt
+              and .runtime.deployment.railwayDeploymentId == $railway.deploymentId
+              and .runtime.deployment.railwayDeploymentId == $apiRuntime.deploymentId
+              and .runtime.deployment.railwayReplicaId == $railway.replicaId
+              and .runtime.deployment.railwayReplicaId == $apiRuntime.replicaId
+              and .runtime.deployment.railwayEnvironment == "production"
+              and .runtime.deployment.railwayService == "rental-management"
+            ' skytech-clean-reset-backup-receipt.json > /dev/null
+          jq -cS '{
+            receiptVersion,
+            purpose,
+            status,
+            requestNonce,
+            operationId,
+            createdAt,
+            source,
+            archive,
+            runtime: {
+              commitFull: .runtime.commitFull,
+              startedAt: .runtime.startedAt,
+              deploymentId: .runtime.deployment.railwayDeploymentId,
+              replicaId: .runtime.deployment.railwayReplicaId,
+              environment: .runtime.deployment.railwayEnvironment,
+              service: .runtime.deployment.railwayService
+            }
+          }' skytech-clean-reset-backup-receipt.json > backup-receipt-identity.json
+
+      - name: Encrypt the verified Railway download without Railway credentials
+        env:
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$BACKUP_ENCRYPTION_PASSPHRASE" != *$'\n'* && "$BACKUP_ENCRYPTION_PASSPHRASE" != *$'\r'* ]]
+          test "$(printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | wc -c)" -ge 32
+          echo "::add-mask::$BACKUP_ENCRYPTION_PASSPHRASE"
+          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg \
+            --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 \
+            --output skytech-clean-reset-backup.zip.gpg skytech-clean-reset-backup.zip
+          test -s skytech-clean-reset-backup.zip.gpg
+          jq -nS \
+            --arg sha256 "$(sha256sum skytech-clean-reset-backup.zip.gpg | awk '{print $1}')" \
+            --argjson sizeBytes "$(stat -c '%s' skytech-clean-reset-backup.zip.gpg)" '
+              { encryptedArchiveSha256: $sha256, encryptedArchiveSizeBytes: $sizeBytes }
+            ' > encrypted-artifact-before-upload.json
+          rm -f skytech-clean-reset-backup.zip
+          test ! -e skytech-clean-reset-backup.zip
+
+      - name: Store encrypted preliminary off-volume backup
+        id: backup_artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: skytech-pre-compatibility-backup-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: skytech-clean-reset-backup.zip.gpg
           if-no-files-found: error
           retention-days: 30
+
+      - name: Remove the local upload source before retrieval testing
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f skytech-clean-reset-backup.zip.gpg
+          test ! -e skytech-clean-reset-backup.zip.gpg
+          stored_dir="$RUNNER_TEMP/skytech-pre-compatibility-stored-artifact"
+          test ! -e "$stored_dir"
+
+      - name: Independently download the immutable artifact by exact ID
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          artifact-ids: ${{ steps.backup_artifact.outputs.artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/skytech-pre-compatibility-stored-artifact
+
+      - name: Enforce the uploaded artifact archive digest independently
+        env:
+          ARTIFACT_DIGEST: ${{ steps.backup_artifact.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.backup_artifact.outputs.artifact-id }}
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^(sha256:)?[a-f0-9]{64}$ ]]
+          test -n "$GITHUB_TOKEN"
+          echo "::add-mask::$GITHUB_TOKEN"
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import { pipeline } from 'node:stream/promises';
+          import { Readable, Transform } from 'node:stream';
+
+          const artifactUrl = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${process.env.ARTIFACT_ID}/zip`;
+          const response = await fetch(artifactUrl, {
+            redirect: 'follow',
+            headers: {
+              Accept: 'application/vnd.github+json',
+              Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+              'X-GitHub-Api-Version': '2022-11-28',
+            },
+          });
+          if (!response.ok || !response.body || new URL(response.url).protocol !== 'https:') {
+            throw new Error(`exact GitHub artifact download failed with HTTP ${response.status}`);
+          }
+          const output = `${process.env.RUNNER_TEMP}/skytech-pre-compatibility-stored-artifact.zip`;
+          const hash = crypto.createHash('sha256');
+          let size = 0;
+          const hasher = new Transform({
+            transform(chunk, _encoding, callback) {
+              size += chunk.length;
+              hash.update(chunk);
+              callback(null, chunk);
+            },
+          });
+          await pipeline(
+            Readable.fromWeb(response.body),
+            hasher,
+            fs.createWriteStream(output, { flags: 'wx', mode: 0o600 }),
+          );
+          const computedDigest = `sha256:${hash.digest('hex')}`;
+          const expectedDigest = process.env.ARTIFACT_DIGEST.startsWith('sha256:')
+            ? process.env.ARTIFACT_DIGEST
+            : `sha256:${process.env.ARTIFACT_DIGEST}`;
+          if (size <= 0 || computedDigest !== expectedDigest) {
+            throw new Error('downloaded GitHub artifact archive digest mismatch');
+          }
+          NODE
+          test "$(stat -c '%a' "$RUNNER_TEMP/skytech-pre-compatibility-stored-artifact.zip")" = "600"
+
+      - name: Decrypt and revalidate the freshly downloaded stored artifact
+        env:
+          ARTIFACT_DIGEST: ${{ steps.backup_artifact.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.backup_artifact.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.backup_artifact.outputs.artifact-url }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$BACKUP_ENCRYPTION_PASSPHRASE" != *$'\n'* && "$BACKUP_ENCRYPTION_PASSPHRASE" != *$'\r'* ]]
+          test "$(printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | wc -c)" -ge 32
+          echo "::add-mask::$BACKUP_ENCRYPTION_PASSPHRASE"
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^(sha256:)?[a-f0-9]{64}$ ]]
+          test "$ARTIFACT_URL" = "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts/$ARTIFACT_ID"
+          stored_dir="$RUNNER_TEMP/skytech-pre-compatibility-stored-artifact"
+          action_ciphertext="$stored_dir/skytech-clean-reset-backup.zip.gpg"
+          test -f "$action_ciphertext"
+          test "$(find "$stored_dir" -maxdepth 1 -type f | wc -l)" = "1"
+          artifact_envelope="$RUNNER_TEMP/skytech-pre-compatibility-stored-artifact.zip"
+          test -f "$artifact_envelope"
+          test "$(unzip -Z1 "$artifact_envelope" | awk '$0 == "skytech-clean-reset-backup.zip.gpg" { count += 1 } END { print count + 0 }')" = "1"
+          test "$(unzip -Z1 "$artifact_envelope" | wc -l)" = "1"
+          digest_verified_dir="$RUNNER_TEMP/skytech-pre-compatibility-digest-verified-artifact"
+          mkdir "$digest_verified_dir"
+          chmod 700 "$digest_verified_dir"
+          stored_ciphertext="$digest_verified_dir/skytech-clean-reset-backup.zip.gpg"
+          unzip -p "$artifact_envelope" skytech-clean-reset-backup.zip.gpg > "$stored_ciphertext"
+          chmod 600 "$stored_ciphertext"
+          cmp --silent "$action_ciphertext" "$stored_ciphertext"
+          expected_encrypted_sha="$(jq -er '.encryptedArchiveSha256' encrypted-artifact-before-upload.json)"
+          expected_encrypted_size="$(jq -er '.encryptedArchiveSizeBytes' encrypted-artifact-before-upload.json)"
+          test "$(sha256sum "$stored_ciphertext" | awk '{print $1}')" = "$expected_encrypted_sha"
+          test "$(stat -c '%s' "$stored_ciphertext")" = "$expected_encrypted_size"
+          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg \
+            --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --decrypt --output "$digest_verified_dir/verified-backup.zip" "$stored_ciphertext"
+          expected_sha="$(jq -er '.backup.sha256' reset-response.json)"
+          expected_size="$(jq -er '.backup.size' reset-response.json)"
+          test "$(sha256sum "$digest_verified_dir/verified-backup.zip" | awk '{print $1}')" = "$expected_sha"
+          test "$(stat -c '%s' "$digest_verified_dir/verified-backup.zip")" = "$expected_size"
+          unzip -tqq "$digest_verified_dir/verified-backup.zip"
+          test "$(unzip -Z1 "$digest_verified_dir/verified-backup.zip" | awk '$0 == "manifest.json" { count += 1 } END { print count + 0 }')" = "1"
+          test "$(unzip -Z1 "$digest_verified_dir/verified-backup.zip" | awk '$0 == "database/app.sqlite" { count += 1 } END { print count + 0 }')" = "1"
+          unzip -p "$digest_verified_dir/verified-backup.zip" manifest.json > "$digest_verified_dir/manifest.json"
+          jq -e \
+            --arg sha "$EXPECTED_DEPLOYED_SHA" \
+            --argjson response "$(cat reset-response.json)" \
+            --argjson railway "$(cat railway-target-before.json)" \
+            --argjson apiRuntime "$(cat api-runtime-identity-before.json)" \
+            --argjson receipt "$(cat backup-receipt-identity.json)" '
+              .generatedAt == $response.backup.generatedAt
+              and .generatedAt == $receipt.archive.generatedAt
+              and .appVersion.commitFull == $sha
+              and .appVersion.commitFull == $apiRuntime.commitFull
+              and .appVersion.startedAt == $apiRuntime.startedAt
+              and .appVersion.startedAt == $receipt.runtime.startedAt
+              and .appVersion.deployment.railwayDeploymentId == $railway.deploymentId
+              and .appVersion.deployment.railwayDeploymentId == $apiRuntime.deploymentId
+              and .appVersion.deployment.railwayDeploymentId == $receipt.runtime.deploymentId
+              and .appVersion.deployment.railwayReplicaId == $railway.replicaId
+              and .appVersion.deployment.railwayReplicaId == $apiRuntime.replicaId
+              and .appVersion.deployment.railwayReplicaId == $receipt.runtime.replicaId
+              and .appVersion.deployment.railwayEnvironment == "production"
+              and .appVersion.deployment.railwayService == "rental-management"
+              and .database.type == "sqlite"
+              and .database.includedAs == "database/app.sqlite"
+              and .database.sourcePath == "app.sqlite"
+              and .counts == $response.backup.collectionCounts
+              and .includedFilesCount == $response.backup.includedFilesCount
+              and .skippedFilesCount == 0
+            ' "$digest_verified_dir/manifest.json" > /dev/null
+          jq -cS '{
+            commitFull: .appVersion.commitFull,
+            deploymentId: .appVersion.deployment.railwayDeploymentId,
+            replicaId: .appVersion.deployment.railwayReplicaId,
+            environment: .appVersion.deployment.railwayEnvironment,
+            service: .appVersion.deployment.railwayService,
+            startedAt: .appVersion.startedAt,
+            backupGeneratedAt: .generatedAt,
+            databaseSourcePath: .database.sourcePath
+          }' "$digest_verified_dir/manifest.json" > backup-runtime-identity.json
+          unzip -p "$digest_verified_dir/verified-backup.zip" database/app.sqlite > "$digest_verified_dir/verified-backup.sqlite"
+          test -s "$digest_verified_dir/verified-backup.sqlite"
+          integrity_result="$(sqlite3 -readonly "$digest_verified_dir/verified-backup.sqlite" 'PRAGMA integrity_check;')"
+          test "$integrity_result" = "ok"
+          foreign_key_violations="$(sqlite3 -readonly "$digest_verified_dir/verified-backup.sqlite" 'PRAGMA foreign_key_check;')"
+          test -z "$foreign_key_violations"
+          database_file_sha="$(sha256sum "$digest_verified_dir/verified-backup.sqlite" | awk '{print $1}')"
+          database_file_size="$(stat -c '%s' "$digest_verified_dir/verified-backup.sqlite")"
+          test "$database_file_sha" = "$(jq -er '.backup.databaseFileSha256' reset-response.json)"
+          test "$database_file_size" = "$(jq -er '.backup.databaseFileSize' reset-response.json)"
+          test "$database_file_sha" = "$(jq -er '.archive.databaseFileSha256' skytech-clean-reset-backup-receipt.json)"
+          test "$database_file_size" = "$(jq -er '.archive.databaseFileSize' skytech-clean-reset-backup-receipt.json)"
+          jq -nS \
+            --arg artifactId "$ARTIFACT_ID" \
+            --arg archiveSha256 "$expected_sha" \
+            --arg integrity "$integrity_result" \
+            --arg sha256 "$database_file_sha" \
+            --argjson sizeBytes "$database_file_size" '
+              {
+                freshlyDownloadedGitHubArtifact: true,
+                artifactId: $artifactId,
+                decryptedArchiveSha256: $archiveSha256,
+                archiveEntry: "database/app.sqlite",
+                integrityCheck: $integrity,
+                foreignKeyViolations: 0,
+                databaseFileSha256: $sha256,
+                databaseFileSizeBytes: $sizeBytes
+              }
+            ' > backup-database-validation.json
+          jq -nS \
+            --arg artifactId "$ARTIFACT_ID" \
+            --arg artifactName "skytech-pre-compatibility-backup-$GITHUB_RUN_ID-attempt-$GITHUB_RUN_ATTEMPT" \
+            --arg artifactUrl "$ARTIFACT_URL" \
+            --arg githubArtifactDigest "$ARTIFACT_DIGEST" \
+            --arg encryptedArchiveSha256 "$expected_encrypted_sha" \
+            --argjson encryptedArchiveSizeBytes "$expected_encrypted_size" \
+            --arg decryptedArchiveSha256 "$expected_sha" \
+            --argjson decryptedArchiveSizeBytes "$expected_size" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --argjson runAttempt "$GITHUB_RUN_ATTEMPT" '
+              {
+                sourceCiphertextRemovedBeforeDownload: true,
+                retrievalScope: "current-run-exact-artifact-id",
+                downloadAction: "actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53",
+                artifactArchiveDigestVerified: true,
+                artifactId: $artifactId,
+                artifactName: $artifactName,
+                artifactUrl: $artifactUrl,
+                githubArtifactDigest: $githubArtifactDigest,
+                runId: $runId,
+                runAttempt: $runAttempt,
+                encryptedArchiveSha256: $encryptedArchiveSha256,
+                encryptedArchiveSizeBytes: $encryptedArchiveSizeBytes,
+                decryptedFreshDownload: true,
+                decryptedArchiveSha256: $decryptedArchiveSha256,
+                decryptedArchiveSizeBytes: $decryptedArchiveSizeBytes,
+                archiveAndSqliteRevalidated: true
+              }
+            ' > stored-artifact-validation.json
+          rm -f "$digest_verified_dir/verified-backup.zip" "$digest_verified_dir/verified-backup.sqlite" "$digest_verified_dir/manifest.json"
+
+      - name: Terminally recheck same-nonce idempotency after every stored-copy predicate
+        env:
+          PRELIMINARY_BACKUP_TOKEN: ${{ secrets.SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PRELIMINARY_BACKUP_TOKEN" != *$'\n'* && "$PRELIMINARY_BACKUP_TOKEN" != *$'\r'* ]]
+          test "${#PRELIMINARY_BACKUP_TOKEN}" -ge 32
+          echo "::add-mask::$PRELIMINARY_BACKUP_TOKEN"
+          request_nonce="$(cat "$RUNNER_TEMP/skytech-pre-compatibility-backup-request-nonce")"
+          [[ "$request_nonce" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          initial_invocation_id="$(cat "$RUNNER_TEMP/skytech-pre-compatibility-backup-initial-invocation")"
+          [[ "$initial_invocation_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          protected_headers="$RUNNER_TEMP/skytech-pre-compatibility-terminal-curl-headers"
+          start_response="$RUNNER_TEMP/skytech-pre-compatibility-terminal-start-response.json"
+          poll_response="$RUNNER_TEMP/skytech-pre-compatibility-terminal-poll-response.json"
+          test ! -e terminal-idempotency-response.json
+          trap 'rm -f "$protected_headers" "$start_response" "$poll_response"' EXIT
+          printf '%s: %s\n%s: %s\n%s: %s\n' \
+            'X-Skytech-Pre-Compatibility-Backup-Token' "$PRELIMINARY_BACKUP_TOKEN" \
+            'X-Skytech-Pre-Compatibility-Backup-Nonce' "$request_nonce" \
+            'Accept' 'application/json' \
+            > "$protected_headers"
+          chmod 600 "$protected_headers"
+          test "$(stat -c '%a' "$protected_headers")" = "600"
+          start_http_status="$(curl --proto '=https' --tlsv1.2 \
+            --silent --show-error \
+            --connect-timeout 15 --max-time 60 \
+            --request POST \
+            --header "@$protected_headers" \
+            --output "$start_response" \
+            --write-out '%{http_code}' \
+            "$PRODUCTION_API_ORIGIN/api/admin/skytech-pre-compatibility-backup")"
+          test "$start_http_status" = "202"
+          terminal_invocation_id="$(jq -er \
+            --arg requestNonce "$request_nonce" '
+              select(
+                .ok == true
+                and .status == "RUNNING"
+                and .requestNonce == $requestNonce
+                and (.invocationId | test("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+              )
+              | .invocationId
+            ' "$start_response")"
+          test "$terminal_invocation_id" != "$initial_invocation_id"
+          printf '%s: %s\n' \
+            'X-Skytech-Pre-Compatibility-Backup-Invocation-Id' "$terminal_invocation_id" \
+            >> "$protected_headers"
+          poll_deadline="$((SECONDS + 4800))"
+          http_status=""
+          while (( SECONDS < poll_deadline )); do
+            http_status="$(curl --proto '=https' --tlsv1.2 \
+              --silent --show-error \
+              --connect-timeout 15 --max-time 60 \
+              --request GET \
+              --header "@$protected_headers" \
+              --output "$poll_response" \
+              --write-out '%{http_code}' \
+              "$PRODUCTION_API_ORIGIN/api/admin/skytech-pre-compatibility-backup/status")"
+            if [[ "$http_status" == "200" ]]; then
+              jq -e \
+                --arg invocationId "$terminal_invocation_id" \
+                --arg requestNonce "$request_nonce" '
+                  .ok == true
+                  and .invocationId == $invocationId
+                  and .workerStatusCode == 200
+                  and .backup.requestNonce == $requestNonce
+                ' "$poll_response" > /dev/null
+              mv "$poll_response" terminal-idempotency-response.json
+              break
+            fi
+            test "$http_status" = "202"
+            jq -e \
+              --arg invocationId "$terminal_invocation_id" \
+              --arg requestNonce "$request_nonce" '
+                .ok == true
+                and .status == "RUNNING"
+                and .invocationId == $invocationId
+                and .requestNonce == $requestNonce
+              ' "$poll_response" > /dev/null
+            sleep 10
+          done
+          test "$http_status" = "200"
+          test -s terminal-idempotency-response.json
+          rm -f "$protected_headers"
+          trap - EXIT
+          jq -e \
+            --arg requestNonce "$request_nonce" '
+              .ok == true
+              and .idempotent == true
+              and (.backup | type == "object")
+              and .backup.requestNonce == $requestNonce
+            ' terminal-idempotency-response.json > /dev/null
+          jq -cS '.backup' reset-response.json > original-backup-object.canonical.json
+          jq -cS '.backup' terminal-idempotency-response.json > terminal-backup-object.canonical.json
+          cmp --silent original-backup-object.canonical.json terminal-backup-object.canonical.json
+          original_backup_object_sha="$(sha256sum original-backup-object.canonical.json | awk '{print $1}')"
+          terminal_backup_object_sha="$(sha256sum terminal-backup-object.canonical.json | awk '{print $1}')"
+          [[ "$original_backup_object_sha" =~ ^[a-f0-9]{64}$ ]]
+          test "$terminal_backup_object_sha" = "$original_backup_object_sha"
+          jq -nS \
+            --argjson httpStatus "$http_status" \
+            --arg requestNonce "$request_nonce" \
+            --arg initialInvocationId "$initial_invocation_id" \
+            --arg terminalInvocationId "$terminal_invocation_id" \
+            --arg originalBackupObjectCanonicalSha256 "$original_backup_object_sha" \
+            --arg terminalBackupObjectCanonicalSha256 "$terminal_backup_object_sha" '
+              {
+                terminalConservationRecheck: true,
+                performedAfterStoredArtifactBeforeFinalRailwayApiReproof: true,
+                httpStatus: $httpStatus,
+                idempotent: true,
+                requestNonce: $requestNonce,
+                initialInvocationId: $initialInvocationId,
+                terminalInvocationId: $terminalInvocationId,
+                distinctWorkerInvocations: ($initialInvocationId != $terminalInvocationId),
+                backupObjectCanonicalEncoding: "jq-compact-sorted-keys-plus-newline",
+                backupObjectByteEquivalent: true,
+                originalBackupObjectCanonicalSha256: $originalBackupObjectCanonicalSha256,
+                terminalBackupObjectCanonicalSha256: $terminalBackupObjectCanonicalSha256
+              }
+            ' > terminal-conservation-validation.json
+
+      # The shared GitHub concurrency group serializes cooperating workflows only. It does not freeze
+      # Railway's external control plane, so the complete singleton predicate is observed again here.
+      - name: Re-prove the full Railway singleton predicate after stored-artifact verification
+        env:
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RAILWAY_TOKEN" != *$'\n'* && "$RAILWAY_TOKEN" != *$'\r'* ]]
+          test -n "$RAILWAY_TOKEN"
+          echo "::add-mask::$RAILWAY_TOKEN"
+          cd "$RUNNER_TEMP/skytech-clean-reset-target"
+          railway status --json > railway-status-after.json
+          cd "$GITHUB_WORKSPACE"
+          RAILWAY_CONTROL_PLANE_OUTPUT="$GITHUB_WORKSPACE/railway-control-plane-after.json" \
+            node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import {
+            RELEASE_TARGET_QUERY,
+            deploymentCommit,
+            railwayGraphql,
+            validateRailwayEffectiveConfig,
+            validateRailwayTargetIdentity,
+          } from './scripts/railway-backend-release.mjs';
+
+          const configAwareReleaseTargetQuery = RELEASE_TARGET_QUERY.replace(
+            '    service(id: $serviceId) {',
+            `    environment(id: $environmentId) {
+              id
+              name
+              unmergedChangesCount
+              config(decryptVariables: false)
+            }
+            environmentStagedChanges(environmentId: $environmentId) {
+              patch(decryptVariables: false)
+            }
+            service(id: $serviceId) {`,
+          );
+          if (configAwareReleaseTargetQuery === RELEASE_TARGET_QUERY) {
+            throw new Error('Railway release query could not be extended with effective environment config');
+          }
+          const data = await railwayGraphql({
+            token: process.env.RAILWAY_TOKEN,
+            query: configAwareReleaseTargetQuery,
+            variables: {
+              environmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+              serviceId: process.env.RAILWAY_SERVICE_ID,
+            },
+          });
+          const identity = validateRailwayTargetIdentity(data, {
+            projectId: process.env.RAILWAY_PROJECT_ID,
+            environmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+            serviceId: process.env.RAILWAY_SERVICE_ID,
+            serviceName: process.env.RAILWAY_SERVICE_NAME,
+            repository: process.env.EXPECTED_REPOSITORY,
+          });
+          const effectiveRuntime = validateRailwayEffectiveConfig(data, {
+            projectId: process.env.RAILWAY_PROJECT_ID,
+            environmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+            serviceId: process.env.RAILWAY_SERVICE_ID,
+            serviceName: process.env.RAILWAY_SERVICE_NAME,
+            repository: process.env.EXPECTED_REPOSITORY,
+            rootDirectory: process.env.RAILWAY_SOURCE_ROOT_DIRECTORY,
+            configFile: process.env.RAILWAY_CONFIG_FILE,
+            healthcheckPath: process.env.RAILWAY_HEALTHCHECK_PATH,
+            startCommand: process.env.RAILWAY_START_COMMAND,
+          }, fs.readFileSync('server/railway.toml', 'utf8'));
+          if (identity.activeDeployments.length !== 1) {
+            throw new Error('exactly one active Railway deployment is required');
+          }
+          const deployment = identity.activeDeployments[0];
+          const objectValue = value => {
+            if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+            if (typeof value !== 'string' || !value.trim()) return {};
+            const parsed = JSON.parse(value);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+          };
+          const environment = data?.environment;
+          if (!environment || typeof environment !== 'object' || Array.isArray(environment)) {
+            throw new Error('target Railway environment was not returned');
+          }
+          const stagedChanges = data?.environmentStagedChanges;
+          if (!stagedChanges || typeof stagedChanges !== 'object' || Array.isArray(stagedChanges)) {
+            throw new Error('Railway staged-changes proof was not returned');
+          }
+          const stagedPatch = stagedChanges.patch;
+          if (!stagedPatch || typeof stagedPatch !== 'object' || Array.isArray(stagedPatch)) {
+            throw new Error('Railway staged patch is not a JSON object');
+          }
+          const stagedPatchStructuralChangeCount = Object.keys(stagedPatch).length;
+          if (stagedPatchStructuralChangeCount !== 0) {
+            throw new Error('Railway staged patch contains structural changes');
+          }
+          const stagedPatchCanonical = JSON.stringify(stagedPatch);
+          if (stagedPatchCanonical !== '{}') {
+            throw new Error('Railway staged patch is not canonical-empty');
+          }
+          const stagedPatchFingerprint = crypto.createHash('sha256')
+            .update(stagedPatchCanonical)
+            .digest('hex');
+          const metadata = objectValue(deployment.meta);
+          const deployConfig = objectValue(objectValue(metadata.serviceManifest).deploy);
+          let deploymentMetadataReplicaCount;
+          if (deployConfig.multiRegionConfig !== undefined && deployConfig.multiRegionConfig !== null) {
+            const counts = Object.values(objectValue(deployConfig.multiRegionConfig)).map(value => value === null
+              ? 0
+              : Number(value?.numReplicas));
+            if (counts.some(value => !Number.isSafeInteger(value) || value < 0)) {
+              throw new Error('Railway deployment-metadata replica configuration is invalid');
+            }
+            deploymentMetadataReplicaCount = counts.reduce((total, value) => total + value, 0);
+          } else if (typeof deployConfig?.region === 'string' && deployConfig.region.trim()) {
+            deploymentMetadataReplicaCount = deployConfig.numReplicas === undefined
+              ? 1
+              : Number(deployConfig.numReplicas);
+          } else {
+            throw new Error('Railway replica count is not proven by deployment metadata');
+          }
+          const effectiveEnvironmentConfig = objectValue(environment.config);
+          const effectiveServices = objectValue(effectiveEnvironmentConfig.services);
+          const effectiveServiceConfig = objectValue(effectiveServices[process.env.RAILWAY_SERVICE_ID]);
+          const effectiveSource = objectValue(effectiveServiceConfig.source);
+          const effectiveSourceCommitSha = String(effectiveSource.commitSha || '').trim().toLowerCase();
+          if (effectiveSourceCommitSha && !/^[a-f0-9]{40}$/.test(effectiveSourceCommitSha)) {
+            throw new Error('effective source commitSha is not an exact lowercase SHA');
+          }
+          const effectiveDeploy = objectValue(effectiveServiceConfig.deploy);
+          const effectiveDeployStartCommand = String(effectiveDeploy.startCommand || '').trim();
+          const effectiveDeployHealthcheckPath = String(effectiveDeploy.healthcheckPath || '').trim();
+          const effectiveDeployPreDeployCommandIsAbsent = effectiveDeploy.preDeployCommand === undefined
+            || effectiveDeploy.preDeployCommand === null
+            || (typeof effectiveDeploy.preDeployCommand === 'string'
+              && effectiveDeploy.preDeployCommand.trim() === '');
+          const effectiveMultiRegionConfig = objectValue(effectiveDeploy.multiRegionConfig);
+          const effectiveRegionEntries = Object.entries(effectiveMultiRegionConfig)
+            .sort(([left], [right]) => left.localeCompare(right));
+          if (effectiveRegionEntries.length === 0) {
+            throw new Error('effective Railway multi-region replica configuration is empty');
+          }
+          const canonicalRegionReplicas = {};
+          for (const [region, regionConfigValue] of effectiveRegionEntries) {
+            const regionConfig = objectValue(regionConfigValue);
+            const count = Number(regionConfig.numReplicas);
+            if (!region.trim() || !Number.isSafeInteger(count) || count < 0) {
+              throw new Error('effective Railway multi-region replica configuration is invalid');
+            }
+            canonicalRegionReplicas[region] = { numReplicas: count };
+          }
+          const effectiveConfigDesiredReplicaCount = Object.values(canonicalRegionReplicas)
+            .reduce((total, region) => total + region.numReplicas, 0);
+          const effectiveVolumeMounts = objectValue(effectiveServiceConfig.volumeMounts);
+          const effectiveVolumeMountIds = Object.keys(effectiveVolumeMounts).sort();
+          const effectiveVolumeMount = objectValue(effectiveVolumeMounts[process.env.RAILWAY_VOLUME_ID]);
+          // This schema field is nullable: null is unknown, never evidence of an empty change set.
+          // Require numeric zero and independently require the secret-safe staged patch to be {}.
+          const checks = [
+            [environment.id === process.env.RAILWAY_ENVIRONMENT_ID, 'effective config environment ID mismatch'],
+            [environment.name === process.env.RAILWAY_ENVIRONMENT_NAME, 'effective config environment name mismatch'],
+            [environment.unmergedChangesCount === 0, 'Railway unmerged-change count is not numeric zero'],
+            [stagedPatchStructuralChangeCount === 0, 'Railway staged patch change count is not zero'],
+            [stagedPatchCanonical === '{}', 'Railway staged patch is not canonical-empty'],
+            [deployment.projectId === identity.projectId, 'active deployment project mismatch'],
+            [deployment.environmentId === identity.environmentId, 'active deployment environment mismatch'],
+            [deployment.serviceId === identity.serviceId, 'active deployment service mismatch'],
+            [String(deployment.status || '').trim().toUpperCase() === 'SUCCESS', 'active deployment is not successful'],
+            [deploymentCommit(deployment) === process.env.EXPECTED_DEPLOYED_SHA, 'active deployment commit mismatch'],
+            [deploymentMetadataReplicaCount === 1, 'deployment-metadata replica count is not exactly one'],
+            [Object.keys(effectiveServices).length > 0, 'effective Railway services config is empty'],
+            [Object.hasOwn(effectiveServices, process.env.RAILWAY_SERVICE_ID), 'target service is absent from effective config'],
+            [effectiveSource.repo === process.env.EXPECTED_REPOSITORY, 'effective source repository mismatch'],
+            [effectiveSource.branch === process.env.RAILWAY_SOURCE_BRANCH, 'effective source branch mismatch'],
+            [!effectiveSourceCommitSha || effectiveSourceCommitSha === process.env.EXPECTED_DEPLOYED_SHA, 'effective source commitSha mismatch'],
+            [effectiveSource.rootDirectory === process.env.RAILWAY_SOURCE_ROOT_DIRECTORY, 'effective source root mismatch'],
+            [effectiveSource.image === undefined || effectiveSource.image === null || effectiveSource.image === '', 'effective source unexpectedly uses an image'],
+            [!effectiveDeployStartCommand || effectiveDeployStartCommand === process.env.RAILWAY_START_COMMAND, 'effective deploy start command mismatch'],
+            [!effectiveDeployHealthcheckPath || effectiveDeployHealthcheckPath === process.env.RAILWAY_HEALTHCHECK_PATH, 'effective deploy healthcheck path mismatch'],
+            [effectiveDeployPreDeployCommandIsAbsent, 'effective deploy pre-deploy command must be absent'],
+            [effectiveConfigDesiredReplicaCount === 1, 'effective-config desired replica count is not exactly one'],
+            [effectiveVolumeMountIds.length === 1, 'effective config must contain exactly one volume mount'],
+            [effectiveVolumeMountIds[0] === process.env.RAILWAY_VOLUME_ID, 'effective config volume ID mismatch'],
+            [effectiveVolumeMount.mountPath === process.env.RAILWAY_VOLUME_MOUNT_PATH, 'effective config volume mount path mismatch'],
+          ];
+          const failed = checks.find(([ok]) => !ok);
+          if (failed) throw new Error(failed[1]);
+          const effectiveConfigProjection = {
+            environment: {
+              id: environment.id,
+              name: environment.name,
+              unmergedChangesCount: 0,
+            },
+            service: {
+              id: process.env.RAILWAY_SERVICE_ID,
+              source: {
+                repo: effectiveSource.repo,
+                branch: effectiveSource.branch,
+                commitSha: effectiveSourceCommitSha || null,
+                rootDirectory: effectiveSource.rootDirectory,
+                image: null,
+              },
+              runtimeAuthority: {
+                configFile: effectiveRuntime.configFile,
+                healthcheckPath: effectiveRuntime.healthcheckPath,
+                startCommand: effectiveRuntime.startCommand,
+                configAuthority: effectiveRuntime.configAuthority,
+              },
+              deploy: {
+                startCommand: effectiveDeployStartCommand || null,
+                healthcheckPath: effectiveDeployHealthcheckPath || null,
+                preDeployCommand: null,
+                multiRegionConfig: canonicalRegionReplicas,
+                desiredReplicaCount: effectiveConfigDesiredReplicaCount,
+              },
+              volumeMounts: {
+                [process.env.RAILWAY_VOLUME_ID]: {
+                  mountPath: effectiveVolumeMount.mountPath,
+                },
+              },
+            },
+          };
+          const effectiveConfigFingerprint = crypto.createHash('sha256')
+            .update(JSON.stringify(effectiveConfigProjection))
+            .digest('hex');
+          fs.writeFileSync(process.env.RAILWAY_CONTROL_PLANE_OUTPUT, `${JSON.stringify({
+            projectId: identity.projectId,
+            environmentId: identity.environmentId,
+            serviceId: identity.serviceId,
+            serviceName: identity.serviceName,
+            repository: process.env.GITHUB_REPOSITORY,
+            sourceRepositoryNormalized: identity.repository,
+            activeDeploymentCount: identity.activeDeployments.length,
+            activeDeploymentId: deployment.id,
+            activeDeploymentStatus: String(deployment.status).trim().toUpperCase(),
+            deployedSha: deploymentCommit(deployment),
+            deploymentMetadataReplicaCount,
+            effectiveConfigDesiredReplicaCount,
+            effectiveConfigProjection,
+            effectiveConfigFingerprint,
+            stagedChangesEmpty: true,
+            stagedPatchStructuralChangeCount,
+            stagedPatchFingerprint,
+          }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+          NODE
+          status_file="$RUNNER_TEMP/skytech-clean-reset-target/railway-status-after.json"
+          test "$(jq -r '.id' "$status_file")" = "$RAILWAY_PROJECT_ID"
+          jq -e \
+            --arg environment "$RAILWAY_ENVIRONMENT_ID" \
+            --arg service "$RAILWAY_SERVICE_ID" \
+            --arg volume "$RAILWAY_VOLUME_ID" \
+            --arg volumeName "$RAILWAY_VOLUME_NAME" \
+            --arg mountPath "$RAILWAY_VOLUME_MOUNT_PATH" \
+            --arg sha "$EXPECTED_DEPLOYED_SHA" \
+            --argjson controlPlane "$(cat railway-control-plane-after.json)" '
+              ([.environments.edges[].node | select(.id == $environment)]) as $environments
+              | ($environments | length) == 1
+                and (
+                  $environments[0] as $environmentNode
+                  | ([
+                      $environmentNode.serviceInstances.edges[].node
+                      | select(.serviceId == $service)
+                    ]) as $services
+                  | ([
+                      $environmentNode.volumeInstances.edges[].node
+                      | select(.volume.id == $volume)
+                    ]) as $volumeAttachments
+                  | ([
+                      $environmentNode.volumeInstances.edges[].node
+                      | select(.serviceId == $service)
+                      | select(.volume.id == $volume)
+                      | select(.volume.name == $volumeName)
+                      | select(.mountPath == $mountPath)
+                      | select(.state == "READY")
+                    ]) as $volumes
+                  | ($services | length) == 1
+                    and ($volumeAttachments | length) == 1
+                    and ($volumes | length) == 1
+                    and $controlPlane.activeDeploymentCount == 1
+                    and $controlPlane.deploymentMetadataReplicaCount == 1
+                    and $controlPlane.effectiveConfigDesiredReplicaCount == 1
+                    and $controlPlane.stagedChangesEmpty == true
+                    and $controlPlane.stagedPatchStructuralChangeCount == 0
+                    and ($controlPlane.stagedPatchFingerprint | test("^[a-f0-9]{64}$"))
+                    and $services[0].latestDeployment.id == $controlPlane.activeDeploymentId
+                    and $services[0].latestDeployment.status == "SUCCESS"
+                    and $services[0].latestDeployment.meta.commitHash == $sha
+                    and $controlPlane.deployedSha == $sha
+                    and (($services[0].latestDeployment.instances | type) == "array")
+                    and (($services[0].latestDeployment.instances | length) == 1)
+                    and $services[0].latestDeployment.instances[0].status == "RUNNING"
+                    and (([
+                      $services[0].latestDeployment.instances[]
+                      | select(.status != "RUNNING")
+                    ] | length) == 0)
+                    and (($services[0].latestDeployment.instances[0].id | type) == "string")
+                    and (($services[0].latestDeployment.instances[0].id | length) > 0)
+                )
+            ' "$status_file" > /dev/null
+          jq -cS \
+            --arg environment "$RAILWAY_ENVIRONMENT_ID" \
+            --arg service "$RAILWAY_SERVICE_ID" \
+            --arg volume "$RAILWAY_VOLUME_ID" \
+            --argjson controlPlane "$(cat railway-control-plane-after.json)" '
+              . as $root
+              | ([.environments.edges[].node | select(.id == $environment)] | .[0]) as $environmentNode
+              | ([
+                  $environmentNode.serviceInstances.edges[].node
+                  | select(.serviceId == $service)
+                ] | .[0]) as $serviceNode
+              | ([
+                  $environmentNode.volumeInstances.edges[].node
+                  | select(.serviceId == $service)
+                  | select(.volume.id == $volume)
+                ] | .[0]) as $volumeNode
+              | {
+                  projectId: $root.id,
+                  environmentId: $environment,
+                  serviceId: $service,
+                  serviceName: $controlPlane.serviceName,
+                  repository: $controlPlane.repository,
+                  volumeId: $volumeNode.volume.id,
+                  volumeName: $volumeNode.volume.name,
+                  volumeMountPath: $volumeNode.mountPath,
+                  volumeState: $volumeNode.state,
+                  volumeAttachmentCount: ([$environmentNode.volumeInstances.edges[].node | select(.volume.id == $volume)] | length),
+                  activeDeploymentCount: $controlPlane.activeDeploymentCount,
+                  deploymentMetadataReplicaCount: $controlPlane.deploymentMetadataReplicaCount,
+                  effectiveConfigDesiredReplicaCount: $controlPlane.effectiveConfigDesiredReplicaCount,
+                  effectiveConfigProjection: $controlPlane.effectiveConfigProjection,
+                  effectiveConfigFingerprint: $controlPlane.effectiveConfigFingerprint,
+                  stagedChangesEmpty: $controlPlane.stagedChangesEmpty,
+                  stagedPatchStructuralChangeCount: $controlPlane.stagedPatchStructuralChangeCount,
+                  stagedPatchFingerprint: $controlPlane.stagedPatchFingerprint,
+                  deploymentId: $serviceNode.latestDeployment.id,
+                  deploymentStatus: $serviceNode.latestDeployment.status,
+                  deployedSha: $serviceNode.latestDeployment.meta.commitHash,
+                  deploymentInstanceCount: ($serviceNode.latestDeployment.instances | length),
+                  nonRunningInstanceCount: ([$serviceNode.latestDeployment.instances[] | select(.status != "RUNNING")] | length),
+                  replicaId: $serviceNode.latestDeployment.instances[0].id,
+                  replicaStatus: $serviceNode.latestDeployment.instances[0].status
+                }
+            ' "$status_file" > railway-target-after.json
+          cmp --silent railway-control-plane-before.json railway-control-plane-after.json
+          cmp --silent railway-target-before.json railway-target-after.json
+
+      - name: Re-prove the complete API runtime and replica predicate after artifact verification
+        env:
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          curl --proto '=https' --tlsv1.2 \
+            --fail-with-body --silent --show-error \
+            --connect-timeout 15 --max-time 60 \
+            --header 'Accept: application/json' \
+            "$PRODUCTION_API_ORIGIN/api/version" > api-runtime-after.json
+          jq -e \
+            --arg sha "$EXPECTED_DEPLOYED_SHA" \
+            --argjson railway "$(cat railway-target-after.json)" '
+              .ok == true
+              and .build.commitFull == $sha
+              and .build.deployment.railwayDeploymentId == $railway.deploymentId
+              and .build.deployment.railwayReplicaId == $railway.replicaId
+              and .build.deployment.railwayEnvironment == "production"
+              and .build.deployment.railwayService == "rental-management"
+              and (.build.startedAt | type == "string" and length > 0)
+              and .app.disabled == true
+            ' api-runtime-after.json > /dev/null
+          jq -cS '{
+            commitFull: .build.commitFull,
+            deploymentId: .build.deployment.railwayDeploymentId,
+            replicaId: .build.deployment.railwayReplicaId,
+            environment: .build.deployment.railwayEnvironment,
+            service: .build.deployment.railwayService,
+            startedAt: .build.startedAt,
+            appDisabled: .app.disabled
+          }' api-runtime-after.json > api-runtime-identity-after.json
+          cmp --silent api-runtime-identity-before.json api-runtime-identity-after.json
+
+      - name: Create exact stored-copy machine evidence
+        env:
+          ARTIFACT_DIGEST: ${{ steps.backup_artifact.outputs.artifact-digest }}
+          ARTIFACT_ID: ${{ steps.backup_artifact.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.backup_artifact.outputs.artifact-url }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          request_nonce="$(cat "$RUNNER_TEMP/skytech-pre-compatibility-backup-request-nonce")"
+          initial_invocation_id="$(jq -er '.invocationId' reset-response.json)"
+          initial_worker_status_code="$(jq -er '.workerStatusCode' reset-response.json)"
+          test "$initial_invocation_id" = "$(cat "$RUNNER_TEMP/skytech-pre-compatibility-backup-initial-invocation")"
+          [[ "$initial_worker_status_code" == "200" || "$initial_worker_status_code" == "201" ]]
+          jq -nS \
+            --argjson backup "$(jq -c '.backup' reset-response.json)" \
+            --argjson receipt "$(cat backup-receipt-identity.json)" \
+            --arg requestNonce "$request_nonce" \
+            --arg initialInvocationId "$initial_invocation_id" \
+            --argjson initialWorkerStatusCode "$initial_worker_status_code" \
+            --arg deployedSha "$EXPECTED_DEPLOYED_SHA" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg ref "$GITHUB_REF" \
+            --arg githubSha "$GITHUB_SHA" \
+            --arg workflowRef "$GITHUB_WORKFLOW_REF" \
+            --arg workflowSha "$GITHUB_WORKFLOW_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --argjson runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg eventName "$GITHUB_EVENT_NAME" \
+            --arg artifactId "$ARTIFACT_ID" \
+            --arg artifactName "skytech-pre-compatibility-backup-$GITHUB_RUN_ID-attempt-$GITHUB_RUN_ATTEMPT" \
+            --arg artifactUrl "$ARTIFACT_URL" \
+            --arg githubArtifactDigest "$ARTIFACT_DIGEST" \
+            --argjson railwayBefore "$(cat railway-target-before.json)" \
+            --argjson railwayAfter "$(cat railway-target-after.json)" \
+            --argjson apiRuntimeBefore "$(cat api-runtime-identity-before.json)" \
+            --argjson apiRuntimeAfter "$(cat api-runtime-identity-after.json)" \
+            --argjson backupRuntime "$(cat backup-runtime-identity.json)" \
+            --argjson storedArtifactValidation "$(cat stored-artifact-validation.json)" \
+            --argjson independentDatabaseValidation "$(cat backup-database-validation.json)" \
+            --argjson terminalConservationRecheck "$(cat terminal-conservation-validation.json)" '
+              {
+                evidenceVersion: 2,
+                purpose: "pre-schema-compatibility-production-backup",
+                provider: "github-actions-encrypted-artifact",
+                repository: $repository,
+                ref: $ref,
+                githubSha: $githubSha,
+                workflowRef: $workflowRef,
+                workflowSha: $workflowSha,
+                eventName: $eventName,
+                runId: $runId,
+                runAttempt: $runAttempt,
+                requestNonce: $requestNonce,
+                initialInvocationId: $initialInvocationId,
+                initialWorkerStatusCode: $initialWorkerStatusCode,
+                operationId: $backup.operationId,
+                receiptFilename: $backup.receiptFilename,
+                receiptSha256: $backup.receiptSha256,
+                receipt: $receipt,
+                artifactId: $artifactId,
+                artifactName: $artifactName,
+                artifactUrl: $artifactUrl,
+                githubArtifactDigest: $githubArtifactDigest,
+                filename: $backup.filename,
+                backupSha256: $backup.sha256,
+                backupSizeBytes: $backup.size,
+                deployedSha: $deployedSha,
+                sourceStateBefore: $backup.sourceStateBefore,
+                sourceStateAfter: $backup.sourceStateAfter,
+                sourceConservation: $receipt.source,
+                railwayIdentityBefore: $railwayBefore,
+                railwayIdentityAfter: $railwayAfter,
+                apiRuntimeIdentityBefore: $apiRuntimeBefore,
+                apiRuntimeIdentityAfter: $apiRuntimeAfter,
+                backupRuntimeIdentity: $backupRuntime,
+                storedArtifactValidation: $storedArtifactValidation,
+                independentDatabaseValidation: $independentDatabaseValidation,
+                terminalConservationRecheck: $terminalConservationRecheck,
+                generatedAt: $backup.generatedAt,
+                logicalDatabaseSha256: $backup.logicalDatabaseSha256,
+                databaseFileSha256: $backup.databaseFileSha256,
+                databaseFileSizeBytes: $backup.databaseFileSize,
+                businessFileCount: $backup.businessFileCount,
+                businessFileInventorySha256: $backup.businessFileInventorySha256,
+                databaseIntegrity: $backup.databaseIntegrity,
+                databaseForeignKeyViolations: $backup.databaseForeignKeyViolations,
+                skippedFilesCount: $backup.skippedFilesCount,
+                verificationSemantics: {
+                  githubConcurrencyGroup: "production-release",
+                  githubConcurrencyScope: "cooperating GitHub workflow runs only",
+                  railwayMutationFreezeClaimed: false,
+                  railwayControlPlaneObservedBeforeAndAfter: true,
+                  railwayNullableUnmergedCountAccepted: false,
+                  railwayStagedPatchQueriedWithDecryptVariablesFalse: true,
+                  railwayStagedPatchCanonicalEmptyBeforeAndAfter: true,
+                  railwayStagedPatchContentsPersisted: false,
+                  fullAfterPredicateRepeatedAfterStoredArtifactVerification: true,
+                  publicHttpStartAcknowledgedWith202Within60Seconds: true,
+                  backupRunsInIsolatedChildProcess: true,
+                  statusPollingDoesNotValidateOrHashTheArchive: true,
+                  workerTimeoutSeconds: 4500,
+                  pollBudgetSecondsPerInvocation: 4800,
+                  finalRailwayApiReproofAfterTerminalWorker: true,
+                  sourceCiphertextRemovedBeforeArtifactDownload: true,
+                  artifactRetrievedByExactCurrentRunArtifactId: true,
+                  artifactArchiveDigestIndependentlyEnforced: true,
+                  freshlyDownloadedCiphertextHashAndSizeMatched: true,
+                  freshlyDownloadedArtifactDecrypted: true,
+                  plaintextArchiveManifestAndSqliteRevalidated: true,
+                  sameNonceTerminalIdempotencyRecheck: true,
+                  terminalBackupObjectByteEquivalent: true
+                },
+                confirmation: "STORED_ARTIFACT_DOWNLOADED_DECRYPTED_AND_REVALIDATED"
+              }
+            ' > independent-backup-copy-machine-evidence.json
+          jq -e '
+            .repository == "rishatkznAI/rental-management"
+            and .ref == "refs/heads/main"
+            and .githubSha == .deployedSha
+            and .workflowSha == .githubSha
+            and .requestNonce == .receipt.requestNonce
+            and .initialInvocationId == .terminalConservationRecheck.initialInvocationId
+            and (.initialWorkerStatusCode == 200 or .initialWorkerStatusCode == 201)
+            and .operationId == .receipt.operationId
+            and .sourceConservation.queryOnly == true
+            and .sourceConservation.totalChangesBefore == 0
+            and .sourceConservation.totalChangesAfter == 0
+            and .sourceConservation.durableStateUnchanged == true
+            and .sourceStateBefore.database == .sourceStateAfter.database
+            and .sourceStateBefore.wal == .sourceStateAfter.wal
+            and .databaseFileSha256 == .receipt.archive.databaseFileSha256
+            and .databaseFileSizeBytes == .receipt.archive.databaseFileSize
+            and .databaseFileSha256 == .independentDatabaseValidation.databaseFileSha256
+            and .databaseFileSizeBytes == .independentDatabaseValidation.databaseFileSizeBytes
+            and .businessFileCount == .receipt.archive.businessFileCount
+            and .businessFileInventorySha256 == .receipt.archive.businessFileInventorySha256
+            and .railwayIdentityBefore == .railwayIdentityAfter
+            and .railwayIdentityBefore.volumeAttachmentCount == 1
+            and .railwayIdentityBefore.stagedChangesEmpty == true
+            and .railwayIdentityBefore.stagedPatchStructuralChangeCount == 0
+            and (.railwayIdentityBefore.stagedPatchFingerprint | test("^[a-f0-9]{64}$"))
+            and .railwayIdentityBefore.stagedPatchFingerprint == .railwayIdentityAfter.stagedPatchFingerprint
+            and .apiRuntimeIdentityBefore == .apiRuntimeIdentityAfter
+            and .railwayIdentityBefore.replicaId == .apiRuntimeIdentityBefore.replicaId
+            and .railwayIdentityBefore.replicaId == .backupRuntimeIdentity.replicaId
+            and .apiRuntimeIdentityBefore.startedAt == .backupRuntimeIdentity.startedAt
+            and .receipt.runtime.startedAt == .backupRuntimeIdentity.startedAt
+            and .verificationSemantics.railwayMutationFreezeClaimed == false
+            and .verificationSemantics.railwayNullableUnmergedCountAccepted == false
+            and .verificationSemantics.railwayStagedPatchQueriedWithDecryptVariablesFalse == true
+            and .verificationSemantics.railwayStagedPatchCanonicalEmptyBeforeAndAfter == true
+            and .verificationSemantics.railwayStagedPatchContentsPersisted == false
+            and .verificationSemantics.publicHttpStartAcknowledgedWith202Within60Seconds == true
+            and .verificationSemantics.backupRunsInIsolatedChildProcess == true
+            and .verificationSemantics.statusPollingDoesNotValidateOrHashTheArchive == true
+            and .verificationSemantics.workerTimeoutSeconds == 4500
+            and .verificationSemantics.pollBudgetSecondsPerInvocation == 4800
+            and .verificationSemantics.finalRailwayApiReproofAfterTerminalWorker == true
+            and .terminalConservationRecheck.terminalConservationRecheck == true
+            and .terminalConservationRecheck.performedAfterStoredArtifactBeforeFinalRailwayApiReproof == true
+            and .terminalConservationRecheck.httpStatus == 200
+            and .terminalConservationRecheck.idempotent == true
+            and .terminalConservationRecheck.requestNonce == .requestNonce
+            and .terminalConservationRecheck.distinctWorkerInvocations == true
+            and .terminalConservationRecheck.initialInvocationId != .terminalConservationRecheck.terminalInvocationId
+            and .terminalConservationRecheck.backupObjectByteEquivalent == true
+            and .terminalConservationRecheck.originalBackupObjectCanonicalSha256 == .terminalConservationRecheck.terminalBackupObjectCanonicalSha256
+            and .verificationSemantics.sameNonceTerminalIdempotencyRecheck == true
+            and .verificationSemantics.terminalBackupObjectByteEquivalent == true
+            and .confirmation == "STORED_ARTIFACT_DOWNLOADED_DECRYPTED_AND_REVALIDATED"
+          ' independent-backup-copy-machine-evidence.json > /dev/null
+
+      - name: Upload non-secret preliminary backup evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: skytech-preliminary-backup-evidence-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            reset-response.json
+            terminal-idempotency-response.json
+            terminal-conservation-validation.json
+            original-backup-object.canonical.json
+            terminal-backup-object.canonical.json
+            skytech-clean-reset-backup-receipt.json
+            independent-backup-copy-machine-evidence.json
+            railway-control-plane-before.json
+            railway-control-plane-after.json
+            railway-target-before.json
+            railway-target-after.json
+            api-runtime-identity-before.json
+            api-runtime-identity-after.json
+            backup-receipt-identity.json
+            backup-runtime-identity.json
+            encrypted-artifact-before-upload.json
+            stored-artifact-validation.json
+            backup-database-validation.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove transient backup files
+        if: always()
+        shell: bash
+        run: |
+          rm -f \
+            skytech-clean-reset-backup.zip \
+            skytech-clean-reset-backup.zip.gpg \
+            skytech-clean-reset-backup-receipt.json
+          rm -f \
+            "$RUNNER_TEMP/skytech-pre-compatibility-backup-request-nonce" \
+            "$RUNNER_TEMP/skytech-pre-compatibility-backup-initial-invocation" \
+            "$RUNNER_TEMP/skytech-pre-compatibility-backup-curl-headers" \
+            "$RUNNER_TEMP/skytech-pre-compatibility-terminal-curl-headers" \
+            "$RUNNER_TEMP/skytech-pre-compatibility-stored-artifact.zip"
+          rm -rf \
+            "$RUNNER_TEMP/skytech-pre-compatibility-stored-artifact" \
+            "$RUNNER_TEMP/skytech-pre-compatibility-digest-verified-artifact"

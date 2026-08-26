@@ -35,4 +35,18 @@ The historical backend mechanism was Railway's connected GitHub repository/autod
 
 Railway's live public GraphQL schema and the Railway CLI schema expose `serviceInstanceDeployV2(environmentId, serviceId, commitSha)`, which returns the created deployment ID. The recovered workflow uses that exact-SHA source deployment primitive with a production-scoped project token. It fails closed before the mutation on wrong GitHub ref/SHA/repository or wrong Railway token/project/environment/service/source/runtime configuration, then fails closed after the mutation on wrong deployment identity, non-`SUCCESS` status, metadata SHA mismatch, health/readiness failure, or public version SHA mismatch.
 
+## Railway file-managed configuration authority
+
+The production service stores the source identity and root directory on the Railway `ServiceInstance`, while deployment settings are supplied by `server/railway.toml`. Railway combines config-as-code with service settings for each deployment; file values take precedence without being copied back into the raw service fields. Consequently the live production `ServiceInstance` correctly reports `rootDirectory=/server` while its raw `healthcheckPath` and `startCommand` are `null`.
+
+The release preflight does not treat those `null` values as either a mismatch or a wildcard. Before `serviceInstanceDeployV2`, it now requires all of the following conflict-free evidence:
+
+- strict project, environment, service, repository source, and `/server` root identity;
+- the exact checked-out `server/railway.toml`, with `deploy.healthcheckPath=/health` and `deploy.startCommand="node scripts/start-with-release-type.cjs"`;
+- Railway `resolvedFileConfig.configFile=/server/railway.toml`, tied to the one successful active deployment by exact deployment ID and commit SHA;
+- `resolvedFileConfig.fileManifest` and `propertyFileMapping` proving both values came from the deploy table in that file;
+- active deployment `meta.fileServiceManifest` and final `meta.serviceManifest` confirming the same effective values.
+
+Any non-null raw value must also match. A conflicting raw field, wrong root/config path, missing committed value, missing resolved evidence, or effective metadata conflict fails closed before the mutation. After Railway reports `SUCCESS`, the returned exact-SHA deployment metadata is checked again for the same config file, property mappings, and effective values before public runtime probes begin.
+
 Full-stack ordering is now backend first, frontend second, unified production gate last. A final read-only job reports exact public state and explicitly records `PARTIAL_RELEASE` when only one side matches the target. No fallback deploy or automatic rollback exists.

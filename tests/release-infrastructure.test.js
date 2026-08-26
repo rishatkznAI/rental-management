@@ -4,7 +4,9 @@ import { readFileSync } from 'node:fs';
 import {
   DEPLOY_EXACT_COMMIT_MUTATION,
   deploymentCommit,
+  parseRailwayDeployConfig,
   railwayGraphql,
+  validateAndTriggerRailwayDeployment,
   validateDeploymentProvenance,
   validateExactGitSha,
   validateExecutionContext,
@@ -17,6 +19,7 @@ import { resolveFrontendScriptUrls } from '../scripts/release-preflight.mjs';
 
 const workflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
 const backendReleaseSource = readFileSync(new URL('../scripts/railway-backend-release.mjs', import.meta.url), 'utf8');
+const railwayConfigSource = readFileSync(new URL('../server/railway.toml', import.meta.url), 'utf8');
 
 const expected = {
   commit: '5f071fc531c870fa2422320efe64bc83cafe509e',
@@ -43,6 +46,7 @@ function targetFixture(overrides = {}) {
       serviceId: expected.serviceId,
       serviceName: expected.serviceName,
       rootDirectory: '/server',
+      railwayConfigFile: null,
       healthcheckPath: '/health',
       startCommand: 'node scripts/start-with-release-type.cjs',
       source: {
@@ -50,6 +54,7 @@ function targetFixture(overrides = {}) {
         image: null,
       },
       activeDeployments: [deploymentFixture()],
+      resolvedFileConfig: resolvedFileConfigFixture(),
     },
     ...overrides,
   };
@@ -62,7 +67,49 @@ function deploymentFixture(overrides = {}) {
     environmentId: expected.environmentId,
     serviceId: expected.serviceId,
     status: 'SUCCESS',
-    meta: { commitHash: expected.commit },
+    meta: {
+      commitHash: expected.commit,
+      repo: expected.repository,
+      rootDirectory: '/server',
+      configFile: '/server/railway.toml',
+      fileServiceManifest: {
+        deploy: {
+          healthcheckPath: '/health',
+          startCommand: 'node scripts/start-with-release-type.cjs',
+        },
+      },
+      propertyFileMapping: {
+        'deploy.healthcheckPath': '$.deploy.healthcheckPath',
+        'deploy.startCommand': '$.deploy.startCommand',
+      },
+      serviceManifest: {
+        deploy: {
+          healthcheckPath: '/health',
+          startCommand: 'node scripts/start-with-release-type.cjs',
+        },
+      },
+    },
+    ...overrides,
+  };
+}
+
+function resolvedFileConfigFixture(overrides = {}) {
+  return {
+    commitHash: expected.commit,
+    configFile: '/server/railway.toml',
+    deploymentId: 'deployment-1',
+    fileManifest: {
+      deploy: {
+        healthcheckPath: '/health',
+        startCommand: 'node scripts/start-with-release-type.cjs',
+      },
+    },
+    propertyFileMapping: {
+      'deploy.healthcheckPath': '$.deploy.healthcheckPath',
+      'deploy.startCommand': '$.deploy.startCommand',
+    },
+    repo: expected.repository,
+    resolvedAt: '2026-08-25T19:00:02.248Z',
     ...overrides,
   };
 }
@@ -123,15 +170,15 @@ test('backend deploy execution is restricted to the exact main workflow context'
   }), /backend or full-stack/);
 });
 
-test('Railway target preflight accepts only the connected production service contract', () => {
-  const result = validateRailwayTarget(targetFixture(), expected);
+test('Railway target preflight accepts the connected production service contract', () => {
+  const result = validateRailwayTarget(targetFixture(), expected, railwayConfigSource);
   assert.equal(result.projectId, expected.projectId);
   assert.equal(result.environmentId, expected.environmentId);
   assert.equal(result.serviceId, expected.serviceId);
   assert.equal(result.repository, expected.repository.toLowerCase());
 });
 
-test('Railway target preflight fails closed on identity, source, and runtime config drift', () => {
+test('Railway target preflight fails closed on identity and source drift', () => {
   const cases = [
     [targetFixture({ projectToken: { projectId: 'wrong', environmentId: expected.environmentId } }), /project token project ID/],
     [targetFixture({ service: { id: 'wrong', name: expected.serviceName, projectId: expected.projectId } }), /service ID/],
@@ -139,17 +186,160 @@ test('Railway target preflight fails closed on identity, source, and runtime con
     [targetFixture({ serviceInstance: { ...targetFixture().serviceInstance, source: { repo: 'other/repo', image: null } } }), /source repository/],
     [targetFixture({ serviceInstance: { ...targetFixture().serviceInstance, source: { repo: expected.repository, image: 'registry/image:tag' } } }), /not an image source/],
     [targetFixture({ serviceInstance: { ...targetFixture().serviceInstance, rootDirectory: '/api' } }), /root directory/],
-    [targetFixture({ serviceInstance: { ...targetFixture().serviceInstance, healthcheckPath: '/status' } }), /healthcheck path/],
-    [targetFixture({ serviceInstance: { ...targetFixture().serviceInstance, startCommand: 'node server.js' } }), /start command/],
     [targetFixture({ serviceInstance: { ...targetFixture().serviceInstance, activeDeployments: [deploymentFixture(), deploymentFixture({ id: 'deployment-2' })] } }), /ambiguous multiple active deployments/],
   ];
   for (const [fixture, pattern] of cases) {
-    assert.throws(() => validateRailwayTarget(fixture, expected), pattern);
+    assert.throws(() => validateRailwayTarget(fixture, expected, railwayConfigSource), pattern);
   }
 });
 
+test('file-managed null ServiceInstance config passes with committed and resolved evidence', () => {
+  const instance = targetFixture().serviceInstance;
+  const result = validateRailwayTarget(targetFixture({
+    serviceInstance: {
+      ...instance,
+      healthcheckPath: null,
+      startCommand: null,
+    },
+  }), expected, railwayConfigSource);
+  assert.equal(result.healthcheckPath, '/health');
+  assert.equal(result.startCommand, 'node scripts/start-with-release-type.cjs');
+  assert.equal(result.configFile, '/server/railway.toml');
+  assert.match(result.configAuthority, /committed railway\.toml/);
+});
+
+test('explicit matching ServiceInstance config passes without source ambiguity', () => {
+  assert.doesNotThrow(() => validateRailwayTarget(targetFixture(), expected, railwayConfigSource));
+});
+
+test('explicit ServiceInstance healthcheck mismatch fails', () => {
+  assert.throws(
+    () => validateRailwayTarget(targetFixture({
+      serviceInstance: { ...targetFixture().serviceInstance, healthcheckPath: '/status' },
+    }), expected, railwayConfigSource),
+    /Railway healthcheck path mismatch/,
+  );
+});
+
+test('explicit ServiceInstance start-command mismatch fails', () => {
+  assert.throws(
+    () => validateRailwayTarget(targetFixture({
+      serviceInstance: { ...targetFixture().serviceInstance, startCommand: 'node server.js' },
+    }), expected, railwayConfigSource),
+    /Railway start command mismatch/,
+  );
+});
+
+test('null ServiceInstance config fails when committed railway.toml is missing', () => {
+  const instance = targetFixture().serviceInstance;
+  assert.throws(
+    () => validateRailwayTarget(targetFixture({
+      serviceInstance: { ...instance, healthcheckPath: null, startCommand: null },
+    }), expected, ''),
+    /committed Railway config source is required/,
+  );
+});
+
+test('null ServiceInstance config fails when committed railway.toml values are wrong', () => {
+  const instance = targetFixture().serviceInstance;
+  const wrongConfig = railwayConfigSource.replace('healthcheckPath = "/health"', 'healthcheckPath = "/status"');
+  assert.throws(
+    () => validateRailwayTarget(targetFixture({
+      serviceInstance: { ...instance, healthcheckPath: null, startCommand: null },
+    }), expected, wrongConfig),
+    /committed Railway healthcheck path mismatch/,
+  );
+});
+
+test('correct railway.toml fails when the strict root directory is wrong', () => {
+  assert.throws(
+    () => validateRailwayTarget(targetFixture({
+      serviceInstance: { ...targetFixture().serviceInstance, rootDirectory: '/api' },
+    }), expected, railwayConfigSource),
+    /Railway root directory mismatch/,
+  );
+});
+
+test('effective deployment metadata conflict fails despite correct railway.toml', () => {
+  const conflictingDeployment = deploymentFixture({
+    meta: {
+      ...deploymentFixture().meta,
+      fileServiceManifest: {
+        deploy: {
+          healthcheckPath: '/status',
+          startCommand: 'node scripts/start-with-release-type.cjs',
+        },
+      },
+    },
+  });
+  assert.throws(
+    () => validateRailwayTarget(targetFixture({
+      serviceInstance: {
+        ...targetFixture().serviceInstance,
+        healthcheckPath: null,
+        startCommand: null,
+        activeDeployments: [conflictingDeployment],
+      },
+    }), expected, railwayConfigSource),
+    /effective deployment healthcheck path mismatch/,
+  );
+});
+
+test('missing resolved deployment evidence fails closed', () => {
+  const instance = targetFixture().serviceInstance;
+  assert.throws(
+    () => validateRailwayTarget(targetFixture({
+      serviceInstance: {
+        ...instance,
+        healthcheckPath: null,
+        startCommand: null,
+        resolvedFileConfig: null,
+      },
+    }), expected, railwayConfigSource),
+    /EFFECTIVE_RAILWAY_CONFIG_UNVERIFIED/,
+  );
+});
+
+test('configuration validation failure causes zero deployment mutations', async () => {
+  let mutationCalls = 0;
+  const instance = targetFixture().serviceInstance;
+  await assert.rejects(
+    validateAndTriggerRailwayDeployment({
+      token: 'redacted-test-token',
+      targetData: targetFixture({
+        serviceInstance: { ...instance, healthcheckPath: null, startCommand: null },
+      }),
+      expected,
+      railwayConfigSource: railwayConfigSource.replace(
+        'startCommand = "node scripts/start-with-release-type.cjs"',
+        'startCommand = "node server.js"',
+      ),
+      graphql: async () => {
+        mutationCalls += 1;
+        return { serviceInstanceDeployV2: 'unexpected-deployment' };
+      },
+    }),
+    /committed Railway start command mismatch/,
+  );
+  assert.equal(mutationCalls, 0);
+});
+
+test('committed railway.toml parser reads the exact deploy values', () => {
+  assert.deepEqual(parseRailwayDeployConfig(railwayConfigSource), {
+    startCommand: 'node scripts/start-with-release-type.cjs',
+    healthcheckPath: '/health',
+  });
+});
+
 test('deployment provenance requires the returned deployment ID, target IDs, SUCCESS, and exact metadata SHA', () => {
-  const validationExpected = { ...expected, deploymentId: 'deployment-1' };
+  const validationExpected = {
+    ...expected,
+    deploymentId: 'deployment-1',
+    rootDirectory: 'server',
+    configFile: '/server/railway.toml',
+    healthcheckPath: '/health',
+    startCommand: 'node scripts/start-with-release-type.cjs',
+  };
   assert.equal(validateDeploymentProvenance(deploymentFixture(), validationExpected).commit, expected.commit);
   assert.equal(deploymentCommit({ meta: JSON.stringify({ commitHash: expected.commit }) }), expected.commit);
   assert.throws(
@@ -163,6 +353,20 @@ test('deployment provenance requires the returned deployment ID, target IDs, SUC
   assert.throws(
     () => validateDeploymentProvenance(deploymentFixture({ meta: { commitHash: 'a'.repeat(40) } }), validationExpected),
     /commit metadata mismatch/,
+  );
+  assert.throws(
+    () => validateDeploymentProvenance(deploymentFixture({
+      meta: {
+        ...deploymentFixture().meta,
+        serviceManifest: {
+          deploy: {
+            healthcheckPath: '/status',
+            startCommand: 'node scripts/start-with-release-type.cjs',
+          },
+        },
+      },
+    }), validationExpected),
+    /resolved service healthcheck path mismatch/,
   );
 });
 

@@ -456,6 +456,19 @@ test('real server preserves trusted actor scope and passes create-role-archive l
     });
     assert.equal(foreignUserWrite.status, 404, JSON.stringify(foreignUserWrite.body));
 
+    const genericUserCreate = await api(server.baseUrl, 'POST', '/api/users', {
+      token,
+      body: {
+        name: 'Must use Membership lifecycle',
+        email: 'membership-workflow-required@example.test',
+        role: 'Менеджер по аренде',
+        status: 'Активен',
+        password: TEST_PASSWORD,
+      },
+    });
+    assert.equal(genericUserCreate.status, 409, JSON.stringify(genericUserCreate.body));
+    assert.equal(genericUserCreate.body.code, 'USER_MEMBERSHIP_WORKFLOW_REQUIRED');
+
     for (const route of [
       '/api/admin/backup/full',
       '/api/admin/backup/history',

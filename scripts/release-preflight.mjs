@@ -658,6 +658,13 @@ function extractScriptUrls(html) {
   return urls;
 }
 
+export function resolveFrontendScriptUrls(html = '', documentUrl = '') {
+  const resolvedDocumentUrl = new URL(documentUrl);
+  return unique(extractScriptUrls(html)
+    .map(scriptUrl => resolveAssetUrl(resolvedDocumentUrl.toString(), scriptUrl))
+    .filter(assetUrl => new URL(assetUrl).origin === resolvedDocumentUrl.origin));
+}
+
 export async function readFrontendBundle(frontendUrl) {
   const cacheBust = `releasePreflight=${Date.now()}`;
   const separator = frontendUrl.includes('?') ? '&' : '?';
@@ -667,18 +674,19 @@ export async function readFrontendBundle(frontendUrl) {
   });
   assertOk(response.status === 200, `frontend URL must return 200. HTTP ${response.status}: ${frontendUrl}`);
 
-  const scriptUrls = extractScriptUrls(html);
-  assertOk(scriptUrls.length > 0, 'frontend HTML did not include any script assets');
+  const documentUrl = response.url || frontendUrl;
+  const assetUrls = resolveFrontendScriptUrls(html, documentUrl);
+  assertOk(assetUrls.length > 0, 'frontend HTML did not include any same-origin script assets');
 
   const assets = [];
-  for (const scriptUrl of scriptUrls) {
-    const assetUrl = resolveAssetUrl(frontendUrl, scriptUrl);
+  for (const assetUrl of assetUrls) {
     const asset = await fetchText(assetUrl, { signal: AbortSignal.timeout(60_000) });
     assertOk(asset.response.status === 200, `frontend asset must return 200. HTTP ${asset.response.status}: ${assetUrl}`);
     assets.push({ url: assetUrl, text: asset.text });
   }
 
   return {
+    documentUrl,
     html,
     assets,
     combinedText: [html, ...assets.map(asset => asset.text)].join('\n'),

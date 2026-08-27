@@ -1,0 +1,521 @@
+name: Skytech Historical Backup Route Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_main_sha:
+        description: Exact reviewed 40-character SHA at refs/heads/main containing the historical artifact GET fix
+        required: true
+        type: string
+      expected_active_backend_sha:
+        description: Exact 40-character SHA currently served by the production backup-only backend
+        required: true
+        type: string
+      confirmation:
+        description: Type RELEASE_HISTORICAL_BACKUP_ROUTE_FIX_WITH_PIN_HANDOFF exactly
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  exact-route-release:
+    name: exact-pin-handoff-and-backend-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    env:
+      EXPECTED_REPOSITORY: rishatkznAI/rental-management
+      EXPECTED_REF: refs/heads/main
+      EXPECTED_WORKFLOW_REF: rishatkznAI/rental-management/.github/workflows/skytech-historical-backup-route-release.yml@refs/heads/main
+      RAILWAY_PROJECT_ID: 1558b38d-bf16-4b50-9ee6-0871b7152116
+      RAILWAY_ENVIRONMENT_ID: 62833109-61cb-4600-9200-d624d6537a05
+      RAILWAY_SERVICE_ID: b2016e92-3c50-4b00-800d-625a139b219c
+      RAILWAY_SERVICE_NAME: rental-management
+      RAILWAY_VOLUME_ID: 48b8768c-a8a9-4a87-8a4b-b980fff5d00c
+      RAILWAY_VOLUME_NAME: rental-management-volume
+      RAILWAY_VOLUME_MOUNT_PATH: /data
+      RAILWAY_EXPECTED_REPOSITORY: rishatkznAI/rental-management
+      RAILWAY_EXPECTED_BRANCH: main
+      PRODUCTION_API_URL: https://api.skytech-rent.ru
+      PRODUCTION_FRONTEND_URL: https://app.skytech-rent.ru
+      PIN_KEY: SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA
+
+    steps:
+      - name: Bind dispatch to exact reviewed main, active backend, and confirmation
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_ACTIVE_BACKEND_SHA: ${{ inputs.expected_active_backend_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_MAIN_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_ACTIVE_BACKEND_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$EXPECTED_MAIN_SHA" != "$EXPECTED_ACTIVE_BACKEND_SHA"
+          test "$CONFIRMATION" = "RELEASE_HISTORICAL_BACKUP_ROUTE_FIX_WITH_PIN_HANDOFF"
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$RUNNER_ENVIRONMENT" = "github-hosted"
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$GITHUB_REF" = "$EXPECTED_REF"
+          test "$GITHUB_SHA" = "$EXPECTED_MAIN_SHA"
+          test "$GITHUB_WORKFLOW_SHA" = "$GITHUB_SHA"
+          test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_WORKFLOW_REF"
+
+      - name: Bind private transient evidence paths to this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$RUNNER_TEMP"
+          [[ "$RUNNER_TEMP" != *$'\n'* && "$RUNNER_TEMP" != *$'\r'* ]]
+          evidence_directory="$RUNNER_TEMP/skytech-historical-backup-route-release"
+          test ! -e "$evidence_directory"
+          install -d -m 700 "$evidence_directory"
+          {
+            printf 'ROUTE_RELEASE_EVIDENCE_DIRECTORY=%s\n' "$evidence_directory"
+            printf 'BASELINE_STATUS_FILE=%s/railway-status-baseline.json\n' "$evidence_directory"
+            printf 'BASELINE_VARIABLES_FILE=%s/railway-variables-baseline.json\n' "$evidence_directory"
+            printf 'BASELINE_PROOF_FILE=%s/control-plane-baseline.json\n' "$evidence_directory"
+            printf 'BASELINE_API_PROOF_FILE=%s/api-baseline.json\n' "$evidence_directory"
+            printf 'STAGE_ATTEMPT_MARKER=%s/stage-attempted\n' "$evidence_directory"
+            printf 'STAGE_RESULT_FILE=%s/variable-set-stage-result.json\n' "$evidence_directory"
+            printf 'STAGED_STATUS_FILE=%s/railway-status-staged.json\n' "$evidence_directory"
+            printf 'STAGED_VARIABLES_FILE=%s/railway-variables-staged.json\n' "$evidence_directory"
+            printf 'STAGED_PROOF_FILE=%s/control-plane-staged.json\n' "$evidence_directory"
+            printf 'STAGED_PROVEN_MARKER=%s/stage-proven\n' "$evidence_directory"
+            printf 'IRREVERSIBLE_MARKER=%s/deployment-attempt-authorized.json\n' "$evidence_directory"
+            printf 'DEPLOYMENT_PROOF_FILE=%s/deployment-attempt.json\n' "$evidence_directory"
+            printf 'TERMINAL_STATUS_FILE=%s/railway-status-terminal.json\n' "$evidence_directory"
+            printf 'TERMINAL_VARIABLES_FILE=%s/railway-variables-terminal.json\n' "$evidence_directory"
+            printf 'TERMINAL_PROOF_FILE=%s/control-plane-terminal.json\n' "$evidence_directory"
+            printf 'TERMINAL_API_PROOF_FILE=%s/api-terminal.json\n' "$evidence_directory"
+            printf 'ROLLBACK_RESULT_FILE=%s/variable-set-rollback-result.json\n' "$evidence_directory"
+            printf 'ROLLBACK_STATUS_FILE=%s/railway-status-rollback.json\n' "$evidence_directory"
+            printf 'ROLLBACK_VARIABLES_FILE=%s/railway-variables-rollback.json\n' "$evidence_directory"
+            printf 'ROLLBACK_PROOF_FILE=%s/control-plane-rollback.json\n' "$evidence_directory"
+          } >> "$GITHUB_ENV"
+
+      - name: Check out the exact reviewed main commit without persisted credentials
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up exact Node.js runtime
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 20.20.2
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Verify checkout and route-release implementation
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$EXPECTED_MAIN_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          node --check scripts/historical-backup-route-release-control-plane.mjs
+          node --check scripts/historical-backup-route-release-deploy.mjs
+          node --check scripts/historical-backup-route-release-api-proof.mjs
+
+      - name: Install exact dependencies and run the full deployable test gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm ci --prefix server
+          npm test
+          git diff --exit-code
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node --check scripts/historical-backup-route-release-control-plane.mjs
+          node --check scripts/historical-backup-route-release-deploy.mjs
+          node --check scripts/historical-backup-route-release-api-proof.mjs
+
+      - name: Install and verify exact Railway CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global @railway/cli@5.45.0
+          test "$(railway --version)" = "railway 5.45.0"
+
+      - name: Validate the dedicated Railway project token without persisting it
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$RAILWAY_TOKEN"
+          test -n "$RAILWAY_TOKEN"
+          [[ "$RAILWAY_TOKEN" != *$'\n'* && "$RAILWAY_TOKEN" != *$'\r'* ]]
+
+      - name: Capture exact frontend representation before backend-only release
+        id: frontend_baseline
+        env:
+          EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_main_sha }}
+        shell: bash
+        run: >-
+          timeout --signal=TERM --kill-after=15s 300s node scripts/frontend-release-snapshot.mjs
+          --mode capture
+          --frontend-url "$PRODUCTION_FRONTEND_URL"
+          --api-url "$PRODUCTION_API_URL"
+          --release-commit "$EXPECTED_RELEASE_COMMIT"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Privately capture Railway variables and singleton status before staging
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "::add-mask::$RAILWAY_TOKEN"
+          install -m 600 /dev/null "$BASELINE_VARIABLES_FILE"
+          install -m 600 /dev/null "$BASELINE_STATUS_FILE"
+          timeout --signal=TERM --kill-after=15s 120s railway variable list \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --json > "$BASELINE_VARIABLES_FILE"
+          timeout --signal=TERM --kill-after=15s 120s railway status \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --json > "$BASELINE_STATUS_FILE"
+
+      - name: Preprove exact old pin, Railway singleton, volume, replica, and empty staged state
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_ACTIVE_BACKEND_SHA: ${{ inputs.expected_active_backend_sha }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$RAILWAY_PROJECT_TOKEN"
+          node scripts/historical-backup-route-release-control-plane.mjs \
+            --mode baseline \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --expected-active-commit "$EXPECTED_ACTIVE_BACKEND_SHA" \
+            --expected-pin "$EXPECTED_ACTIVE_BACKEND_SHA" \
+            --status-file "$BASELINE_STATUS_FILE" \
+            --variables-file "$BASELINE_VARIABLES_FILE" \
+            --output "$BASELINE_PROOF_FILE"
+
+      - name: Preprove exact canonical backup-only API
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_ACTIVE_BACKEND_SHA: ${{ inputs.expected_active_backend_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          previous_deployment_id="$(node -e 'const p=require(process.argv[1]); process.stdout.write(p.railway.deploymentId)' "$BASELINE_PROOF_FILE")"
+          node scripts/historical-backup-route-release-api-proof.mjs \
+            --phase baseline \
+            --origin "$PRODUCTION_API_URL" \
+            --expected-commit "$EXPECTED_ACTIVE_BACKEND_SHA" \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --expected-deployment-id "$previous_deployment_id" \
+            --railway-proof "$BASELINE_PROOF_FILE" \
+            --attempts 3 \
+            --interval-ms 3000 \
+            --output "$BASELINE_API_PROOF_FILE"
+
+      - name: Stage only the reviewed backup-runtime pin with deploys skipped
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_ACTIVE_BACKEND_SHA: ${{ inputs.expected_active_backend_sha }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "::add-mask::$RAILWAY_TOKEN"
+          install -m 600 /dev/null "$STAGE_ATTEMPT_MARKER"
+          install -m 600 /dev/null "$STAGE_RESULT_FILE"
+          install -m 600 /dev/null "$STAGED_VARIABLES_FILE"
+          install -m 600 /dev/null "$STAGED_STATUS_FILE"
+          timeout --signal=TERM --kill-after=15s 120s railway variable set "$PIN_KEY=$EXPECTED_MAIN_SHA" \
+            --skip-deploys \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --json > "$STAGE_RESULT_FILE"
+          timeout --signal=TERM --kill-after=15s 120s railway variable list \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --json > "$STAGED_VARIABLES_FILE"
+          timeout --signal=TERM --kill-after=15s 120s railway status \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --json > "$STAGED_STATUS_FILE"
+          node scripts/historical-backup-route-release-control-plane.mjs \
+            --mode staged \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --expected-active-commit "$EXPECTED_ACTIVE_BACKEND_SHA" \
+            --expected-pin "$EXPECTED_MAIN_SHA" \
+            --status-file "$STAGED_STATUS_FILE" \
+            --variables-file "$STAGED_VARIABLES_FILE" \
+            --baseline-proof "$BASELINE_PROOF_FILE" \
+            --baseline-variables "$BASELINE_VARIABLES_FILE" \
+            --output "$STAGED_PROOF_FILE"
+          install -m 600 /dev/null "$STAGED_PROVEN_MARKER"
+
+      - name: Establish irreversible deployment uncertainty boundary
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_ACTIVE_BACKEND_SHA: ${{ inputs.expected_active_backend_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -f "$STAGED_PROVEN_MARKER"
+          test ! -e "$IRREVERSIBLE_MARKER"
+          previous_deployment_id="$(node -e 'const p=require(process.argv[1]); process.stdout.write(p.railway.deploymentId)' "$BASELINE_PROOF_FILE")"
+          marker_tmp="$IRREVERSIBLE_MARKER.tmp"
+          jq -nS \
+            --arg workflowCommit "$EXPECTED_MAIN_SHA" \
+            --arg previousCommit "$EXPECTED_ACTIVE_BACKEND_SHA" \
+            --arg previousDeploymentId "$previous_deployment_id" '
+              {
+                markerVersion: 1,
+                workflowCommit: $workflowCommit,
+                previousCommit: $previousCommit,
+                previousDeploymentId: $previousDeploymentId,
+                decision: "DEPLOYMENT_ATTEMPT_AUTHORIZED_NO_AUTOMATIC_ROLLBACK"
+              }
+            ' > "$marker_tmp"
+          chmod 600 "$marker_tmp"
+          mv "$marker_tmp" "$IRREVERSIBLE_MARKER"
+          {
+            printf '### Historical backup route release uncertainty boundary\n\n'
+            printf -- '- exact deploy attempt authorized: `%s`\n' "$EXPECTED_MAIN_SHA"
+            printf -- '- automatic deploy retry: `FORBIDDEN`\n'
+            printf -- '- automatic rollback after this marker: `FORBIDDEN`\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trigger exactly one reviewed SHA deployment and wait for Railway SUCCESS
+        id: exact_deploy
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_ACTIVE_BACKEND_SHA: ${{ inputs.expected_active_backend_sha }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$RAILWAY_PROJECT_TOKEN"
+          previous_deployment_id="$(node -e 'const p=require(process.argv[1]); process.stdout.write(p.railway.deploymentId)' "$BASELINE_PROOF_FILE")"
+          node scripts/historical-backup-route-release-deploy.mjs \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --previous-commit "$EXPECTED_ACTIVE_BACKEND_SHA" \
+            --previous-deployment-id "$previous_deployment_id" \
+            --variables-file "$STAGED_VARIABLES_FILE" \
+            --baseline-variables "$BASELINE_VARIABLES_FILE" \
+            --stage-proof "$STAGED_PROOF_FILE" \
+            --irreversible-marker "$IRREVERSIBLE_MARKER" \
+            --output "$DEPLOYMENT_PROOF_FILE"
+
+      - name: Privately capture terminal Railway variables and singleton status
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "::add-mask::$RAILWAY_TOKEN"
+          install -m 600 /dev/null "$TERMINAL_VARIABLES_FILE"
+          install -m 600 /dev/null "$TERMINAL_STATUS_FILE"
+          timeout --signal=TERM --kill-after=15s 120s railway variable list \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --json > "$TERMINAL_VARIABLES_FILE"
+          timeout --signal=TERM --kill-after=15s 120s railway status \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --json > "$TERMINAL_STATUS_FILE"
+
+      - name: Prove exact new pin, deployment, replica, volume, old-deployment retirement, and empty staged state
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          EXACT_DEPLOYMENT_ID: ${{ steps.exact_deploy.outputs.deployment_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$RAILWAY_PROJECT_TOKEN"
+          test -n "$EXACT_DEPLOYMENT_ID"
+          node scripts/historical-backup-route-release-control-plane.mjs \
+            --mode terminal \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --expected-active-commit "$EXPECTED_MAIN_SHA" \
+            --expected-pin "$EXPECTED_MAIN_SHA" \
+            --expected-deployment-id "$EXACT_DEPLOYMENT_ID" \
+            --status-file "$TERMINAL_STATUS_FILE" \
+            --variables-file "$TERMINAL_VARIABLES_FILE" \
+            --baseline-proof "$BASELINE_PROOF_FILE" \
+            --expected-variables "$STAGED_VARIABLES_FILE" \
+            --output "$TERMINAL_PROOF_FILE"
+
+      - name: Prove exact new canonical backup-only API runtime
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXACT_DEPLOYMENT_ID: ${{ steps.exact_deploy.outputs.deployment_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/historical-backup-route-release-api-proof.mjs \
+            --phase terminal \
+            --origin "$PRODUCTION_API_URL" \
+            --expected-commit "$EXPECTED_MAIN_SHA" \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --expected-deployment-id "$EXACT_DEPLOYMENT_ID" \
+            --railway-proof "$TERMINAL_PROOF_FILE" \
+            --attempts 30 \
+            --interval-ms 5000 \
+            --output "$TERMINAL_API_PROOF_FILE"
+
+      - name: Roll back only a pre-deploy staged pin after non-success
+        if: failure() || cancelled()
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_ACTIVE_BACKEND_SHA: ${{ inputs.expected_active_backend_sha }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup_non_success_evidence() {
+            if test -n "${ROUTE_RELEASE_EVIDENCE_DIRECTORY:-}" \
+              && test "$ROUTE_RELEASE_EVIDENCE_DIRECTORY" = "$RUNNER_TEMP/skytech-historical-backup-route-release"; then
+              set +e
+              rm -rf "$ROUTE_RELEASE_EVIDENCE_DIRECTORY"
+            fi
+          }
+          trap cleanup_non_success_evidence EXIT
+          if test -z "${STAGE_ATTEMPT_MARKER:-}" || test ! -e "$STAGE_ATTEMPT_MARKER"; then
+            exit 0
+          fi
+          if test -e "$IRREVERSIBLE_MARKER"; then
+            {
+              printf '### Deployment state uncertainty\n\n'
+              printf -- '- result: `HARD FAIL`\n'
+              printf -- '- irreversible marker: `PRESENT`\n'
+              printf -- '- automatic rollback: `NOT ATTEMPTED`\n'
+              printf -- '- automatic deploy retry: `NOT ATTEMPTED`\n'
+              printf -- '- required action: inspect exact Railway deployment state before any later mutation\n'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          umask 077
+          echo "::add-mask::$RAILWAY_TOKEN"
+          install -m 600 /dev/null "$ROLLBACK_RESULT_FILE"
+          install -m 600 /dev/null "$ROLLBACK_VARIABLES_FILE"
+          install -m 600 /dev/null "$ROLLBACK_STATUS_FILE"
+          timeout --signal=TERM --kill-after=10s 60s railway variable set "$PIN_KEY=$EXPECTED_ACTIVE_BACKEND_SHA" \
+            --skip-deploys \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --json > "$ROLLBACK_RESULT_FILE"
+          timeout --signal=TERM --kill-after=10s 45s railway variable list \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            --json > "$ROLLBACK_VARIABLES_FILE"
+          timeout --signal=TERM --kill-after=10s 45s railway status \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --json > "$ROLLBACK_STATUS_FILE"
+          timeout --signal=TERM --kill-after=10s 60s node scripts/historical-backup-route-release-control-plane.mjs \
+            --mode rollback \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --expected-active-commit "$EXPECTED_ACTIVE_BACKEND_SHA" \
+            --expected-pin "$EXPECTED_ACTIVE_BACKEND_SHA" \
+            --status-file "$ROLLBACK_STATUS_FILE" \
+            --variables-file "$ROLLBACK_VARIABLES_FILE" \
+            --baseline-proof "$BASELINE_PROOF_FILE" \
+            --baseline-variables "$BASELINE_VARIABLES_FILE" \
+            --output "$ROLLBACK_PROOF_FILE"
+          {
+            printf '### Pre-deploy pin rollback\n\n'
+            printf -- '- result: `PASS`\n'
+            printf -- '- exact old pin restored: `%s`\n' "$EXPECTED_ACTIVE_BACKEND_SHA"
+            printf -- '- running old deployment changed: `NO`\n'
+            printf -- '- staged changes after rollback: `EMPTY`\n'
+            printf -- '- deploy/redeploy/restart performed: `NO`\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify frontend conservation after every backend deployment outcome
+        if: always() && steps.frontend_baseline.outcome == 'success'
+        env:
+          EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_main_sha }}
+          EXPECTED_FRONTEND_COMMIT: ${{ steps.frontend_baseline.outputs.frontend_commit }}
+          EXPECTED_FRONTEND_COMMIT_FULL: ${{ steps.frontend_baseline.outputs.frontend_commit_full }}
+          EXPECTED_FRONTEND_REPRESENTATION_SHA256: ${{ steps.frontend_baseline.outputs.frontend_representation_sha256 }}
+        shell: bash
+        run: >-
+          timeout --signal=TERM --kill-after=15s 300s node scripts/frontend-release-snapshot.mjs
+          --mode verify
+          --frontend-url "$PRODUCTION_FRONTEND_URL"
+          --api-url "$PRODUCTION_API_URL"
+          --release-commit "$EXPECTED_RELEASE_COMMIT"
+          --expected-commit "$EXPECTED_FRONTEND_COMMIT"
+          --expected-commit-full "$EXPECTED_FRONTEND_COMMIT_FULL"
+          --expected-representation-sha256 "$EXPECTED_FRONTEND_REPRESENTATION_SHA256"
+
+      - name: Publish allowlisted terminal conservation evidence
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_ACTIVE_BACKEND_SHA: ${{ inputs.expected_active_backend_sha }}
+          EXACT_DEPLOYMENT_ID: ${{ steps.exact_deploy.outputs.deployment_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          replica_id="$(node -e 'const p=require(process.argv[1]); process.stdout.write(p.railway.replicaId)' "$TERMINAL_PROOF_FILE")"
+          volume_id="$(node -e 'const p=require(process.argv[1]); process.stdout.write(p.railway.volumeId)' "$TERMINAL_PROOF_FILE")"
+          [[ "$EXACT_DEPLOYMENT_ID" =~ ^[A-Za-z0-9._:-]+$ ]]
+          [[ "$replica_id" =~ ^[A-Za-z0-9._:-]+$ ]]
+          test "$volume_id" = "$RAILWAY_VOLUME_ID"
+          {
+            printf '### Historical backup artifact GET route release\n\n'
+            printf -- '- result: `PASS`\n'
+            printf -- '- previous backend SHA: `%s`\n' "$EXPECTED_ACTIVE_BACKEND_SHA"
+            printf -- '- exact backend SHA: `%s`\n' "$EXPECTED_MAIN_SHA"
+            printf -- '- exact deployment ID: `%s`\n' "$EXACT_DEPLOYMENT_ID"
+            printf -- '- exact replica ID: `%s`\n' "$replica_id"
+            printf -- '- exact volume ID: `%s`\n' "$volume_id"
+            printf -- '- backup-only runtime: `PASS`\n'
+            printf -- '- expected-SHA pin handoff: `PASS`\n'
+            printf -- '- decrypted deploy-config pin: `PASS` (exact single-value container, raw value not emitted)\n'
+            printf -- '- CLI/GraphQL resolved variable inventories: `EXACT` (raw values not emitted)\n'
+            printf -- '- resolved variable conservation: `PASS` (only documented Railway-derived `RAILWAY_GIT_COMMIT_SHA` may change; presence and 40-hex shape proven)\n'
+            printf -- '- full target-service config conservation: `PASS`\n'
+            printf -- '- staged changes: `EMPTY`\n'
+            printf -- '- old deployment active: `NO`\n'
+            printf -- '- frontend representation conserved: `PASS`\n'
+            printf -- '- app/data/write-freeze mutation: `NONE`\n'
+            printf -- '- automatic rollback/retry after uncertainty boundary: `NONE`\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Always delete raw variable JSON and transient evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if test -n "${ROUTE_RELEASE_EVIDENCE_DIRECTORY:-}" \
+            && test "$ROUTE_RELEASE_EVIDENCE_DIRECTORY" = "$RUNNER_TEMP/skytech-historical-backup-route-release"; then
+            rm -rf "$ROUTE_RELEASE_EVIDENCE_DIRECTORY"
+          fi

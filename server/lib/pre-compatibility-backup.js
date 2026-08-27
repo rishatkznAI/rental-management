@@ -488,6 +488,297 @@ function validateBusinessFileCoverage(archive, dbPath, fileRoots = []) {
   };
 }
 
+function validationFailure(code, message) {
+  throw Object.assign(new Error(message), { code });
+}
+
+function isPlainObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isNonNegativeSafeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function validateHistoricalManifest(archive, receipt) {
+  const { manifest } = archive;
+  const fileNames = [...archive.entries.keys()].filter(name => name.startsWith('files/'));
+  const localFileNames = [];
+  const embeddedFileNames = [];
+  for (const name of fileNames) {
+    const parts = name.split('/');
+    if (parts.length < 3 || parts.some(part => !part)) {
+      validationFailure(
+        'PRE_COMPATIBILITY_BACKUP_FILE_MANIFEST_MISMATCH',
+        'The historical backup contains an invalid business-file path.',
+      );
+    }
+    if (parts[1] === 'embedded-photos') embeddedFileNames.push(name);
+    else if (BUSINESS_FILE_ROOT_NAMES.includes(parts[1])) localFileNames.push(name);
+    else {
+      validationFailure(
+        'PRE_COMPATIBILITY_BACKUP_FILE_MANIFEST_MISMATCH',
+        'The historical backup contains an unrecognized business-file root.',
+      );
+    }
+  }
+  localFileNames.sort((left, right) => left.localeCompare(right));
+  embeddedFileNames.sort((left, right) => left.localeCompare(right));
+
+  const includedFilesCount = fileNames.length;
+  const localFilesCount = localFileNames.length;
+  const embeddedPhotosCount = embeddedFileNames.length;
+  const manifestIncludedFilesCount = manifest.includedFilesCount;
+  const manifestNestedIncludedFilesCount = manifest.files?.includedFilesCount;
+  const manifestIncludedCount = manifest.files?.includedCount;
+  const manifestLocalFilesCount = manifest.localFilesCount;
+  const manifestNestedLocalFilesCount = manifest.files?.localFilesCount;
+  const manifestEmbeddedPhotosCount = manifest.embeddedPhotosCount;
+  const manifestNestedEmbeddedPhotosCount = manifest.files?.embeddedPhotosCount;
+  const skippedFilesCount = manifest.skippedFilesCount;
+  const nestedSkippedFilesCount = manifest.files?.skippedFilesCount;
+  if (
+    !isPlainObject(manifest.files)
+    || !isNonNegativeSafeInteger(manifestIncludedFilesCount)
+    || !isNonNegativeSafeInteger(manifestNestedIncludedFilesCount)
+    || !isNonNegativeSafeInteger(manifestIncludedCount)
+    || !isNonNegativeSafeInteger(manifestLocalFilesCount)
+    || !isNonNegativeSafeInteger(manifestNestedLocalFilesCount)
+    || !isNonNegativeSafeInteger(manifestEmbeddedPhotosCount)
+    || !isNonNegativeSafeInteger(manifestNestedEmbeddedPhotosCount)
+    || !isNonNegativeSafeInteger(skippedFilesCount)
+    || !isNonNegativeSafeInteger(nestedSkippedFilesCount)
+    || skippedFilesCount !== 0
+    || nestedSkippedFilesCount !== 0
+    || manifestIncludedFilesCount !== includedFilesCount
+    || manifestNestedIncludedFilesCount !== includedFilesCount
+    || manifestIncludedCount !== includedFilesCount
+    || manifestLocalFilesCount !== localFilesCount
+    || manifestNestedLocalFilesCount !== localFilesCount
+    || manifestEmbeddedPhotosCount !== embeddedPhotosCount
+    || manifestNestedEmbeddedPhotosCount !== embeddedPhotosCount
+    || includedFilesCount !== localFilesCount + embeddedPhotosCount
+  ) {
+    validationFailure(
+      'PRE_COMPATIBILITY_BACKUP_FILE_MANIFEST_MISMATCH',
+      'The historical backup file manifest is inconsistent.',
+    );
+  }
+
+  if (!Array.isArray(manifest.files.included)) {
+    validationFailure(
+      'PRE_COMPATIBILITY_BACKUP_FILE_MANIFEST_MISMATCH',
+      'The historical backup local-file manifest is missing.',
+    );
+  }
+  const manifestLocalFiles = manifest.files.included.map(item => {
+    if (
+      !isPlainObject(item)
+      || typeof item.path !== 'string'
+      || !isNonNegativeSafeInteger(item.size)
+    ) {
+      validationFailure(
+        'PRE_COMPATIBILITY_BACKUP_FILE_MANIFEST_MISMATCH',
+        'The historical backup local-file manifest is invalid.',
+      );
+    }
+    const entry = archive.entries.get(item.path);
+    if (
+      !entry
+      || !localFileNames.includes(item.path)
+      || entry.size !== item.size
+    ) {
+      validationFailure(
+        'PRE_COMPATIBILITY_BACKUP_FILE_MANIFEST_MISMATCH',
+        'The historical backup local-file manifest does not match the archive.',
+      );
+    }
+    return { path: item.path, size: item.size };
+  }).sort((left, right) => left.path.localeCompare(right.path));
+  const expectedManifestLocalFiles = localFileNames.map(name => ({
+    path: name,
+    size: archive.entries.get(name).size,
+  }));
+  if (JSON.stringify(manifestLocalFiles) !== JSON.stringify(expectedManifestLocalFiles)) {
+    validationFailure(
+      'PRE_COMPATIBILITY_BACKUP_FILE_MANIFEST_MISMATCH',
+      'The historical backup local-file inventory is incomplete.',
+    );
+  }
+
+  const expectedEntryNames = new Set([
+    'manifest.json',
+    'README-backup.txt',
+    'database/app.sqlite',
+    ...fileNames,
+  ]);
+  if (
+    archive.entries.size !== expectedEntryNames.size
+    || [...archive.entries.keys()].some(name => !expectedEntryNames.has(name))
+  ) {
+    validationFailure(
+      'PRE_COMPATIBILITY_BACKUP_FILE_MANIFEST_MISMATCH',
+      'The historical backup contains entries outside its full-backup manifest.',
+    );
+  }
+
+  if (
+    manifest.database?.sourcePath !== 'app.sqlite'
+    || manifest.backupSize !== archive.size
+    || manifest.generatedAt !== receipt?.archive?.generatedAt
+    || JSON.stringify(manifest.appVersion) !== JSON.stringify(receipt?.runtime)
+    || JSON.stringify(manifest.counts) !== JSON.stringify(receipt?.archive?.collectionCounts)
+    || receipt?.archive?.databaseIncludedAs !== 'database/app.sqlite'
+    || receipt?.archive?.includedFilesCount !== includedFilesCount
+    || receipt?.archive?.skippedFilesCount !== 0
+  ) {
+    validationFailure(
+      'PRE_COMPATIBILITY_BACKUP_MANIFEST_MISMATCH',
+      'The historical backup manifest does not match its receipt.',
+    );
+  }
+
+  const counts = manifest.counts;
+  if (
+    !isPlainObject(counts)
+    || Object.values(counts).some(value => !isNonNegativeSafeInteger(value))
+  ) {
+    validationFailure(
+      'PRE_COMPATIBILITY_BACKUP_COLLECTION_COUNT_MISMATCH',
+      'The historical backup collection counts are invalid.',
+    );
+  }
+
+  const businessFileInventory = localFileNames.map(zipPath => ({
+    zipPath,
+    size: archive.entries.get(zipPath).size,
+    sha256: hashStoredZipEntry(archive, zipPath),
+  }));
+  return {
+    businessFileCount: businessFileInventory.length,
+    businessFileInventorySha256: sha256(JSON.stringify(businessFileInventory)),
+  };
+}
+
+function validateHistoricalPreCompatibilityBackup({
+  backupPath,
+  receipt,
+  DatabaseConstructor = Database,
+}) {
+  const backupStat = fs.lstatSync(backupPath);
+  if (
+    !backupStat.isFile()
+    || backupStat.isSymbolicLink()
+    || backupStat.nlink !== 1
+    || backupStat.size !== receipt?.archive?.size
+  ) {
+    validationFailure(
+      'PRE_COMPATIBILITY_BACKUP_ARCHIVE_UNSAFE',
+      'The historical preliminary backup archive target is unsafe.',
+    );
+  }
+  const archive = inspectFullBackupArchive(backupPath);
+  for (const name of archive.entries.keys()) validateStoredZipEntry(archive, name);
+  const fileInventory = validateHistoricalManifest(archive, receipt);
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'skytech-pre-compatibility-history-'));
+  const tempDbPath = path.join(tempDirectory, 'app.sqlite');
+  let backupDb;
+  let extractedDatabase;
+  let validationError;
+  try {
+    extractedDatabase = extractStoredZipEntry(archive, 'database/app.sqlite', tempDbPath);
+    backupDb = new DatabaseConstructor(tempDbPath, { readonly: true, fileMustExist: true });
+    backupDb.pragma('foreign_keys = ON');
+    backupDb.pragma('query_only = ON');
+    const backupIntegrity = backupDb.pragma('integrity_check');
+    const backupForeignKeyViolations = backupDb.pragma('foreign_key_check').length;
+    if (
+      backupDb.readonly !== true
+      || backupDb.pragma('query_only', { simple: true }) !== 1
+      || backupIntegrity.length !== 1
+      || backupIntegrity[0].integrity_check !== 'ok'
+      || receipt?.archive?.databaseIntegrity !== 'ok'
+    ) {
+      validationFailure(
+        'PRE_COMPATIBILITY_BACKUP_DATABASE_INTEGRITY_FAILED',
+        'The historical preliminary backup database failed integrity_check.',
+      );
+    }
+    if (
+      backupForeignKeyViolations !== 0
+      || receipt?.archive?.databaseForeignKeyViolations !== backupForeignKeyViolations
+    ) {
+      validationFailure(
+        'PRE_COMPATIBILITY_BACKUP_DATABASE_FOREIGN_KEYS_FAILED',
+        'The historical preliminary backup database failed foreign_key_check.',
+      );
+    }
+
+    const manifestNames = Object.keys(archive.manifest.counts).sort();
+    // The one historical preliminary generator intentionally called the full
+    // backup builder with `collections: []`. An empty manifest count object is
+    // therefore not an app_data completeness claim; the logical DB digest below
+    // still binds every SQLite row. Nonempty manifests remain exact inventories.
+    if (manifestNames.length > 0) {
+      const backupCollections = optionalAppDataMetadata(backupDb);
+      if (
+        !backupCollections.supported
+        || JSON.stringify(backupCollections.names) !== JSON.stringify(manifestNames)
+      ) {
+        validationFailure(
+          'PRE_COMPATIBILITY_BACKUP_COLLECTION_SET_MISMATCH',
+          'The historical preliminary backup collection inventory is incomplete.',
+        );
+      }
+      for (const name of backupCollections.names) {
+        if (archive.manifest.counts[name] !== backupCollections.counts[name]) {
+          validationFailure(
+            'PRE_COMPATIBILITY_BACKUP_COLLECTION_COUNT_MISMATCH',
+            'The historical preliminary backup collection counts are incomplete.',
+          );
+        }
+      }
+    }
+
+    const logicalDatabaseSha256 = databaseLogicalDigest(backupDb);
+    if (
+      extractedDatabase.sha256 !== receipt?.archive?.databaseFileSha256
+      || extractedDatabase.size !== receipt?.archive?.databaseFileSize
+      || logicalDatabaseSha256 !== receipt?.archive?.logicalDatabaseSha256
+      || fileInventory.businessFileCount !== receipt?.archive?.businessFileCount
+      || fileInventory.businessFileInventorySha256
+        !== receipt?.archive?.businessFileInventorySha256
+    ) {
+      validationFailure(
+        'PRE_COMPATIBILITY_BACKUP_ARCHIVE_MISMATCH',
+        'The historical preliminary backup archive does not match its receipt.',
+      );
+    }
+    return {
+      archiveEntries: archive.entries.size,
+      businessFileCount: fileInventory.businessFileCount,
+      businessFileInventorySha256: fileInventory.businessFileInventorySha256,
+      databaseIntegrity: 'ok',
+      databaseForeignKeyViolations: 0,
+      logicalDatabaseSha256,
+      extractedDatabaseSha256: extractedDatabase.sha256,
+      extractedDatabaseSize: extractedDatabase.size,
+    };
+  } catch (error) {
+    validationError = error;
+    throw error;
+  } finally {
+    let cleanupError;
+    try { backupDb?.close(); } catch (error) { cleanupError = error; }
+    try {
+      fs.rmSync(tempDirectory, { recursive: true, force: true });
+    } catch (error) {
+      cleanupError ||= error;
+    }
+    if (!validationError && cleanupError) throw cleanupError;
+  }
+}
+
 function validatePreCompatibilityBackup({
   sourceDb,
   sourceDbPath,
@@ -599,5 +890,6 @@ module.exports = {
   requested,
   sameStatIdentity,
   statIdentity,
+  validateHistoricalPreCompatibilityBackup,
   validatePreCompatibilityBackup,
 };

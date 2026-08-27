@@ -1,0 +1,868 @@
+name: Skytech Historical Preliminary Backup Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_main_sha:
+        description: Exact reviewed 40-character SHA at refs/heads/main containing this workflow
+        required: true
+        type: string
+      expected_backend_sha:
+        description: Exact 40-character SHA currently served by the production backup-only backend
+        required: true
+        type: string
+      confirmation:
+        description: Type RECOVER_SKYTECH_HISTORICAL_BACKUP_20260827T143126Z exactly
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  recover-exact-historical-backup:
+    name: authenticated-https-recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    env:
+      EXPECTED_REPOSITORY: rishatkznAI/rental-management
+      EXPECTED_REF: refs/heads/main
+      RAILWAY_PROJECT_ID: 1558b38d-bf16-4b50-9ee6-0871b7152116
+      RAILWAY_ENVIRONMENT_ID: 62833109-61cb-4600-9200-d624d6537a05
+      RAILWAY_SERVICE_ID: b2016e92-3c50-4b00-800d-625a139b219c
+      RAILWAY_VOLUME_ID: 48b8768c-a8a9-4a87-8a4b-b980fff5d00c
+      RAILWAY_VOLUME_NAME: rental-management-volume
+      RAILWAY_VOLUME_MOUNT_PATH: /data
+      PRODUCTION_API_ORIGIN: https://api.skytech-rent.ru
+      HISTORICAL_SOURCE_COMMIT: 5f01ec09bbff89066ca7f856a2f7167d27623e7a
+      HISTORICAL_SOURCE_DEPLOYMENT_ID: 3e619e81-d972-44f1-a8d8-86918a00e1ca
+      HISTORICAL_SOURCE_REPLICA_ID: 3438d4e6-bcaa-4b59-8e4b-15d00f26548d
+      HISTORICAL_REQUEST_NONCE: 108970e3-9adf-4369-ba48-dff4fcfb1d20
+      HISTORICAL_ARCHIVE_FILENAME: skytech-pre-clean-reset-20260827T143126Z.zip
+      HISTORICAL_ARCHIVE_SIZE: '11930936'
+      HISTORICAL_RECEIPT_FILENAME: skytech-pre-compatibility-backup-receipt.json
+      HISTORICAL_RECEIPT_SIZE: '3835'
+
+    steps:
+      - name: Bind the dispatch to exact reviewed main and explicit backend SHAs
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_BACKEND_SHA: ${{ inputs.expected_backend_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_MAIN_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_BACKEND_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$EXPECTED_BACKEND_SHA" != "$HISTORICAL_SOURCE_COMMIT"
+          test "$CONFIRMATION" = "RECOVER_SKYTECH_HISTORICAL_BACKUP_20260827T143126Z"
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPOSITORY"
+          test "$GITHUB_REF" = "$EXPECTED_REF"
+          test "$GITHUB_SHA" = "$EXPECTED_MAIN_SHA"
+          test "$GITHUB_WORKFLOW_SHA" = "$GITHUB_SHA"
+          test "$GITHUB_WORKFLOW_REF" = "$EXPECTED_REPOSITORY/.github/workflows/skytech-historical-backup-recovery.yml@$EXPECTED_REF"
+
+      - name: Bind all transient paths to this ephemeral runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = "github-hosted"
+          test "$RUNNER_OS" = "Linux"
+          test -n "$RUNNER_TEMP"
+          [[ "$RUNNER_TEMP" != *$'\n'* && "$RUNNER_TEMP" != *$'\r'* ]]
+          {
+            printf 'RECOVERY_DOWNLOAD_DIRECTORY=%s/skytech-historical-backup-download\n' "$RUNNER_TEMP"
+            printf 'RECOVERY_CIPHERTEXT=%s/skytech-historical-backup-recovery.tar.age\n' "$RUNNER_TEMP"
+            printf 'RECOVERY_STORED_DIRECTORY=%s/skytech-historical-backup-stored-artifact\n' "$RUNNER_TEMP"
+            printf 'RECOVERY_ARTIFACT_ENVELOPE=%s/skytech-historical-backup-stored-artifact.zip\n' "$RUNNER_TEMP"
+            printf 'RECOVERY_REVALIDATION_DIRECTORY=%s/skytech-historical-backup-revalidation\n' "$RUNNER_TEMP"
+            printf 'RECOVERY_VALIDATION_DIRECTORY=%s/skytech-historical-backup-validation\n' "$RUNNER_TEMP"
+            printf 'AGE_BINARY=%s/skytech-historical-backup-tools/age\n' "$RUNNER_TEMP"
+          } >> "$GITHUB_ENV"
+
+      - name: Check out the exact reviewed commit without persisted credentials
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 20.20.2
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Verify checkout and install exact local validation dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          npm ci --prefix server
+          node --check scripts/historical-backup-recovery-railway-proof.mjs
+          node --check scripts/historical-backup-recovery-api-proof.mjs
+          node --check scripts/validate-historical-pre-compatibility-backup.mjs
+
+      - name: Install pinned Railway CLI and age
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          npm install --global @railway/cli@5.45.0
+          test "$(railway --version)" = "railway 5.45.0"
+          tools_directory="$RUNNER_TEMP/skytech-historical-backup-tools"
+          archive="$RUNNER_TEMP/age-v1.3.1-linux-amd64.tar.gz"
+          extracted="$RUNNER_TEMP/age-v1.3.1-linux-amd64"
+          test ! -e "$tools_directory"
+          test ! -e "$archive"
+          test ! -e "$extracted"
+          install -d -m 700 "$tools_directory" "$extracted"
+          curl --proto '=https' --tlsv1.2 \
+            --fail --silent --show-error --location --max-redirs 3 \
+            --connect-timeout 15 --max-time 300 \
+            --output "$archive" \
+            https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz
+          test "$(sha256sum "$archive" | awk '{print $1}')" = "bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377"
+          tar -xzf "$archive" -C "$extracted"
+          install -m 755 "$extracted/age/age" "$AGE_BINARY"
+          install -m 755 "$extracted/age/age-plugin-batchpass" "$tools_directory/age-plugin-batchpass"
+          test "$($AGE_BINARY --version)" = "v1.3.1"
+          test "$("$tools_directory/age-plugin-batchpass" --version)" = "v1.3.1"
+          rm -f "$archive"
+          rm -rf "$extracted"
+
+      - name: Validate dedicated recovery secrets without persisting them
+        env:
+          PRELIMINARY_BACKUP_TOKEN: ${{ secrets.SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN }}
+          AGE_PASSPHRASE: ${{ secrets.SKYTECH_HISTORICAL_BACKUP_RECOVERY_PASSPHRASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$PRELIMINARY_BACKUP_TOKEN"
+          echo "::add-mask::$AGE_PASSPHRASE"
+          [[ "$PRELIMINARY_BACKUP_TOKEN" != *$'\n'* && "$PRELIMINARY_BACKUP_TOKEN" != *$'\r'* ]]
+          [[ "$AGE_PASSPHRASE" != *$'\n'* && "$AGE_PASSPHRASE" != *$'\r'* ]]
+          test "$(printf '%s' "$PRELIMINARY_BACKUP_TOKEN" | wc -c)" -ge 32
+          test "$(printf '%s' "$AGE_PASSPHRASE" | wc -c)" -ge 48
+
+      - name: Prove exact Railway singleton, volume, replica, and empty staged state before recovery
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_BACKEND_SHA: ${{ inputs.expected_backend_sha }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$RAILWAY_TOKEN"
+          echo "::add-mask::$RAILWAY_PROJECT_TOKEN"
+          test -n "$RAILWAY_TOKEN"
+          test -n "$RAILWAY_PROJECT_TOKEN"
+          target_directory="$RUNNER_TEMP/skytech-historical-railway-before"
+          install -d -m 700 "$target_directory"
+          timeout --signal=TERM --kill-after=15s 120s railway status \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --json > "$target_directory/status.json"
+          node scripts/historical-backup-recovery-railway-proof.mjs \
+            --expected-commit "$EXPECTED_BACKEND_SHA" \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --status-file "$target_directory/status.json" \
+            --output railway-historical-recovery-before.json
+
+      - name: Prove exact canonical public backup-only API identity before recovery
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_BACKEND_SHA: ${{ inputs.expected_backend_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/historical-backup-recovery-api-proof.mjs \
+            --origin "$PRODUCTION_API_ORIGIN" \
+            --expected-commit "$EXPECTED_BACKEND_SHA" \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --railway-proof railway-historical-recovery-before.json \
+            --output api-historical-recovery-before.json
+
+      - name: Fetch receipt then archive then receipt over authenticated strict HTTPS
+        env:
+          PRELIMINARY_BACKUP_TOKEN: ${{ secrets.SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "::add-mask::$PRELIMINARY_BACKUP_TOKEN"
+          [[ "$PRELIMINARY_BACKUP_TOKEN" != *$'\n'* && "$PRELIMINARY_BACKUP_TOKEN" != *$'\r'* ]]
+          test "$(printf '%s' "$PRELIMINARY_BACKUP_TOKEN" | wc -c)" -ge 32
+          test "$RECOVERY_DOWNLOAD_DIRECTORY" = "$RUNNER_TEMP/skytech-historical-backup-download"
+          test ! -e "$RECOVERY_DOWNLOAD_DIRECTORY"
+          install -d -m 700 "$RECOVERY_DOWNLOAD_DIRECTORY"
+          request_headers="$RUNNER_TEMP/skytech-historical-backup-request-headers"
+          receipt_headers="$RUNNER_TEMP/skytech-historical-backup-receipt-headers"
+          archive_headers="$RUNNER_TEMP/skytech-historical-backup-archive-headers"
+          second_receipt_headers="$RUNNER_TEMP/skytech-historical-backup-second-receipt-headers"
+          receipt="$RECOVERY_DOWNLOAD_DIRECTORY/$HISTORICAL_RECEIPT_FILENAME"
+          archive="$RECOVERY_DOWNLOAD_DIRECTORY/$HISTORICAL_ARCHIVE_FILENAME"
+          second_receipt="$RECOVERY_DOWNLOAD_DIRECTORY/receipt-after-archive.json"
+          cleanup_request_material() {
+            rm -f "$request_headers" "$receipt_headers" "$archive_headers" "$second_receipt_headers"
+          }
+          trap cleanup_request_material EXIT
+          {
+            printf 'X-Skytech-Pre-Compatibility-Backup-Token: %s\n' "$PRELIMINARY_BACKUP_TOKEN"
+            printf 'X-Skytech-Pre-Compatibility-Backup-Nonce: %s\n' "$HISTORICAL_REQUEST_NONCE"
+            printf 'X-Skytech-Pre-Compatibility-Backup-Source-Commit: %s\n' "$HISTORICAL_SOURCE_COMMIT"
+          } > "$request_headers"
+          chmod 600 "$request_headers"
+
+          fetch_exact() {
+            local endpoint="$1"
+            local output="$2"
+            local headers="$3"
+            local max_seconds="$4"
+            local max_bytes="$5"
+            local result
+            result="$(curl \
+              --fail --silent --show-error \
+              --proto '=https' --tlsv1.2 \
+              --max-redirs 0 --max-filesize "$max_bytes" \
+              --connect-timeout 15 --max-time "$max_seconds" \
+              --retry 3 --retry-delay 2 --retry-all-errors \
+              --request GET \
+              --header 'Accept: application/octet-stream' \
+              --header 'Accept-Encoding: identity' \
+              --header 'Origin: https://historical-backup-recovery.invalid' \
+              --header "@$request_headers" \
+              --dump-header "$headers" \
+              --output "$output" \
+              --write-out '%{http_code}\n%{url_effective}\n%{num_redirects}' \
+              "$endpoint")"
+            mapfile -t fields <<< "$result"
+            test "${#fields[@]}" = "3"
+            test "${fields[0]}" = "200"
+            test "${fields[1]}" = "$endpoint"
+            test "${fields[2]}" = "0"
+            chmod 600 "$output" "$headers"
+          }
+          read_exact_header() {
+            local wanted="$1"
+            local header_file="$2"
+            awk -v wanted="$wanted" '
+              BEGIN { IGNORECASE = 1; count = 0 }
+              {
+                sub(/\r$/, "")
+                prefix = wanted ":"
+                if (tolower(substr($0, 1, length(prefix))) == tolower(prefix)) {
+                  value = substr($0, length(prefix) + 1)
+                  sub(/^[[:space:]]+/, "", value)
+                  values[++count] = value
+                }
+              }
+              END { if (count != 1 || values[1] == "") exit 1; print values[1] }
+            ' "$header_file"
+          }
+          reject_header() {
+            local wanted="$1"
+            local header_file="$2"
+            ! awk -v wanted="$wanted" '
+              BEGIN { IGNORECASE = 1 }
+              { sub(/\r$/, ""); if (tolower(substr($0, 1, length(wanted) + 1)) == tolower(wanted ":")) found = 1 }
+              END { exit(found ? 0 : 1) }
+            ' "$header_file"
+          }
+          reject_header_prefix() {
+            local wanted="$1"
+            local header_file="$2"
+            ! awk -v wanted="$wanted" '
+              BEGIN { IGNORECASE = 1 }
+              { sub(/\r$/, ""); if (tolower(substr($0, 1, length(wanted))) == tolower(wanted)) found = 1 }
+              END { exit(found ? 0 : 1) }
+            ' "$header_file"
+          }
+          validate_security_headers() {
+            local header_file="$1"
+            test "$(read_exact_header 'Cache-Control' "$header_file")" = "no-store"
+            test "$(read_exact_header 'X-Content-Type-Options' "$header_file")" = "nosniff"
+            test "$(read_exact_header 'Content-Security-Policy' "$header_file")" = "default-src 'none'; frame-ancestors 'none'"
+            test "$(read_exact_header 'Strict-Transport-Security' "$header_file")" = "max-age=31536000; includeSubDomains"
+            reject_header 'Location' "$header_file"
+            reject_header 'Content-Encoding' "$header_file"
+            reject_header_prefix 'Access-Control-' "$header_file"
+          }
+
+          base_url="$PRODUCTION_API_ORIGIN/api/admin/skytech-pre-compatibility-backup/artifacts"
+          fetch_exact "$base_url/receipt" "$receipt" "$receipt_headers" 300 "$HISTORICAL_RECEIPT_SIZE"
+          test "$(stat -c '%s' "$receipt")" = "$HISTORICAL_RECEIPT_SIZE"
+          receipt_sha="$(sha256sum "$receipt" | awk '{print $1}')"
+          [[ "$receipt_sha" =~ ^[a-f0-9]{64}$ ]]
+          jq -e \
+            --arg nonce "$HISTORICAL_REQUEST_NONCE" \
+            --arg commit "$HISTORICAL_SOURCE_COMMIT" \
+            --arg deployment "$HISTORICAL_SOURCE_DEPLOYMENT_ID" \
+            --arg replica "$HISTORICAL_SOURCE_REPLICA_ID" \
+            --arg archiveFilename "$HISTORICAL_ARCHIVE_FILENAME" \
+            --argjson archiveSize "$HISTORICAL_ARCHIVE_SIZE" '
+              .receiptVersion == 1
+              and .purpose == "pre-schema-compatibility-production-backup"
+              and .status == "COMPLETE"
+              and .requestNonce == $nonce
+              and .runtime.commitFull == $commit
+              and .runtime.deployment.railwayDeploymentId == $deployment
+              and .runtime.deployment.railwayReplicaId == $replica
+              and .archive.filename == $archiveFilename
+              and .archive.size == $archiveSize
+              and (.archive.sha256 | test("^[a-f0-9]{64}$"))
+            ' "$receipt" > /dev/null
+          archive_sha="$(jq -er '.archive.sha256' "$receipt")"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$receipt_headers")" = "$receipt_sha"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$receipt_headers")" = "$receipt_sha"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$receipt_headers")" = "$HISTORICAL_SOURCE_COMMIT"
+          test "$(read_exact_header 'Content-Length' "$receipt_headers")" = "$HISTORICAL_RECEIPT_SIZE"
+          test "$(read_exact_header 'Content-Type' "$receipt_headers")" = "application/json; charset=utf-8"
+          test "$(read_exact_header 'Content-Disposition' "$receipt_headers")" = "attachment; filename=\"$HISTORICAL_RECEIPT_FILENAME\""
+          validate_security_headers "$receipt_headers"
+
+          fetch_exact "$base_url/archive" "$archive" "$archive_headers" 1800 "$HISTORICAL_ARCHIVE_SIZE"
+          test "$(stat -c '%s' "$archive")" = "$HISTORICAL_ARCHIVE_SIZE"
+          test "$(sha256sum "$archive" | awk '{print $1}')" = "$archive_sha"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$archive_headers")" = "$archive_sha"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$archive_headers")" = "$receipt_sha"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$archive_headers")" = "$HISTORICAL_SOURCE_COMMIT"
+          test "$(read_exact_header 'Content-Length' "$archive_headers")" = "$HISTORICAL_ARCHIVE_SIZE"
+          test "$(read_exact_header 'Content-Type' "$archive_headers")" = "application/zip"
+          test "$(read_exact_header 'Content-Disposition' "$archive_headers")" = "attachment; filename=\"$HISTORICAL_ARCHIVE_FILENAME\""
+          validate_security_headers "$archive_headers"
+
+          fetch_exact "$base_url/receipt" "$second_receipt" "$second_receipt_headers" 300 "$HISTORICAL_RECEIPT_SIZE"
+          test "$(stat -c '%s' "$second_receipt")" = "$HISTORICAL_RECEIPT_SIZE"
+          test "$(sha256sum "$second_receipt" | awk '{print $1}')" = "$receipt_sha"
+          cmp --silent "$receipt" "$second_receipt"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$second_receipt_headers")" = "$receipt_sha"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$second_receipt_headers")" = "$receipt_sha"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$second_receipt_headers")" = "$HISTORICAL_SOURCE_COMMIT"
+          test "$(read_exact_header 'Content-Length' "$second_receipt_headers")" = "$HISTORICAL_RECEIPT_SIZE"
+          test "$(read_exact_header 'Content-Type' "$second_receipt_headers")" = "application/json; charset=utf-8"
+          test "$(read_exact_header 'Content-Disposition' "$second_receipt_headers")" = "attachment; filename=\"$HISTORICAL_RECEIPT_FILENAME\""
+          validate_security_headers "$second_receipt_headers"
+          jq -nS \
+            --arg receiptSha256 "$receipt_sha" \
+            --arg archiveSha256 "$archive_sha" \
+            --argjson receiptSize "$HISTORICAL_RECEIPT_SIZE" \
+            --argjson archiveSize "$HISTORICAL_ARCHIVE_SIZE" '
+              {
+                transport: "authenticated-strict-https",
+                redirectsFollowed: false,
+                corsHeadersObserved: false,
+                receiptArchiveReceiptSequence: true,
+                terminalReceiptByteEquivalent: true,
+                receiptSha256: $receiptSha256,
+                receiptSize: $receiptSize,
+                archiveSha256: $archiveSha256,
+                archiveSize: $archiveSize
+              }
+            ' > historical-backup-download-identity.json
+          cleanup_request_material
+          trap - EXIT
+
+      - name: Validate exact historical receipt, manifest, ZIP, SQLite, foreign keys, and hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RECOVERY_VALIDATION_DIRECTORY" = "$RUNNER_TEMP/skytech-historical-backup-validation"
+          test ! -e "$RECOVERY_VALIDATION_DIRECTORY"
+          install -d -m 700 "$RECOVERY_VALIDATION_DIRECTORY"
+          cleanup_validation_directory() { rm -rf "$RECOVERY_VALIDATION_DIRECTORY"; }
+          trap cleanup_validation_directory EXIT
+          TMPDIR="$RECOVERY_VALIDATION_DIRECTORY" node scripts/validate-historical-pre-compatibility-backup.mjs \
+            --receipt "$RECOVERY_DOWNLOAD_DIRECTORY/$HISTORICAL_RECEIPT_FILENAME" \
+            --archive "$RECOVERY_DOWNLOAD_DIRECTORY/$HISTORICAL_ARCHIVE_FILENAME" \
+            --output historical-backup-validation-before.json
+          jq -e \
+            --argjson download "$(cat historical-backup-download-identity.json)" '
+              .receiptSha256 == $download.receiptSha256
+              and .receiptSize == $download.receiptSize
+              and .archiveSha256 == $download.archiveSha256
+              and .archiveSize == $download.archiveSize
+              and .databaseIntegrity == "ok"
+              and .databaseForeignKeyViolations == 0
+            ' historical-backup-validation-before.json > /dev/null
+          cleanup_validation_directory
+          trap - EXIT
+
+      - name: Encrypt the exact receipt and archive only on the ephemeral runner
+        env:
+          AGE_PASSPHRASE: ${{ secrets.SKYTECH_HISTORICAL_BACKUP_RECOVERY_PASSPHRASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "::add-mask::$AGE_PASSPHRASE"
+          [[ "$AGE_PASSPHRASE" != *$'\n'* && "$AGE_PASSPHRASE" != *$'\r'* ]]
+          test "$(printf '%s' "$AGE_PASSPHRASE" | wc -c)" -ge 48
+          export PATH="$(dirname "$AGE_BINARY"):$PATH"
+          bundle="$RUNNER_TEMP/skytech-historical-backup-recovery.tar"
+          test ! -e "$bundle"
+          test ! -e "$RECOVERY_CIPHERTEXT"
+          cleanup_plaintext() {
+            rm -f "$bundle"
+            rm -rf "$RECOVERY_DOWNLOAD_DIRECTORY"
+          }
+          trap cleanup_plaintext EXIT
+          tar --create --format=ustar --sort=name \
+            --owner=0 --group=0 --numeric-owner \
+            --mtime='2026-08-27T14:31:26Z' \
+            --file "$bundle" \
+            --directory "$RECOVERY_DOWNLOAD_DIRECTORY" \
+            "$HISTORICAL_ARCHIVE_FILENAME" "$HISTORICAL_RECEIPT_FILENAME"
+          "$AGE_BINARY" --encrypt -j batchpass --output "$RECOVERY_CIPHERTEXT" "$bundle"
+          chmod 600 "$RECOVERY_CIPHERTEXT"
+          test -s "$RECOVERY_CIPHERTEXT"
+          jq -nS \
+            --arg format "age-v1-plugin-batchpass" \
+            --arg sha256 "$(sha256sum "$RECOVERY_CIPHERTEXT" | awk '{print $1}')" \
+            --argjson sizeBytes "$(stat -c '%s' "$RECOVERY_CIPHERTEXT")" '
+              { format: $format, sha256: $sha256, sizeBytes: $sizeBytes }
+            ' > historical-backup-ciphertext-identity.json
+          cleanup_plaintext
+          trap - EXIT
+          test ! -e "$bundle"
+          test ! -e "$RECOVERY_DOWNLOAD_DIRECTORY"
+
+      - name: Upload one immutable 90-day encrypted recovery artifact
+        id: recovery_artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: skytech-historical-backup-recovery-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/skytech-historical-backup-recovery.tar.age
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
+
+      - name: Remove the local ciphertext source before independent retrieval
+        env:
+          ARTIFACT_ID: ${{ steps.recovery_artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.recovery_artifact.outputs.artifact-digest }}
+          ARTIFACT_URL: ${{ steps.recovery_artifact.outputs.artifact-url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^(sha256:)?[a-f0-9]{64}$ ]]
+          test "$ARTIFACT_URL" = "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts/$ARTIFACT_ID"
+          rm -f "$RECOVERY_CIPHERTEXT"
+          test ! -e "$RECOVERY_CIPHERTEXT"
+          test ! -e "$RECOVERY_STORED_DIRECTORY"
+
+      - name: Independently download the immutable artifact by exact artifact ID
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          artifact-ids: ${{ steps.recovery_artifact.outputs.artifact-id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/skytech-historical-backup-stored-artifact
+
+      - name: Independently enforce the exact uploaded artifact digest
+        env:
+          ARTIFACT_ID: ${{ steps.recovery_artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.recovery_artifact.outputs.artifact-digest }}
+          ARTIFACT_NAME: skytech-historical-backup-recovery-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "::add-mask::$GITHUB_TOKEN"
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^(sha256:)?[a-f0-9]{64}$ ]]
+          test -n "$GITHUB_TOKEN"
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import { Readable, Transform } from 'node:stream';
+          import { pipeline } from 'node:stream/promises';
+
+          const metadataEndpoint = `https://api.github.com/repos/${process.env.GITHUB_REPOSITORY}/actions/artifacts/${process.env.ARTIFACT_ID}`;
+          const headers = {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+          };
+          const metadataResponse = await fetch(metadataEndpoint, {
+            redirect: 'manual',
+            signal: AbortSignal.timeout(60_000),
+            headers,
+          });
+          if (!metadataResponse.ok || metadataResponse.url !== metadataEndpoint) {
+            throw new Error(`exact artifact-ID metadata retrieval failed with HTTP ${metadataResponse.status}`);
+          }
+          const metadata = await metadataResponse.json();
+          const createdAt = Date.parse(metadata.created_at);
+          const expiresAt = Date.parse(metadata.expires_at);
+          const observedRetentionSeconds = (expiresAt - createdAt) / 1000;
+          const minimumAcceptedRetentionSeconds = 89 * 24 * 60 * 60;
+          const maximumAcceptedRetentionSeconds = 91 * 24 * 60 * 60;
+          const expectedDigest = process.env.ARTIFACT_DIGEST.startsWith('sha256:')
+            ? process.env.ARTIFACT_DIGEST
+            : `sha256:${process.env.ARTIFACT_DIGEST}`;
+          const expectedArchiveUrl = `${metadataEndpoint}/zip`;
+          const metadataChecks = [
+            [String(metadata.id) === process.env.ARTIFACT_ID, 'artifact metadata ID mismatch'],
+            [metadata.name === process.env.ARTIFACT_NAME, 'artifact metadata name mismatch'],
+            [metadata.expired === false, 'artifact is already expired'],
+            [Number.isSafeInteger(metadata.size_in_bytes) && metadata.size_in_bytes > 0, 'artifact metadata size is invalid'],
+            [metadata.archive_download_url === expectedArchiveUrl, 'artifact archive URL mismatch'],
+            [String(metadata.workflow_run?.id) === process.env.GITHUB_RUN_ID, 'artifact workflow run mismatch'],
+            [Number.isFinite(createdAt) && Number.isFinite(expiresAt), 'artifact retention timestamps are invalid'],
+            [expiresAt > Date.now(), 'artifact expiration is not in the future'],
+            [Number.isFinite(observedRetentionSeconds)
+              && observedRetentionSeconds >= minimumAcceptedRetentionSeconds
+              && observedRetentionSeconds <= maximumAcceptedRetentionSeconds,
+            'artifact observed retention window is outside the accepted 89-to-91-day bounds'],
+            [metadata.digest === undefined || metadata.digest === null || metadata.digest === expectedDigest,
+              'artifact metadata digest mismatch'],
+          ];
+          const failedMetadataCheck = metadataChecks.find(([ok]) => !ok);
+          if (failedMetadataCheck) throw new Error(failedMetadataCheck[1]);
+          fs.writeFileSync('historical-backup-artifact-metadata.json', `${JSON.stringify({
+            artifactId: process.env.ARTIFACT_ID,
+            artifactName: metadata.name,
+            artifactDigest: expectedDigest,
+            artifactSizeBytes: metadata.size_in_bytes,
+            createdAt: metadata.created_at,
+            expiresAt: metadata.expires_at,
+            requestedRetentionDays: 90,
+            observedRetentionSeconds,
+            minimumAcceptedRetentionSeconds,
+            maximumAcceptedRetentionSeconds,
+            workflowRunId: process.env.GITHUB_RUN_ID,
+          }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+
+          const endpoint = expectedArchiveUrl;
+          const response = await fetch(endpoint, {
+            redirect: 'follow',
+            signal: AbortSignal.timeout(300_000),
+            headers,
+          });
+          if (!response.ok || !response.body || new URL(response.url).protocol !== 'https:') {
+            throw new Error(`exact artifact-ID retrieval failed with HTTP ${response.status}`);
+          }
+          const hash = crypto.createHash('sha256');
+          let size = 0;
+          const limiter = new Transform({
+            transform(chunk, _encoding, callback) {
+              size += chunk.length;
+              if (size > 64 * 1024 * 1024) return callback(new Error('artifact envelope exceeds the byte limit'));
+              hash.update(chunk);
+              return callback(null, chunk);
+            },
+          });
+          await pipeline(
+            Readable.fromWeb(response.body),
+            limiter,
+            fs.createWriteStream(process.env.RECOVERY_ARTIFACT_ENVELOPE, { flags: 'wx', mode: 0o600 }),
+          );
+          if (size <= 0 || `sha256:${hash.digest('hex')}` !== expectedDigest) {
+            throw new Error('exact artifact-ID envelope digest mismatch');
+          }
+          NODE
+          test "$(stat -c '%a' "$RECOVERY_ARTIFACT_ENVELOPE")" = "600"
+
+      - name: Decrypt and fully revalidate only freshly downloaded exact stored bytes
+        env:
+          AGE_PASSPHRASE: ${{ secrets.SKYTECH_HISTORICAL_BACKUP_RECOVERY_PASSPHRASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "::add-mask::$AGE_PASSPHRASE"
+          [[ "$AGE_PASSPHRASE" != *$'\n'* && "$AGE_PASSPHRASE" != *$'\r'* ]]
+          test "$(printf '%s' "$AGE_PASSPHRASE" | wc -c)" -ge 48
+          export PATH="$(dirname "$AGE_BINARY"):$PATH"
+          action_ciphertext="$RECOVERY_STORED_DIRECTORY/skytech-historical-backup-recovery.tar.age"
+          test -f "$action_ciphertext"
+          test "$(find "$RECOVERY_STORED_DIRECTORY" -maxdepth 1 -type f | wc -l)" = "1"
+          test "$(unzip -Z1 "$RECOVERY_ARTIFACT_ENVELOPE" | wc -l)" = "1"
+          test "$(unzip -Z1 "$RECOVERY_ARTIFACT_ENVELOPE")" = "skytech-historical-backup-recovery.tar.age"
+          test ! -e "$RECOVERY_REVALIDATION_DIRECTORY"
+          install -d -m 700 "$RECOVERY_REVALIDATION_DIRECTORY"
+          stored_ciphertext="$RECOVERY_REVALIDATION_DIRECTORY/skytech-historical-backup-recovery.tar.age"
+          decrypted_bundle="$RECOVERY_REVALIDATION_DIRECTORY/recovered.tar"
+          recovered_directory="$RECOVERY_REVALIDATION_DIRECTORY/plaintext"
+          cleanup_revalidation_plaintext() {
+            rm -f "$decrypted_bundle"
+            rm -rf "$recovered_directory"
+          }
+          trap cleanup_revalidation_plaintext EXIT
+          unzip -p "$RECOVERY_ARTIFACT_ENVELOPE" skytech-historical-backup-recovery.tar.age > "$stored_ciphertext"
+          chmod 600 "$stored_ciphertext"
+          cmp --silent "$action_ciphertext" "$stored_ciphertext"
+          test "$(sha256sum "$stored_ciphertext" | awk '{print $1}')" = "$(jq -er '.sha256' historical-backup-ciphertext-identity.json)"
+          test "$(stat -c '%s' "$stored_ciphertext")" = "$(jq -er '.sizeBytes' historical-backup-ciphertext-identity.json)"
+          "$AGE_BINARY" --decrypt -j batchpass --output "$decrypted_bundle" "$stored_ciphertext"
+          chmod 600 "$decrypted_bundle"
+          mapfile -t bundle_entries < <(tar -tf "$decrypted_bundle" | sort)
+          test "${#bundle_entries[@]}" = "2"
+          test "${bundle_entries[0]}" = "$HISTORICAL_ARCHIVE_FILENAME"
+          test "${bundle_entries[1]}" = "$HISTORICAL_RECEIPT_FILENAME"
+          install -d -m 700 "$recovered_directory"
+          tar --extract --file "$decrypted_bundle" \
+            --directory "$recovered_directory" --no-same-owner --no-same-permissions
+          chmod 600 \
+            "$recovered_directory/$HISTORICAL_ARCHIVE_FILENAME" \
+            "$recovered_directory/$HISTORICAL_RECEIPT_FILENAME"
+          test "$(stat -c '%s' "$recovered_directory/$HISTORICAL_ARCHIVE_FILENAME")" = "$HISTORICAL_ARCHIVE_SIZE"
+          test "$(stat -c '%s' "$recovered_directory/$HISTORICAL_RECEIPT_FILENAME")" = "$HISTORICAL_RECEIPT_SIZE"
+          test "$(sha256sum "$recovered_directory/$HISTORICAL_ARCHIVE_FILENAME" | awk '{print $1}')" = "$(jq -er '.archiveSha256' historical-backup-download-identity.json)"
+          test "$(sha256sum "$recovered_directory/$HISTORICAL_RECEIPT_FILENAME" | awk '{print $1}')" = "$(jq -er '.receiptSha256' historical-backup-download-identity.json)"
+          TMPDIR="$RECOVERY_REVALIDATION_DIRECTORY" node scripts/validate-historical-pre-compatibility-backup.mjs \
+            --receipt "$recovered_directory/$HISTORICAL_RECEIPT_FILENAME" \
+            --archive "$recovered_directory/$HISTORICAL_ARCHIVE_FILENAME" \
+            --output historical-backup-validation-after.json
+          cmp --silent historical-backup-validation-before.json historical-backup-validation-after.json
+          cleanup_revalidation_plaintext
+          trap - EXIT
+          test ! -e "$decrypted_bundle"
+          test ! -e "$recovered_directory"
+
+      - name: Terminally re-prove the exact durable receipt over authenticated strict HTTPS
+        env:
+          PRELIMINARY_BACKUP_TOKEN: ${{ secrets.SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo "::add-mask::$PRELIMINARY_BACKUP_TOKEN"
+          [[ "$PRELIMINARY_BACKUP_TOKEN" != *$'\n'* && "$PRELIMINARY_BACKUP_TOKEN" != *$'\r'* ]]
+          test "$(printf '%s' "$PRELIMINARY_BACKUP_TOKEN" | wc -c)" -ge 32
+          request_headers="$RUNNER_TEMP/skytech-historical-backup-terminal-request-headers"
+          response_headers="$RUNNER_TEMP/skytech-historical-backup-terminal-receipt-headers"
+          terminal_receipt="$RUNNER_TEMP/skytech-historical-backup-terminal-receipt.json"
+          cleanup_terminal_receipt() { rm -f "$request_headers" "$response_headers" "$terminal_receipt"; }
+          trap cleanup_terminal_receipt EXIT
+          {
+            printf 'X-Skytech-Pre-Compatibility-Backup-Token: %s\n' "$PRELIMINARY_BACKUP_TOKEN"
+            printf 'X-Skytech-Pre-Compatibility-Backup-Nonce: %s\n' "$HISTORICAL_REQUEST_NONCE"
+            printf 'X-Skytech-Pre-Compatibility-Backup-Source-Commit: %s\n' "$HISTORICAL_SOURCE_COMMIT"
+          } > "$request_headers"
+          chmod 600 "$request_headers"
+          endpoint="$PRODUCTION_API_ORIGIN/api/admin/skytech-pre-compatibility-backup/artifacts/receipt"
+          result="$(curl \
+            --fail --silent --show-error --proto '=https' --tlsv1.2 \
+            --max-redirs 0 --max-filesize "$HISTORICAL_RECEIPT_SIZE" \
+            --connect-timeout 15 --max-time 300 \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            --request GET --header 'Accept-Encoding: identity' \
+            --header 'Origin: https://historical-backup-recovery.invalid' \
+            --header "@$request_headers" --dump-header "$response_headers" \
+            --output "$terminal_receipt" \
+            --write-out '%{http_code}\n%{url_effective}\n%{num_redirects}' "$endpoint")"
+          mapfile -t fields <<< "$result"
+          test "${#fields[@]}" = "3"
+          test "${fields[0]}" = "200"
+          test "${fields[1]}" = "$endpoint"
+          test "${fields[2]}" = "0"
+          chmod 600 "$response_headers" "$terminal_receipt"
+          test "$(stat -c '%s' "$terminal_receipt")" = "$HISTORICAL_RECEIPT_SIZE"
+          test "$(sha256sum "$terminal_receipt" | awk '{print $1}')" = "$(jq -er '.receiptSha256' historical-backup-download-identity.json)"
+          read_exact_header() {
+            awk -v wanted="$1" '
+              BEGIN { IGNORECASE = 1; count = 0 }
+              { sub(/\r$/, ""); prefix = wanted ":"; if (tolower(substr($0, 1, length(prefix))) == tolower(prefix)) { value = substr($0, length(prefix) + 1); sub(/^[[:space:]]+/, "", value); values[++count] = value } }
+              END { if (count != 1 || values[1] == "") exit 1; print values[1] }
+            ' "$2"
+          }
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$response_headers")" = "$(jq -er '.receiptSha256' historical-backup-download-identity.json)"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$response_headers")" = "$(jq -er '.receiptSha256' historical-backup-download-identity.json)"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$response_headers")" = "$HISTORICAL_SOURCE_COMMIT"
+          test "$(read_exact_header 'Content-Length' "$response_headers")" = "$HISTORICAL_RECEIPT_SIZE"
+          test "$(read_exact_header 'Content-Type' "$response_headers")" = "application/json; charset=utf-8"
+          test "$(read_exact_header 'Content-Disposition' "$response_headers")" = "attachment; filename=\"$HISTORICAL_RECEIPT_FILENAME\""
+          test "$(read_exact_header 'Cache-Control' "$response_headers")" = "no-store"
+          test "$(read_exact_header 'X-Content-Type-Options' "$response_headers")" = "nosniff"
+          test "$(read_exact_header 'Content-Security-Policy' "$response_headers")" = "default-src 'none'; frame-ancestors 'none'"
+          test "$(read_exact_header 'Strict-Transport-Security' "$response_headers")" = "max-age=31536000; includeSubDomains"
+          ! grep -Eiq '^(Location|Content-Encoding|Access-Control-[^:]*):' "$response_headers"
+          jq -e \
+            --arg nonce "$HISTORICAL_REQUEST_NONCE" \
+            --arg commit "$HISTORICAL_SOURCE_COMMIT" \
+            --arg deployment "$HISTORICAL_SOURCE_DEPLOYMENT_ID" \
+            --arg replica "$HISTORICAL_SOURCE_REPLICA_ID" '
+              .requestNonce == $nonce
+              and .runtime.commitFull == $commit
+              and .runtime.deployment.railwayDeploymentId == $deployment
+              and .runtime.deployment.railwayReplicaId == $replica
+              and .status == "COMPLETE"
+            ' "$terminal_receipt" > /dev/null
+          cleanup_terminal_receipt
+          trap - EXIT
+
+      - name: Terminally re-prove Railway singleton and no staged or concurrent release
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_BACKEND_SHA: ${{ inputs.expected_backend_sha }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$RAILWAY_TOKEN"
+          echo "::add-mask::$RAILWAY_PROJECT_TOKEN"
+          test -n "$RAILWAY_TOKEN"
+          test -n "$RAILWAY_PROJECT_TOKEN"
+          target_directory="$RUNNER_TEMP/skytech-historical-railway-after"
+          install -d -m 700 "$target_directory"
+          timeout --signal=TERM --kill-after=15s 120s railway status \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --json > "$target_directory/status.json"
+          node scripts/historical-backup-recovery-railway-proof.mjs \
+            --expected-commit "$EXPECTED_BACKEND_SHA" \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --status-file "$target_directory/status.json" \
+            --output railway-historical-recovery-after.json
+          cmp --silent railway-historical-recovery-before.json railway-historical-recovery-after.json
+
+      - name: Terminally re-prove the exact canonical public backup-only API identity
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_BACKEND_SHA: ${{ inputs.expected_backend_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/historical-backup-recovery-api-proof.mjs \
+            --origin "$PRODUCTION_API_ORIGIN" \
+            --expected-commit "$EXPECTED_BACKEND_SHA" \
+            --expected-workflow-commit "$EXPECTED_MAIN_SHA" \
+            --railway-proof railway-historical-recovery-after.json \
+            --output api-historical-recovery-after.json
+          cmp --silent api-historical-recovery-before.json api-historical-recovery-after.json
+
+      - name: Validate final immutable stored-copy evidence
+        env:
+          ARTIFACT_ID: ${{ steps.recovery_artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.recovery_artifact.outputs.artifact-digest }}
+          ARTIFACT_URL: ${{ steps.recovery_artifact.outputs.artifact-url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -nS \
+            --arg artifactId "$ARTIFACT_ID" \
+            --arg artifactDigest "$ARTIFACT_DIGEST" \
+            --arg artifactUrl "$ARTIFACT_URL" \
+            --arg sourceCommit "$HISTORICAL_SOURCE_COMMIT" \
+            --argjson artifactMetadata "$(cat historical-backup-artifact-metadata.json)" \
+            --argjson validation "$(cat historical-backup-validation-after.json)" '
+              {
+                evidenceVersion: 1,
+                productionDataMutated: false,
+                sourceCommit: $sourceCommit,
+                retrieval: "authenticated-strict-https",
+                artifact: {
+                  provider: "github-actions-encrypted-artifact",
+                  id: $artifactId,
+                  digest: $artifactDigest,
+                  url: $artifactUrl,
+                  requestedRetentionDays: 90,
+                  minimumAcceptedObservedRetentionSeconds: $artifactMetadata.minimumAcceptedRetentionSeconds,
+                  metadata: $artifactMetadata,
+                  exactArtifactIdDownloaded: true,
+                  exactArtifactDigestVerified: true,
+                  freshlyDownloadedBytesDecrypted: true
+                },
+                validation: $validation,
+                terminalReceiptReproved: true,
+                terminalRailwayReproved: true,
+                terminalApiReproved: true,
+                confirmation: "HISTORICAL_BACKUP_STORED_DECRYPTED_AND_REVALIDATED"
+              }
+            ' > historical-backup-recovery-result.json
+          jq -e '
+            .productionDataMutated == false
+            and .artifact.requestedRetentionDays == 90
+            and .artifact.metadata.requestedRetentionDays == 90
+            and .artifact.minimumAcceptedObservedRetentionSeconds == (89 * 24 * 60 * 60)
+            and .artifact.metadata.minimumAcceptedRetentionSeconds == (89 * 24 * 60 * 60)
+            and .artifact.metadata.maximumAcceptedRetentionSeconds == (91 * 24 * 60 * 60)
+            and .artifact.metadata.observedRetentionSeconds >= .artifact.metadata.minimumAcceptedRetentionSeconds
+            and .artifact.metadata.observedRetentionSeconds <= .artifact.metadata.maximumAcceptedRetentionSeconds
+            and .artifact.metadata.artifactId == .artifact.id
+            and .artifact.exactArtifactIdDownloaded == true
+            and .artifact.exactArtifactDigestVerified == true
+            and .artifact.freshlyDownloadedBytesDecrypted == true
+            and .validation.databaseIntegrity == "ok"
+            and .validation.databaseForeignKeyViolations == 0
+            and .terminalReceiptReproved == true
+            and .terminalRailwayReproved == true
+            and .terminalApiReproved == true
+            and .confirmation == "HISTORICAL_BACKUP_STORED_DECRYPTED_AND_REVALIDATED"
+          ' historical-backup-recovery-result.json > /dev/null
+
+      - name: Publish allowlisted non-secret recovery evidence to the run summary
+        env:
+          ARTIFACT_ID: ${{ steps.recovery_artifact.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.recovery_artifact.outputs.artifact-digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^(sha256:)?[a-f0-9]{64}$ ]]
+          receipt_sha="$(jq -er '.receiptSha256 | select(test("^[a-f0-9]{64}$"))' historical-backup-validation-after.json)"
+          archive_sha="$(jq -er '.archiveSha256 | select(test("^[a-f0-9]{64}$"))' historical-backup-validation-after.json)"
+          {
+            printf '### Historical preliminary backup recovery\n\n'
+            printf -- '- result: `PASS`\n'
+            printf -- '- immutable Actions artifact ID: `%s`\n' "$ARTIFACT_ID"
+            printf -- '- immutable Actions artifact digest: `%s`\n' "$ARTIFACT_DIGEST"
+            printf -- '- exact receipt SHA-256: `%s`\n' "$receipt_sha"
+            printf -- '- exact archive SHA-256: `%s`\n' "$archive_sha"
+            printf -- '- receipt/manifest/ZIP/SQLite/foreign-key/hash revalidation: `PASS`\n'
+            printf -- '- terminal receipt/Railway/API conservation: `PASS`\n'
+            printf -- '- production data mutation: `NONE`\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Always remove plaintext, ciphertext, credentials, and transient evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          rm -f \
+            "$RUNNER_TEMP/skytech-historical-backup-request-headers" \
+            "$RUNNER_TEMP/skytech-historical-backup-terminal-request-headers" \
+            "$RUNNER_TEMP/skytech-historical-backup-receipt-headers" \
+            "$RUNNER_TEMP/skytech-historical-backup-archive-headers" \
+            "$RUNNER_TEMP/skytech-historical-backup-second-receipt-headers" \
+            "$RUNNER_TEMP/skytech-historical-backup-terminal-receipt-headers" \
+            "$RUNNER_TEMP/skytech-historical-backup-terminal-receipt.json" \
+            "$RUNNER_TEMP/skytech-historical-backup-recovery.tar" \
+            "$RUNNER_TEMP/skytech-historical-backup-recovery.tar.age" \
+            "$RUNNER_TEMP/skytech-historical-backup-stored-artifact.zip" \
+            "$RUNNER_TEMP/age-v1.3.1-linux-amd64.tar.gz"
+          rm -rf \
+            "$RUNNER_TEMP/skytech-historical-backup-download" \
+            "$RUNNER_TEMP/skytech-historical-backup-stored-artifact" \
+            "$RUNNER_TEMP/skytech-historical-backup-revalidation" \
+            "$RUNNER_TEMP/skytech-historical-backup-validation" \
+            "$RUNNER_TEMP/skytech-historical-backup-tools" \
+            "$RUNNER_TEMP/age-v1.3.1-linux-amd64" \
+            "$RUNNER_TEMP/skytech-historical-railway-before" \
+            "$RUNNER_TEMP/skytech-historical-railway-after"
+          rm -f \
+            railway-historical-recovery-before.json \
+            railway-historical-recovery-after.json \
+            api-historical-recovery-before.json \
+            api-historical-recovery-after.json \
+            historical-backup-download-identity.json \
+            historical-backup-validation-before.json \
+            historical-backup-validation-after.json \
+            historical-backup-ciphertext-identity.json \
+            historical-backup-artifact-metadata.json \
+            historical-backup-recovery-result.json

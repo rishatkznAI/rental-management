@@ -896,18 +896,34 @@ test('production workflow orders backend before frontend and keeps failures fail
   assert.match(workflowSource, /production-gate:[\s\S]*- backend-deploy[\s\S]*- frontend-deploy/);
   assert.match(workflowSource, /RAILWAY_PROJECT_TOKEN: \$\{\{ secrets\.RAILWAY_PROJECT_TOKEN \}\}/);
   assert.match(workflowSource, /EXPECTED_RELEASE_COMMIT: \$\{\{ github\.sha \}\}/);
+  assert.match(workflowSource, /needs\.backend-deploy\.result == 'success'[\s\S]*needs\.backend-deploy\.outputs\.frontend_representation_sha256 != ''/);
   assert.match(workflowSource, /cancel-in-progress: false/);
   assert.match(workflowSource, /PARTIAL_RELEASE|release-outcome\.mjs/);
   assert.doesNotMatch(workflowSource, /railway\s+(?:up|redeploy)/i);
   assert.doesNotMatch(workflowSource, /\bssh\b|remediation/i);
   assert.match(backendReleaseSource, /BACKEND_HEALTH_GATE_FAILED/);
   assert.match(backendReleaseSource, /timed out waiting for the exact-SHA Railway deployment/);
+
+  const baselineCapture = workflowSource.indexOf('- name: Capture immutable public frontend baseline');
+  const railwayDeploy = workflowSource.indexOf('- name: Deploy exact commit and verify Railway backend');
+  const deploymentAttemptTerminal = workflowSource.indexOf('- name: Verify frontend conservation after backend deployment attempt');
+  const gatePreProbe = workflowSource.indexOf('- name: Verify conserved frontend before production probes');
+  const targetedSmoke = workflowSource.indexOf('- name: Run production targeted GET smoke');
+  const loginSmoke = workflowSource.indexOf('- name: Run production smoke login');
+  const gateTerminal = workflowSource.indexOf('- name: Verify conserved frontend after all production probes');
+  assert.ok(baselineCapture >= 0 && baselineCapture < railwayDeploy, 'frontend baseline must be captured before Railway mutation');
+  assert.ok(railwayDeploy < deploymentAttemptTerminal, 'backend deployment attempt must be terminally bracketed');
+  assert.ok(gatePreProbe >= 0 && gatePreProbe < targetedSmoke, 'gate must verify frontend before credential-bearing probes');
+  assert.ok(targetedSmoke < loginSmoke && loginSmoke < gateTerminal, 'terminal frontend verification must follow every production smoke');
+  assert.match(workflowSource, /Verify frontend conservation after backend deployment attempt[\s\S]{0,120}if: always\(\)/);
+  assert.match(workflowSource, /Verify conserved frontend after all production probes[\s\S]{0,120}if: always\(\)/);
 });
 
 test('new release infrastructure paths remain deployment tooling, not backend runtime', () => {
   const result = classifyReleaseChangedFiles([
     '.github/workflows/deploy.yml',
     'scripts/release-conservation-contract.mjs',
+    'scripts/frontend-release-snapshot.mjs',
     'scripts/release-targeted-smoke.mjs',
     'scripts/railway-backend-release.mjs',
     'scripts/release-outcome.mjs',
@@ -919,4 +935,5 @@ test('new release infrastructure paths remain deployment tooling, not backend ru
   assert.equal(result.failClosed, false);
   assert.match(workflowSource, /- 'scripts\/release-conservation-contract\.mjs'/);
   assert.match(workflowSource, /- 'scripts\/release-targeted-smoke\.mjs'/);
+  assert.match(workflowSource, /- 'scripts\/frontend-release-snapshot\.mjs'/);
 });

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import {
   classifyReleaseChangedFiles,
   classifyReleasePath,
+  validateRequestedReleaseType,
 } from '../scripts/release-classifier.mjs';
 
 const deployWorkflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
@@ -96,6 +97,30 @@ test('release classifier preserves explicit deploy-tooling treatment for product
   assert.equal(result.entries[0].kind, 'deploy-tooling');
 });
 
+test('release classifier treats frontend conservation snapshot tooling as deploy tooling', () => {
+  const result = classifyReleaseChangedFiles(['scripts/frontend-release-snapshot.mjs']);
+  assert.equal(result.allowed, true);
+  assert.equal(result.releaseType, 'deploy-tooling');
+  assert.equal(result.requiresBackendDeploy, false);
+});
+
+test('manual release accepts only an exact classifier match', () => {
+  const backend = classifyReleaseChangedFiles(['server/routes/clients.js']);
+  const fullStack = classifyReleaseChangedFiles(['server/routes/clients.js', 'src/main.tsx']);
+  assert.equal(validateRequestedReleaseType(backend, 'backend'), 'backend');
+  assert.equal(validateRequestedReleaseType(fullStack, 'full-stack'), 'full-stack');
+  assert.throws(
+    () => validateRequestedReleaseType(fullStack, 'backend'),
+    /manual release type mismatch: requested=backend detected=full-stack/,
+  );
+  assert.throws(() => validateRequestedReleaseType(backend, ''), /manual release type is required/);
+  assert.throws(() => validateRequestedReleaseType(backend, 'auto'), /unknown manual release type/);
+  assert.throws(
+    () => validateRequestedReleaseType(classifyReleaseChangedFiles([]), 'backend'),
+    /unresolved classifier result "unknown"/,
+  );
+});
+
 test('release classifier treats the guarded clean-production backup workflow as deploy tooling', () => {
   const result = classifyReleaseChangedFiles([
     '.github/workflows/skytech-clean-production-reset.yml',
@@ -108,6 +133,8 @@ test('deploy workflow delegates push classification to the tested classifier', (
   assert.match(deployWorkflowSource, /node scripts\/release-classifier\.mjs/);
   assert.match(deployWorkflowSource, /--changed-files-file "\$changed_files_file"/);
   assert.match(deployWorkflowSource, /requires_backend: \$\{\{ steps\.classify\.outputs\.requires_backend \}\}/);
+  assert.match(deployWorkflowSource, /classifier_args\+=\(--requested-release-type/);
+  assert.doesNotMatch(deployWorkflowSource, /release_type="\$\{requested_release_type/);
   assert.doesNotMatch(deployWorkflowSource, /frontend_allowed=/);
   assert.doesNotMatch(deployWorkflowSource, /deploy_tooling_allowed=/);
   assert.doesNotMatch(deployWorkflowSource, /release_critical=/);

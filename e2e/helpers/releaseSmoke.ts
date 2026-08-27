@@ -5,6 +5,7 @@ import {
   conservedLoginCredentials,
   validateConservedProductionLogin,
 } from '../../scripts/release-conservation-contract.mjs';
+import { releaseVerificationContractResult } from '../../scripts/release-preflight.mjs';
 
 type BuildInfo = {
   commit?: string;
@@ -57,6 +58,8 @@ export type ReleaseSmokeConfig = {
   adminEmail: string;
   adminPassword: string;
   expectedCommit?: string;
+  expectedFrontendCommit?: string;
+  expectedFrontendCommitFull?: string;
   releaseType?: ReleaseType | string;
   readOnlySections?: Array<{ label: string; route: string; nav: RegExp }>;
 };
@@ -97,15 +100,9 @@ function shortCommit(value = '') {
   return value.trim().slice(0, 12);
 }
 
-function commitsMatch(left = '', right = '') {
-  const normalizedLeft = left.trim();
-  const normalizedRight = right.trim();
-  if (!normalizedLeft || !normalizedRight) return false;
-  return normalizedLeft.startsWith(normalizedRight) || normalizedRight.startsWith(normalizedLeft);
-}
-
 function normalizeReleaseType(value = ''): ReleaseType {
   const normalized = value.trim().toLowerCase();
+  if (!normalized) return 'full-stack';
   if (
     normalized === 'frontend-only' ||
     normalized === 'backend' ||
@@ -113,32 +110,71 @@ function normalizeReleaseType(value = ''): ReleaseType {
     normalized === 'deploy-tooling' ||
     normalized === 'frontend-deploy-tooling'
   ) return normalized;
-  return 'full-stack';
+  throw new Error(`unknown release type "${normalized}"`);
 }
 
-function backendCommitFromBuild(backendBuild?: BuildInfo | null) {
-  return backendBuild?.commitFull || backendBuild?.commit || '';
+function releaseProbeEvidence(url: string, status: number | null, json: VersionInfo | null) {
+  return {
+    ok: status === 200 && json?.ok === true,
+    url,
+    status,
+    timeoutMs: 15_000,
+    timedOut: false,
+    error: status === 200 && json?.ok === true ? '' : 'HTTP 200 with JSON ok=true is required',
+    bodyExcerpt: '',
+  };
 }
 
-function allowsBackendCommitDrift(config: Pick<ReleaseSmokeConfig, 'environmentName' | 'releaseType'>) {
-  const releaseType = normalizeReleaseType(String(config.releaseType || ''));
-  return config.environmentName === 'production' && (
-    releaseType === 'frontend-only' ||
-    releaseType === 'deploy-tooling' ||
-    releaseType === 'frontend-deploy-tooling'
-  );
-}
-
-function expectedDriftReleaseType(releaseType?: ReleaseType | string) {
-  const normalizedReleaseType = normalizeReleaseType(String(releaseType || ''));
-  if (normalizedReleaseType === 'deploy-tooling' || normalizedReleaseType === 'frontend-deploy-tooling') return normalizedReleaseType;
-  return 'frontend-only';
-}
-
-function frontendOnlyBackendDriftMessage(details: { expectedCommit?: string; frontendCommit?: string; backendCommit: string; releaseType?: ReleaseType | string }) {
-  const expected = details.expectedCommit ? ` expected=${shortCommit(details.expectedCommit)}` : '';
-  const frontend = details.frontendCommit ? ` frontend=${details.frontendCommit}` : '';
-  return `Backend commit differs from frontend commit: expected for ${expectedDriftReleaseType(details.releaseType)} release.${expected}${frontend} backend=${details.backendCommit}`;
+function assertExpectedReleaseCommitContract({
+  config,
+  frontendBuild,
+  backendBuild,
+  frontendStatus,
+  healthStatus,
+  healthJson,
+  readyStatus,
+  readyJson,
+  versionStatus,
+  versionJson,
+}: {
+  config: ReleaseSmokeConfig;
+  frontendBuild: BuildInfo;
+  backendBuild: BuildInfo;
+  frontendStatus: number | null;
+  healthStatus: number | null;
+  healthJson: VersionInfo | null;
+  readyStatus: number | null;
+  readyJson: VersionInfo | null;
+  versionStatus: number | null;
+  versionJson: VersionInfo | null;
+}) {
+  const frontendEvidenceOk = frontendStatus !== null
+    && frontendStatus >= 200
+    && frontendStatus < 300
+    && Boolean(frontendBuild.commit)
+    && frontendBuild.apiBaseUrl === config.apiUrl;
+  const releaseContract = releaseVerificationContractResult({
+    env: config.environmentName,
+    releaseType: config.releaseType,
+    frontendBuild,
+    backendBuild,
+    expectedCommit: config.expectedCommit,
+    expectedFrontendCommit: config.expectedFrontendCommit,
+    expectedFrontendCommitFull: config.expectedFrontendCommitFull,
+    frontendEvidence: {
+      ok: frontendEvidenceOk,
+      url: config.frontendUrl,
+      status: frontendStatus,
+      timeoutMs: 15_000,
+      timedOut: false,
+      error: frontendEvidenceOk ? '' : 'frontend marker or API target is invalid',
+      bodyExcerpt: '',
+    },
+    backendVersion: releaseProbeEvidence(`${config.apiUrl}/api/version`, versionStatus, versionJson),
+    health: releaseProbeEvidence(`${config.apiUrl}/health`, healthStatus, healthJson),
+    readiness: releaseProbeEvidence(`${config.apiUrl}/health/ready`, readyStatus, readyJson),
+  });
+  expect(releaseContract.pass, releaseContract.failureReasons.join('; ')).toBe(true);
 }
 
 function sanitize(text: string, limit = 1200) {
@@ -659,72 +695,57 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig, te
     await api.dispose();
   }
 
-  if (normalizedConfig.expectedCommit) {
-    const backendCommit = backendCommitFromBuild(backendBuild);
-    const backendCommitMatchesExpected = commitsMatch(backendCommit, normalizedConfig.expectedCommit)
-      || commitsMatch(backendBuild.commit || '', shortCommit(normalizedConfig.expectedCommit));
-    if (!backendCommitMatchesExpected && allowsBackendCommitDrift(normalizedConfig)) {
-      console.log(frontendOnlyBackendDriftMessage({
-        expectedCommit: normalizedConfig.expectedCommit,
-        backendCommit,
-        releaseType: normalizedConfig.releaseType,
-      }));
-    } else {
-      expect(
-        backendCommitMatchesExpected,
-        `backend commit should match expected release commit: expected=${shortCommit(normalizedConfig.expectedCommit)}, backend=${backendCommit}`,
-      ).toBeTruthy();
-    }
-  }
-
   const conservationEvidence: ConservationEvidence = {
     environment: normalizedConfig.environmentName,
     health: { status: healthStatus || 0, json: healthJson || {} },
     ready: { status: readyStatus || 0, json: readyJson || {} },
     version: { status: versionStatus || 0, json: versionJson || {} },
   };
-  if (conservationEvidenceRequiresValidation(conservationEvidence)) {
+  const requiresConservationValidation = conservationEvidenceRequiresValidation(conservationEvidence);
+  if (requiresConservationValidation) {
     expect(healthJson, 'health probe evidence must be retained for conserved login validation').toBeTruthy();
     expect(readyJson, 'ready probe evidence must be retained for conserved login validation').toBeTruthy();
     expect(healthStatus, 'health probe status must be retained for conserved login validation').toBe(200);
     expect(readyStatus, 'ready probe status must be retained for conserved login validation').toBe(200);
     expect(versionStatus, 'version probe status must be retained for conserved login validation').toBe(200);
+    classifyConservedProductionProbes(conservationEvidence);
+  }
+
+  action = requiresConservationValidation ? 'frontend conservation' : 'frontend boot';
+  const frontendResponse = await page.goto(
+    requiresConservationValidation
+      ? conservedAppUrl(normalizedConfig.frontendUrl, normalizedConfig.expectedCommit)
+      : appUrl(normalizedConfig.frontendUrl, '/login'),
+    { waitUntil: 'domcontentloaded' },
+  );
+  expect(
+    frontendResponse?.ok(),
+    requiresConservationValidation
+      ? 'conserved production frontend should return a successful document response'
+      : `${normalizedConfig.environmentName} frontend should return a successful document response`,
+  ).toBe(true);
+  await expect(page.locator('body')).toBeVisible();
+  await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit));
+  frontendBuild = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
+  expect(frontendBuild?.commit, 'frontend commit should be available with debugVersion=1').toBeTruthy();
+  expect(frontendBuild?.apiBaseUrl, 'frontend build marker should expose API base URL').toBe(normalizedConfig.apiUrl);
+  assertExpectedReleaseCommitContract({
+    config: normalizedConfig,
+    frontendBuild: frontendBuild || {},
+    backendBuild: backendBuild || {},
+    frontendStatus: frontendResponse?.status() ?? null,
+    healthStatus,
+    healthJson,
+    readyStatus,
+    readyJson,
+    versionStatus,
+    versionJson,
+  });
+
+  if (requiresConservationValidation) {
     const directLogin = await directConservedLoginSmoke(normalizedConfig, conservationEvidence);
     const backupOnly = directLogin.backupOnly;
     loginStatus = directLogin.status;
-
-    action = 'frontend conservation';
-    await page.goto(conservedAppUrl(normalizedConfig.frontendUrl, normalizedConfig.expectedCommit), { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('body')).toBeVisible();
-    await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit));
-    frontendBuild = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
-    expect(frontendBuild?.commit, 'frontend commit should be available with debugVersion=1').toBeTruthy();
-    expect(frontendBuild?.apiBaseUrl, 'frontend build marker should expose API base URL').toBe(normalizedConfig.apiUrl);
-
-    if (normalizedConfig.expectedCommit) {
-      expect(
-        commitsMatch(frontendBuild?.commit || '', shortCommit(normalizedConfig.expectedCommit)),
-        `frontend commit should match expected release commit: expected=${shortCommit(normalizedConfig.expectedCommit)}, frontend=${frontendBuild?.commit || 'missing'}`,
-      ).toBeTruthy();
-    }
-
-    const backendCommit = backendCommitFromBuild(backendBuild);
-    if (frontendBuild?.commit && backendCommit) {
-      const frontendBackendMatch = commitsMatch(frontendBuild.commit, backendCommit);
-      if (!frontendBackendMatch && allowsBackendCommitDrift(normalizedConfig)) {
-        console.log(frontendOnlyBackendDriftMessage({
-          frontendCommit: frontendBuild.commit,
-          backendCommit,
-          releaseType: normalizedConfig.releaseType,
-        }));
-      } else {
-        expect(
-          frontendBackendMatch,
-          `frontend/backend commits should match unless release owner approved drift: frontend=${frontendBuild.commit}, backend=${backendCommit}`,
-        ).toBeTruthy();
-      }
-    }
-
     await expectMaintenanceUiVisible(page, normalizedConfig, versionJson.app.message, frontendBuild, backendBuild, loginStatus);
     console.log(backupOnly
       ? 'Production is conserved: the exact isolated backup-only runtime has no login route (HTTP 404), authenticated smoke skipped.'
@@ -735,21 +756,6 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig, te
 
   const directLogin = await directLoginSmoke(normalizedConfig);
   loginStatus = directLogin.status;
-
-  action = 'frontend boot';
-  await page.goto(appUrl(normalizedConfig.frontendUrl, '/login'), { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('body')).toBeVisible();
-  await page.waitForFunction(() => Boolean(window.__SKYTECH_BUILD_INFO__?.commit));
-  frontendBuild = await page.evaluate(() => window.__SKYTECH_BUILD_INFO__ || null);
-  expect(frontendBuild?.commit, 'frontend commit should be available with debugVersion=1').toBeTruthy();
-  expect(frontendBuild?.apiBaseUrl, 'frontend build marker should expose API base URL').toBe(normalizedConfig.apiUrl);
-
-  if (normalizedConfig.expectedCommit) {
-    expect(
-      commitsMatch(frontendBuild?.commit || '', shortCommit(normalizedConfig.expectedCommit)),
-      `frontend commit should match expected release commit: expected=${shortCommit(normalizedConfig.expectedCommit)}, frontend=${frontendBuild?.commit || 'missing'}`,
-    ).toBeTruthy();
-  }
 
   action = 'admin login';
   page.on('response', (response) => {
@@ -786,21 +792,6 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig, te
     await expect(navButton, `${section.label} nav should be visible for ${normalizedConfig.environmentName} admin`).toBeVisible();
     await page.goto(appUrl(normalizedConfig.frontendUrl, section.route), { waitUntil: 'domcontentloaded' });
     await expectHealthyMain(page, section.label);
-  }
-
-  action = 'commit match';
-  const frontendCommit = frontendBuild?.commit || '';
-  const backendCommit = backendCommitFromBuild(backendBuild);
-  if (frontendCommit && backendCommit) {
-    const frontendBackendMatch = commitsMatch(frontendCommit, backendCommit);
-    if (!frontendBackendMatch && allowsBackendCommitDrift(normalizedConfig)) {
-      console.log(frontendOnlyBackendDriftMessage({ frontendCommit, backendCommit, releaseType: normalizedConfig.releaseType }));
-    } else {
-      expect(
-        frontendBackendMatch,
-        `frontend/backend commits should match unless release owner approved drift: frontend=${frontendCommit}, backend=${backendCommit}`,
-      ).toBeTruthy();
-    }
   }
 
   expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);

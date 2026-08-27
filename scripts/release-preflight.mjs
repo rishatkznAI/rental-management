@@ -51,6 +51,8 @@ export function parseArgs(argv) {
   const args = {
     env: '',
     expectedCommit: process.env.EXPECTED_RELEASE_COMMIT || process.env.GITHUB_SHA || '',
+    expectedFrontendCommit: process.env.EXPECTED_FRONTEND_COMMIT || '',
+    expectedFrontendCommitFull: process.env.EXPECTED_FRONTEND_COMMIT_FULL || '',
     oldCommit: process.env.RELEASE_PREFLIGHT_OLD_COMMIT || '',
     releaseType: normalizeReleaseType(process.env.RELEASE_TYPE || process.env.RELEASE_PREFLIGHT_RELEASE_TYPE || ''),
     changedFiles: process.env.RELEASE_PREFLIGHT_CHANGED_FILES || '',
@@ -60,6 +62,8 @@ export function parseArgs(argv) {
     const arg = argv[index];
     if (arg === '--env') args.env = argv[++index] || '';
     else if (arg === '--expected-commit') args.expectedCommit = argv[++index] || '';
+    else if (arg === '--expected-frontend-commit') args.expectedFrontendCommit = argv[++index] || '';
+    else if (arg === '--expected-frontend-commit-full') args.expectedFrontendCommitFull = argv[++index] || '';
     else if (arg === '--old-commit') args.oldCommit = argv[++index] || '';
     else if (arg === '--release-type') args.releaseType = normalizeReleaseType(argv[++index] || '');
     else if (arg === '--changed-files') args.changedFiles = argv[++index] || '';
@@ -85,6 +89,8 @@ Required env by mode:
 
 Optional:
   EXPECTED_RELEASE_COMMIT or GITHUB_SHA
+  EXPECTED_FRONTEND_COMMIT or --expected-frontend-commit <captured marker>
+  EXPECTED_FRONTEND_COMMIT_FULL or --expected-frontend-commit-full <captured 40-char SHA>
   RELEASE_PREFLIGHT_OLD_COMMIT
   RELEASE_TYPE or --release-type ${RELEASE_REQUEST_TYPE_OPTIONS.join('|')}
   RELEASE_PREFLIGHT_CHANGED_FILES or --changed-files <newline-or-comma-separated paths>
@@ -281,6 +287,8 @@ export function releaseVerificationContractResult({
   frontendBuild = {},
   backendBuild = {},
   expectedCommit = '',
+  expectedFrontendCommit = '',
+  expectedFrontendCommitFull = '',
   frontendEvidence = {},
   backendVersion = {},
   health = {},
@@ -288,6 +296,8 @@ export function releaseVerificationContractResult({
 } = {}) {
   const requestedReleaseType = releaseTypeValue(releaseType) || 'auto';
   const frontendCommit = frontendCommitFromBuild(frontendBuild);
+  const frontendMarkerCommit = String(frontendBuild.commit || frontendBuild.commitFull || '').trim();
+  const frontendResolvedCommit = String(frontendBuild.commitFull || '').trim();
   const backendCommit = backendCommitFromBuild(backendBuild);
   const expectedSha = validateGitSha(expectedCommit, 'expected release commit');
   const frontendSha = validateGitSha(frontendCommit, 'frontend actual commit');
@@ -321,9 +331,32 @@ export function releaseVerificationContractResult({
 
   const knownReleaseType = RELEASE_TYPES.has(resolvedReleaseType);
   const requireFrontendMatch = knownReleaseType && resolvedReleaseType !== 'backend';
+  const requireFrontendConservation = knownReleaseType && resolvedReleaseType === 'backend';
   const requireBackendMatch = knownReleaseType && !allowsBackendCommitDrift({ env, releaseType: resolvedReleaseType });
-  const allowFrontendDrift = knownReleaseType && !requireFrontendMatch;
+  const allowFrontendDrift = knownReleaseType && !requireFrontendMatch && !requireFrontendConservation;
   const allowBackendDrift = knownReleaseType && !requireBackendMatch;
+  const expectedFrontendMarkerSha = validateGitSha(expectedFrontendCommit, 'expected conserved frontend marker commit');
+  const expectedFrontendFullSha = validateGitSha(expectedFrontendCommitFull, 'expected conserved frontend full commit');
+  const actualFrontendMarkerSha = validateGitSha(frontendMarkerCommit, 'actual conserved frontend marker commit');
+  const actualFrontendFullSha = frontendResolvedCommit
+    ? validateGitSha(frontendResolvedCommit, 'actual conserved frontend full commit')
+    : null;
+  const expectedFrontendFullIsExact = expectedFrontendFullSha.valid && expectedFrontendFullSha.length === MAX_GIT_SHA_LENGTH;
+  const actualFrontendFullIsExact = !actualFrontendFullSha || (
+    actualFrontendFullSha.valid && actualFrontendFullSha.length === MAX_GIT_SHA_LENGTH
+  );
+  const frontendBaselineIsConsistent = expectedFrontendMarkerSha.valid && expectedFrontendFullIsExact && (
+    expectedFrontendFullSha.normalized.startsWith(expectedFrontendMarkerSha.normalized)
+  );
+  const frontendMarkerConserved = expectedFrontendMarkerSha.valid && actualFrontendMarkerSha.valid && (
+    actualFrontendMarkerSha.original === expectedFrontendMarkerSha.original
+  );
+  const frontendFullConserved = !actualFrontendFullSha || (
+    expectedFrontendFullIsExact && actualFrontendFullIsExact &&
+    actualFrontendFullSha.normalized === expectedFrontendFullSha.normalized
+  );
+  const frontendConservationMatch = requireFrontendConservation && frontendBaselineIsConsistent &&
+    frontendMarkerConserved && frontendFullConserved;
   const informationalDifferences = [];
   const normalizedFrontendEvidence = normalizeProbeEvidence(frontendEvidence);
   const normalizedBackendVersion = normalizeProbeEvidence(backendVersion, '/api/version');
@@ -336,6 +369,33 @@ export function releaseVerificationContractResult({
   if (!expectedSha.valid) failureReasons.push(expectedSha.error);
   if (!frontendSha.valid) failureReasons.push(frontendSha.error);
   if (!backendSha.valid) failureReasons.push(backendSha.error);
+  if (requireFrontendConservation) {
+    if (!expectedFrontendMarkerSha.valid) failureReasons.push(expectedFrontendMarkerSha.error);
+    if (!expectedFrontendFullSha.valid) failureReasons.push(expectedFrontendFullSha.error);
+    else if (!expectedFrontendFullIsExact) {
+      failureReasons.push('expected conserved frontend full commit must be exactly 40 hexadecimal characters');
+    }
+    if (!actualFrontendMarkerSha.valid) failureReasons.push(actualFrontendMarkerSha.error);
+    if (actualFrontendFullSha && !actualFrontendFullSha.valid) failureReasons.push(actualFrontendFullSha.error);
+    else if (actualFrontendFullSha && !actualFrontendFullIsExact) {
+      failureReasons.push('actual conserved frontend full commit must be exactly 40 hexadecimal characters');
+    }
+    if (expectedFrontendMarkerSha.valid && expectedFrontendFullIsExact && !frontendBaselineIsConsistent) {
+      failureReasons.push(
+        `captured frontend marker/full commit mismatch. marker=${expectedFrontendMarkerSha.original} full=${expectedFrontendFullSha.normalized}`,
+      );
+    }
+    if (expectedFrontendMarkerSha.valid && actualFrontendMarkerSha.valid && !frontendMarkerConserved) {
+      failureReasons.push(
+        `conserved frontend marker changed. expected=${expectedFrontendMarkerSha.original} actual=${actualFrontendMarkerSha.original}`,
+      );
+    }
+    if (actualFrontendFullSha && expectedFrontendFullIsExact && actualFrontendFullIsExact && !frontendFullConserved) {
+      failureReasons.push(
+        `conserved frontend full commit changed. expected=${expectedFrontendFullSha.normalized} actual=${actualFrontendFullSha.normalized}`,
+      );
+    }
+  }
   if (!normalizedFrontendEvidence.ok) {
     failureReasons.push(probeFailureReason('frontend marker', normalizedFrontendEvidence, resolvedReleaseType));
   }
@@ -350,7 +410,11 @@ export function releaseVerificationContractResult({
   if (backendSha.valid && expectedSha.valid && requireBackendMatch && !backendMatch) {
     failureReasons.push(`backend commit mismatch. expected=${expectedSha.normalized} actual=${backendSha.normalized}`);
   }
-  if (frontendSha.valid && expectedSha.valid && allowFrontendDrift && !frontendMatch) {
+  if (frontendSha.valid && expectedSha.valid && requireFrontendConservation && frontendConservationMatch && !frontendMatch) {
+    informationalDifferences.push(
+      'frontend commit differs from the backend release commit and exactly matches the captured pre-deploy frontend baseline',
+    );
+  } else if (frontendSha.valid && expectedSha.valid && allowFrontendDrift && !frontendMatch) {
     informationalDifferences.push(`frontend commit differs from expected and is allowed for ${resolvedReleaseType} release`);
   }
   if (backendSha.valid && expectedSha.valid && allowBackendDrift && !backendMatch) {
@@ -364,10 +428,12 @@ export function releaseVerificationContractResult({
     frontendActualCommit: frontendCommit,
     backendActualCommit: backendCommit,
     requireFrontendMatch,
+    requireFrontendConservation,
     requireBackendMatch,
     allowFrontendDrift,
     allowBackendDrift,
     frontendMatch,
+    frontendConservationMatch,
     backendMatch,
     pass: failureReasons.length === 0,
     failureReasons,
@@ -377,6 +443,10 @@ export function releaseVerificationContractResult({
       expected: expectedSha,
       frontend: frontendSha,
       backend: backendSha,
+      expectedFrontendMarker: expectedFrontendMarkerSha,
+      expectedFrontendFull: expectedFrontendFullSha,
+      actualFrontendMarker: actualFrontendMarkerSha,
+      actualFrontendFull: actualFrontendFullSha,
     },
     probes: {
       frontend: normalizedFrontendEvidence,
@@ -1014,6 +1084,8 @@ async function main() {
     frontendBuild,
     backendBuild,
     expectedCommit,
+    expectedFrontendCommit: args.expectedFrontendCommit,
+    expectedFrontendCommitFull: args.expectedFrontendCommitFull,
     frontendEvidence,
     backendVersion: versionProbe.evidence,
     health: healthProbe.evidence,

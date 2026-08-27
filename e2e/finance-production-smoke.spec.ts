@@ -363,6 +363,8 @@ test('production finance smoke stays read-only', async ({ page }, testInfo) => {
       frontendBuild: frontendBuild || {},
       backendBuild: backendBuild || {},
       expectedCommit,
+      expectedFrontendCommit: String(process.env.EXPECTED_FRONTEND_COMMIT || '').trim(),
+      expectedFrontendCommitFull: String(process.env.EXPECTED_FRONTEND_COMMIT_FULL || '').trim(),
       frontendEvidence: frontendMarker.evidence,
       backendVersion: versionProbe.evidence,
       health: healthProbe.evidence,

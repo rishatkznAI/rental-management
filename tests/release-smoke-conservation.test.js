@@ -18,6 +18,7 @@ import {
 } from '../scripts/finance-smoke-equipment-discovery.mjs';
 
 const releaseSmokeSource = readFileSync(new URL('../e2e/helpers/releaseSmoke.ts', import.meta.url), 'utf8');
+const productionSmokeSource = readFileSync(new URL('../e2e/production-smoke.spec.ts', import.meta.url), 'utf8');
 const conservationContractSource = readFileSync(new URL('../scripts/release-conservation-contract.mjs', import.meta.url), 'utf8');
 const deployWorkflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
 const productionUiSelectorSmokeSource = readFileSync(new URL('../e2e/production-ui-selector-smoke.spec.ts', import.meta.url), 'utf8');
@@ -66,9 +67,15 @@ test('production release smoke checks app.disabled before authenticated smoke', 
   assert.match(releaseSmokeSource, /conservationEvidenceRequiresValidation\(conservationEvidence\)/);
   assert.match(releaseSmokeSource, /directConservedLoginSmoke/);
   assert.match(releaseSmokeSource, /directLoginSmoke\(normalizedConfig\)/);
-  const conservationGuard = releaseSmokeSource.indexOf('if (conservationEvidenceRequiresValidation(conservationEvidence))');
-  const ordinaryLogin = releaseSmokeSource.indexOf('const directLogin = await directLoginSmoke(normalizedConfig);');
-  assert.ok(conservationGuard >= 0 && ordinaryLogin > conservationGuard, 'conservation evidence must be classified before ordinary credentials can be sent');
+  const releaseRunner = releaseSmokeSource.slice(releaseSmokeSource.indexOf('export async function runReleaseSmoke'));
+  const conservationGuard = releaseRunner.indexOf('const requiresConservationValidation = conservationEvidenceRequiresValidation(conservationEvidence);');
+  const sharedContract = releaseRunner.indexOf('assertExpectedReleaseCommitContract({');
+  const conservedLogin = releaseRunner.indexOf('directConservedLoginSmoke(normalizedConfig, conservationEvidence)');
+  const ordinaryLogin = releaseRunner.indexOf('directLoginSmoke(normalizedConfig)');
+  assert.ok(conservationGuard >= 0, 'conservation evidence must be classified before any login');
+  assert.ok(sharedContract > conservationGuard, 'the shared release contract must follow credentialless probes');
+  assert.ok(conservedLogin > sharedContract, 'the shared release contract must pass before conserved credentials are sent');
+  assert.ok(ordinaryLogin > sharedContract, 'the shared release contract must pass before ordinary credentials are sent');
 });
 
 test('conserved release smoke requires 503 normally and exact route absence only for proven backup-only identity', () => {
@@ -118,7 +125,7 @@ test('conserved release smoke requires 503 normally and exact route absence only
 test('conserved release smoke opens root with commit cache bust and waits for UI render', () => {
   assert.match(releaseSmokeSource, /function conservedAppUrl\(frontendUrl: string, expectedCommit\?: string\)/);
   assert.match(releaseSmokeSource, /url\.searchParams\.set\('v', shortCommit\(expectedCommit\) \|\| String\(Date\.now\(\)\)\)/);
-  assert.match(releaseSmokeSource, /page\.goto\(conservedAppUrl\(normalizedConfig\.frontendUrl, normalizedConfig\.expectedCommit\)/);
+  assert.match(releaseSmokeSource, /conservedAppUrl\(normalizedConfig\.frontendUrl, normalizedConfig\.expectedCommit\)/);
   assert.doesNotMatch(releaseSmokeSource, /page\.goto\(appUrl\(normalizedConfig\.frontendUrl, '\/login'\)[\s\S]*frontend conservation/);
   assert.match(releaseSmokeSource, /expect\.poll\(/);
   assert.match(releaseSmokeSource, /hasMaintenanceUiText\(await visibleBodyText\(page\), appDisabledMessage\)/);
@@ -188,13 +195,24 @@ test('dashboard cockpit helper preserves caller viewport for mobile artifacts', 
   assert.match(helper, /if \(viewport\.width >= 1024\) \{[\s\S]*dashboard key signals should be above the desktop fold/);
 });
 
-test('production release smoke allows backend drift only for frontend-only and deploy-tooling releases', () => {
+test('production release smoke delegates commit policy to the shared contract with backend conservation inputs', () => {
   assert.match(releaseSmokeSource, /type ReleaseType = 'frontend-only' \| 'backend' \| 'full-stack' \| 'deploy-tooling' \| 'frontend-deploy-tooling'/);
   assert.match(releaseSmokeSource, /releaseType\?: ReleaseType \| string/);
-  assert.match(releaseSmokeSource, /releaseType === 'frontend-only' \|\|[\s\S]*releaseType === 'deploy-tooling' \|\|[\s\S]*releaseType === 'frontend-deploy-tooling'/);
-  assert.match(releaseSmokeSource, /expectedDriftReleaseType\(details\.releaseType\)/);
+  assert.match(releaseSmokeSource, /expectedFrontendCommit\?: string/);
+  assert.match(releaseSmokeSource, /expectedFrontendCommitFull\?: string/);
+  assert.match(releaseSmokeSource, /releaseVerificationContractResult\(\{/);
+  assert.match(releaseSmokeSource, /expectedFrontendCommit: config\.expectedFrontendCommit/);
+  assert.match(releaseSmokeSource, /expectedFrontendCommitFull: config\.expectedFrontendCommitFull/);
   assert.match(releaseSmokeSource, /releaseType: normalizeReleaseType\(String\(config\.releaseType \|\| ''\)\)/);
-  assert.match(releaseSmokeSource, /releaseType: normalizedConfig\.releaseType/);
+  assert.match(releaseSmokeSource, /releaseType: config\.releaseType/);
+  assert.match(releaseSmokeSource, /if \(!normalized\) return 'full-stack';/);
+  assert.match(releaseSmokeSource, /throw new Error\(`unknown release type/);
+  assert.doesNotMatch(releaseSmokeSource, /if \(!config\.expectedCommit\) return/);
+  assert.match(
+    productionSmokeSource,
+    /expectedCommit: optionalEnv\('EXPECTED_RELEASE_COMMIT'\) \|\| requiredEnv\('GITHUB_SHA', 'production smoke release contract'\)/,
+  );
+  assert.doesNotMatch(releaseSmokeSource, /backendCommitMatchesExpected|frontend\/backend commits should match unless/);
 });
 
 test('production UI selector smoke passes frontend marker release type into release smoke', () => {
@@ -237,7 +255,12 @@ test('production UI selector smoke validates client KPIs without pinning product
 });
 
 const expectedReleaseCommit = 'ae9d8a8a286307f5d6e701585750af94d631edc1';
-const olderFrontendBuild = { commit: 'eb7dea8ef464', releaseType: 'frontend-only' };
+const olderFrontendCommitFull = 'eb7dea8ef4641111111111111111111111111111';
+const olderFrontendBuild = {
+  commit: olderFrontendCommitFull.slice(0, 12),
+  commitFull: olderFrontendCommitFull,
+  releaseType: 'frontend-only',
+};
 const matchingFrontendBuild = { commitFull: expectedReleaseCommit, releaseType: 'frontend-only' };
 const matchingBackendBuild = { commitFull: expectedReleaseCommit, releaseType: 'backend' };
 const olderBackendBuild = { commitFull: '3b445384ab16263c620a08db3a84a0316d7c3719', releaseType: 'full-stack' };
@@ -276,6 +299,8 @@ function releaseContract(releaseType, frontendBuild, backendBuild, overrides = {
     frontendBuild,
     backendBuild,
     expectedCommit: expectedReleaseCommit,
+    expectedFrontendCommit: olderFrontendBuild.commit,
+    expectedFrontendCommitFull: olderFrontendCommitFull,
     frontendEvidence: successfulProbe('/'),
     backendVersion: successfulProbe('/api/version'),
     health: successfulProbe('/health'),
@@ -284,14 +309,49 @@ function releaseContract(releaseType, frontendBuild, backendBuild, overrides = {
   });
 }
 
-test('backend release passes when backend matches and frontend is older', () => {
+test('backend release passes only when backend matches and frontend exactly matches the captured baseline', () => {
   const result = releaseContract('backend', olderFrontendBuild, matchingBackendBuild);
   assert.equal(result.pass, true);
   assert.equal(result.requireFrontendMatch, false);
+  assert.equal(result.requireFrontendConservation, true);
+  assert.equal(result.frontendConservationMatch, true);
   assert.equal(result.requireBackendMatch, true);
-  assert.equal(result.allowFrontendDrift, true);
+  assert.equal(result.allowFrontendDrift, false);
   assert.equal(result.allowBackendDrift, false);
-  assert.deepEqual(result.informationalDifferences, ['frontend commit differs from expected and is allowed for backend release']);
+  assert.deepEqual(result.informationalDifferences, [
+    'frontend commit differs from the backend release commit and exactly matches the captured pre-deploy frontend baseline',
+  ]);
+});
+
+test('backend release fails closed when the captured frontend baseline is missing', () => {
+  const result = releaseContract('backend', olderFrontendBuild, matchingBackendBuild, {
+    expectedFrontendCommit: '',
+    expectedFrontendCommitFull: '',
+  });
+  assert.equal(result.pass, false);
+  assert.equal(result.frontendConservationMatch, false);
+  assert.ok(result.failureReasons.some(reason => /expected conserved frontend marker commit is missing/.test(reason)));
+  assert.ok(result.failureReasons.some(reason => /expected conserved frontend full commit is missing/.test(reason)));
+});
+
+test('backend release fails closed when the public frontend marker changed after capture', () => {
+  const changedFrontend = { ...olderFrontendBuild, commit: 'cb7dea8ef464' };
+  const result = releaseContract('backend', changedFrontend, matchingBackendBuild);
+  assert.equal(result.pass, false);
+  assert.ok(result.failureReasons.some(reason => /conserved frontend marker changed/.test(reason)));
+});
+
+test('backend release rejects an inconsistent or abbreviated full baseline commit', () => {
+  const inconsistent = releaseContract('backend', olderFrontendBuild, matchingBackendBuild, {
+    expectedFrontendCommitFull: 'f'.repeat(40),
+  });
+  const abbreviated = releaseContract('backend', olderFrontendBuild, matchingBackendBuild, {
+    expectedFrontendCommitFull: olderFrontendBuild.commit,
+  });
+  assert.equal(inconsistent.pass, false);
+  assert.ok(inconsistent.failureReasons.some(reason => /captured frontend marker\/full commit mismatch/.test(reason)));
+  assert.equal(abbreviated.pass, false);
+  assert.ok(abbreviated.failureReasons.some(reason => /must be exactly 40 hexadecimal characters/.test(reason)));
 });
 
 test('backend release fails when backend mismatches', () => {
@@ -505,7 +565,7 @@ test('PR #199 explicit backend contract passes with ae9d8a8a backend and earlier
   assert.equal(result.requestedReleaseType, 'backend');
   assert.equal(result.resolvedReleaseType, 'backend');
   assert.equal(result.expectedCommit, expectedReleaseCommit);
-  assert.equal(result.frontendActualCommit, 'eb7dea8ef464');
+  assert.equal(result.frontendActualCommit, olderFrontendCommitFull);
   assert.equal(result.backendActualCommit, expectedReleaseCommit);
 });
 
@@ -529,6 +589,8 @@ test('identical CLI and Playwright evidence produces an identical shared result'
     frontendBuild: olderFrontendBuild,
     backendBuild: matchingBackendBuild,
     expectedCommit: expectedReleaseCommit,
+    expectedFrontendCommit: olderFrontendBuild.commit,
+    expectedFrontendCommitFull: olderFrontendCommitFull,
     frontendEvidence: successfulProbe('/'),
     backendVersion: successfulProbe('/api/version'),
     health: successfulProbe('/health'),
@@ -553,6 +615,11 @@ test('finance production smoke workflow passes release type with auto default', 
   assert.match(financeProductionSmokeWorkflowSource, /- deploy-tooling/);
   assert.match(financeProductionSmokeWorkflowSource, /- frontend-deploy-tooling/);
   assert.match(financeProductionSmokeWorkflowSource, /RELEASE_TYPE: \$\{\{ inputs\.release_type \}\}/);
+  assert.match(financeProductionSmokeWorkflowSource, /expected_frontend_commit:/);
+  assert.match(financeProductionSmokeWorkflowSource, /expected_frontend_commit_full:/);
+  assert.match(financeProductionSmokeWorkflowSource, /EXPECTED_FRONTEND_COMMIT: \$\{\{ inputs\.expected_frontend_commit \}\}/);
+  assert.match(financeProductionSmokeWorkflowSource, /EXPECTED_FRONTEND_COMMIT_FULL: \$\{\{ inputs\.expected_frontend_commit_full \}\}/);
+  assert.match(financeProductionSmokeWorkflowSource, /"\$RELEASE_TYPE" == "backend" \|\| "\$RELEASE_TYPE" == "auto"/);
 });
 
 test('production dashboard visual smoke uses release type policy for backend commit drift', () => {

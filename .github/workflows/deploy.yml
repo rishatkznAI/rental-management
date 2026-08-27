@@ -18,6 +18,7 @@ on:
       - 'scripts/release-classifier.mjs'
       - 'scripts/release-conservation-contract.mjs'
       - 'scripts/release-preflight.mjs'
+      - 'scripts/frontend-release-snapshot.mjs'
       - 'scripts/release-targeted-smoke.mjs'
       - 'scripts/frontend-build-marker.mjs'
       - 'scripts/backend-release-marker.mjs'
@@ -36,6 +37,7 @@ on:
       - 'tests/release-classifier.test.js'
       - 'tests/release-smoke-conservation.test.js'
       - 'tests/release-infrastructure.test.js'
+      - 'tests/frontend-release-snapshot.test.js'
       - 'docs/*release*.md'
       - 'docs/**/*release*.md'
       - 'docs/*deploy*.md'
@@ -98,31 +100,18 @@ jobs:
             fi
           fi
 
-          requested_release_type="${{ inputs.release_type || '' }}"
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            release_type="${requested_release_type:-full-stack}"
-            changed_files="$(IFS=,; echo "${files[*]}")"
-            echo "release_type=$release_type" >> "$GITHUB_OUTPUT"
-            echo "changed_files=$changed_files" >> "$GITHUB_OUTPUT"
-            echo "requires_backend=$([[ "$release_type" == "backend" || "$release_type" == "full-stack" ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-            {
-              echo "### Release classification"
-              echo
-              echo "- event: workflow_dispatch"
-              echo "- release_type: \`$release_type\`"
-              echo "- changed files:"
-              printf '  - `%s`\n' "${files[@]}"
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
           changed_files_file="${RUNNER_TEMP}/release-classifier-files.txt"
           printf '%s\n' "${files[@]}" > "$changed_files_file"
-          node scripts/release-classifier.mjs \
-            --changed-files-file "$changed_files_file" \
-            --github-output "$GITHUB_OUTPUT" \
-            --github-summary "$GITHUB_STEP_SUMMARY" \
+          classifier_args=(
+            --changed-files-file "$changed_files_file"
+            --github-output "$GITHUB_OUTPUT"
+            --github-summary "$GITHUB_STEP_SUMMARY"
             --expected-commit "$GITHUB_SHA"
+          )
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            classifier_args+=(--requested-release-type "${{ inputs.release_type || '' }}")
+          fi
+          node scripts/release-classifier.mjs "${classifier_args[@]}"
 
   basic-ci:
     name: Basic CI
@@ -250,6 +239,9 @@ jobs:
       deployment_id: ${{ steps.backend.outputs.deployment_id }}
       backend_commit: ${{ steps.backend.outputs.backend_commit }}
       backend_release_type: ${{ steps.backend.outputs.backend_release_type }}
+      frontend_commit: ${{ steps.frontend_baseline.outputs.frontend_commit }}
+      frontend_commit_full: ${{ steps.frontend_baseline.outputs.frontend_commit_full }}
+      frontend_representation_sha256: ${{ steps.frontend_baseline.outputs.frontend_representation_sha256 }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -260,6 +252,21 @@ jobs:
         with:
           node-version: 20
 
+      - name: Capture immutable public frontend baseline
+        id: frontend_baseline
+        if: needs.classify-release.outputs.release_type == 'backend'
+        run: >-
+          node scripts/frontend-release-snapshot.mjs
+          --mode capture
+          --frontend-url "$PRODUCTION_FRONTEND_URL"
+          --api-url "$PRODUCTION_API_URL"
+          --release-commit "$EXPECTED_RELEASE_COMMIT"
+          --github-output "$GITHUB_OUTPUT"
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+          EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+
       - name: Validate Railway release configuration
         shell: bash
         run: |
@@ -269,12 +276,14 @@ jobs:
           test -n "$RAILWAY_ENVIRONMENT_ID"
           test -n "$RAILWAY_SERVICE_ID"
           test -n "$PRODUCTION_API_URL"
+          test -n "$PRODUCTION_FRONTEND_URL"
         env:
           RAILWAY_PROJECT_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
           RAILWAY_ENVIRONMENT_ID: ${{ vars.RAILWAY_ENVIRONMENT_ID }}
           RAILWAY_SERVICE_ID: ${{ vars.RAILWAY_SERVICE_ID }}
           PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
 
       - name: Deploy exact commit and verify Railway backend
         id: backend
@@ -290,6 +299,25 @@ jobs:
           RAILWAY_EXPECTED_REPOSITORY: ${{ github.repository }}
           RAILWAY_EXPECTED_BRANCH: main
           PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+
+      - name: Verify frontend conservation after backend deployment attempt
+        if: always() && needs.classify-release.outputs.release_type == 'backend'
+        run: >-
+          node scripts/frontend-release-snapshot.mjs
+          --mode verify
+          --frontend-url "$PRODUCTION_FRONTEND_URL"
+          --api-url "$PRODUCTION_API_URL"
+          --release-commit "$EXPECTED_RELEASE_COMMIT"
+          --expected-commit "$EXPECTED_FRONTEND_COMMIT"
+          --expected-commit-full "$EXPECTED_FRONTEND_COMMIT_FULL"
+          --expected-representation-sha256 "$EXPECTED_FRONTEND_REPRESENTATION_SHA256"
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+          EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+          EXPECTED_FRONTEND_COMMIT: ${{ steps.frontend_baseline.outputs.frontend_commit }}
+          EXPECTED_FRONTEND_COMMIT_FULL: ${{ steps.frontend_baseline.outputs.frontend_commit_full }}
+          EXPECTED_FRONTEND_REPRESENTATION_SHA256: ${{ steps.frontend_baseline.outputs.frontend_representation_sha256 }}
 
   frontend-deploy:
     name: Deploy GitHub Pages frontend
@@ -330,7 +358,13 @@ jobs:
       needs.basic-ci.result == 'success' &&
       needs.playwright-smoke.result == 'success' &&
       (
-        (needs.classify-release.outputs.release_type == 'backend' && needs.backend-deploy.result == 'success') ||
+        (
+          needs.classify-release.outputs.release_type == 'backend' &&
+          needs.backend-deploy.result == 'success' &&
+          needs.backend-deploy.outputs.frontend_commit != '' &&
+          needs.backend-deploy.outputs.frontend_commit_full != '' &&
+          needs.backend-deploy.outputs.frontend_representation_sha256 != ''
+        ) ||
         (
           needs.classify-release.outputs.release_type != 'backend' &&
           needs.frontend-deploy.result == 'success' &&
@@ -370,6 +404,25 @@ jobs:
           RELEASE_PREFLIGHT_CHANGED_FILES: ${{ needs.classify-release.outputs.changed_files }}
           CHANGED_FILES_FILE: ${{ runner.temp }}/release-changed-files.txt
 
+      - name: Verify conserved frontend before production probes
+        if: needs.classify-release.outputs.release_type == 'backend'
+        run: >-
+          node scripts/frontend-release-snapshot.mjs
+          --mode verify
+          --frontend-url "$PRODUCTION_FRONTEND_URL"
+          --api-url "$PRODUCTION_API_URL"
+          --release-commit "$EXPECTED_RELEASE_COMMIT"
+          --expected-commit "$EXPECTED_FRONTEND_COMMIT"
+          --expected-commit-full "$EXPECTED_FRONTEND_COMMIT_FULL"
+          --expected-representation-sha256 "$EXPECTED_FRONTEND_REPRESENTATION_SHA256"
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+          EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+          EXPECTED_FRONTEND_COMMIT: ${{ needs.backend-deploy.outputs.frontend_commit }}
+          EXPECTED_FRONTEND_COMMIT_FULL: ${{ needs.backend-deploy.outputs.frontend_commit_full }}
+          EXPECTED_FRONTEND_REPRESENTATION_SHA256: ${{ needs.backend-deploy.outputs.frontend_representation_sha256 }}
+
       - name: Run production release preflight
         run: npm run release:preflight -- --env production --expected-commit "$EXPECTED_RELEASE_COMMIT" --release-type "$RELEASE_TYPE" --changed-files-file "$CHANGED_FILES_FILE"
         env:
@@ -379,6 +432,8 @@ jobs:
           RELEASE_TYPE: ${{ needs.classify-release.outputs.release_type }}
           RELEASE_PREFLIGHT_CHANGED_FILES: ${{ needs.classify-release.outputs.changed_files }}
           CHANGED_FILES_FILE: ${{ runner.temp }}/release-changed-files.txt
+          EXPECTED_FRONTEND_COMMIT: ${{ needs.backend-deploy.outputs.frontend_commit }}
+          EXPECTED_FRONTEND_COMMIT_FULL: ${{ needs.backend-deploy.outputs.frontend_commit_full }}
 
       - name: Verify public frontend build marker
         if: needs.classify-release.outputs.release_type != 'backend'
@@ -405,6 +460,27 @@ jobs:
           PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
           EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
           RELEASE_TYPE: ${{ needs.classify-release.outputs.release_type }}
+          EXPECTED_FRONTEND_COMMIT: ${{ needs.backend-deploy.outputs.frontend_commit }}
+          EXPECTED_FRONTEND_COMMIT_FULL: ${{ needs.backend-deploy.outputs.frontend_commit_full }}
+
+      - name: Verify conserved frontend after all production probes
+        if: always() && needs.classify-release.outputs.release_type == 'backend'
+        run: >-
+          node scripts/frontend-release-snapshot.mjs
+          --mode verify
+          --frontend-url "$PRODUCTION_FRONTEND_URL"
+          --api-url "$PRODUCTION_API_URL"
+          --release-commit "$EXPECTED_RELEASE_COMMIT"
+          --expected-commit "$EXPECTED_FRONTEND_COMMIT"
+          --expected-commit-full "$EXPECTED_FRONTEND_COMMIT_FULL"
+          --expected-representation-sha256 "$EXPECTED_FRONTEND_REPRESENTATION_SHA256"
+        env:
+          PRODUCTION_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+          PRODUCTION_FRONTEND_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+          EXPECTED_RELEASE_COMMIT: ${{ github.sha }}
+          EXPECTED_FRONTEND_COMMIT: ${{ needs.backend-deploy.outputs.frontend_commit }}
+          EXPECTED_FRONTEND_COMMIT_FULL: ${{ needs.backend-deploy.outputs.frontend_commit_full }}
+          EXPECTED_FRONTEND_REPRESENTATION_SHA256: ${{ needs.backend-deploy.outputs.frontend_representation_sha256 }}
 
       - name: Upload production dashboard cockpit screenshots
         if: always()

@@ -19,6 +19,14 @@ on:
           - full-stack
           - deploy-tooling
           - frontend-deploy-tooling
+      expected_frontend_commit:
+        description: Captured public frontend marker commit (required for backend or auto)
+        required: false
+        default: ''
+      expected_frontend_commit_full:
+        description: Captured public frontend exact 40-character commit (required for backend or auto)
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -37,6 +45,8 @@ jobs:
       PRODUCTION_ADMIN_EMAIL: ${{ secrets.PRODUCTION_ADMIN_EMAIL }}
       PRODUCTION_ADMIN_PASSWORD: ${{ secrets.PRODUCTION_ADMIN_PASSWORD }}
       EXPECTED_RELEASE_COMMIT: ${{ inputs.expected_release_commit }}
+      EXPECTED_FRONTEND_COMMIT: ${{ inputs.expected_frontend_commit }}
+      EXPECTED_FRONTEND_COMMIT_FULL: ${{ inputs.expected_frontend_commit_full }}
       RELEASE_TYPE: ${{ inputs.release_type }}
       CI: true
 
@@ -61,6 +71,16 @@ jobs:
               exit 1
             fi
           done
+          if [[ "$RELEASE_TYPE" == "backend" || "$RELEASE_TYPE" == "auto" ]]; then
+            if [[ ! "$EXPECTED_FRONTEND_COMMIT" =~ ^[a-f0-9]{7,40}$ ]]; then
+              echo "::error title=Missing frontend baseline::EXPECTED_FRONTEND_COMMIT must be a 7-40 character lowercase Git SHA for ${RELEASE_TYPE} finance smoke"
+              exit 1
+            fi
+            if [[ ! "$EXPECTED_FRONTEND_COMMIT_FULL" =~ ^[a-f0-9]{40}$ || "$EXPECTED_FRONTEND_COMMIT_FULL" != "$EXPECTED_FRONTEND_COMMIT"* ]]; then
+              echo "::error title=Invalid frontend baseline::EXPECTED_FRONTEND_COMMIT_FULL must be an exact 40-character SHA matching the marker prefix"
+              exit 1
+            fi
+          fi
           echo "Required production smoke secrets are present."
 
       - name: Install dependencies

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -30,6 +31,17 @@ const FRONTEND_RELEASE_TYPES = new Set(['frontend-only', 'deploy-tooling', 'fron
 const MIN_GIT_SHA_LENGTH = 7;
 const MAX_GIT_SHA_LENGTH = 40;
 const DEFAULT_RELEASE_PROBE_TIMEOUT_MS = 15_000;
+const FRONTEND_REPRESENTATION_NOT_READY = 'FRONTEND_REPRESENTATION_NOT_READY';
+const FRONTEND_PROPAGATION_RETRY_OFFSETS_MS = Object.freeze([
+  0,
+  30_000,
+  90_000,
+  210_000,
+  390_000,
+  630_000,
+]);
+const MAX_RETRY_WAIT_CHUNK_MS = 60_000;
+const FRONTEND_PROPAGATION_FINAL_FETCH_TIMEOUT_MS = 60_000;
 
 export function normalizeReleaseType(value = '') {
   return String(value || '').trim().toLowerCase() || 'full-stack';
@@ -586,6 +598,99 @@ async function fetchText(url, options = {}) {
   return { response, text };
 }
 
+function safeResponseHeader(response, name) {
+  const value = safeDiagnosticExcerpt(response?.headers?.get?.(name) || '', 160);
+  return value || null;
+}
+
+function responseMediaType(response) {
+  return String(response?.headers?.get?.('content-type') || '')
+    .split(';', 1)[0]
+    .trim()
+    .toLowerCase();
+}
+
+function safePublicOrigin(value) {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function frontendRepresentationEvidence(response, html, {
+  frontendUrl,
+  totalScriptCount,
+  sameOriginScriptCount,
+} = {}) {
+  const bytes = Buffer.byteLength(String(html || ''));
+  return {
+    status: Number.isInteger(response?.status) ? response.status : null,
+    finalOrigin: safePublicOrigin(response?.url || frontendUrl),
+    contentType: safeResponseHeader(response, 'content-type'),
+    cacheControl: safeResponseHeader(response, 'cache-control'),
+    age: safeResponseHeader(response, 'age'),
+    etag: safeResponseHeader(response, 'etag'),
+    lastModified: safeResponseHeader(response, 'last-modified'),
+    server: safeResponseHeader(response, 'server'),
+    cache: safeResponseHeader(response, 'x-cache'),
+    servedBy: safeResponseHeader(response, 'x-served-by'),
+    edgeRegion: safeResponseHeader(response, 'x-github-edge-region'),
+    requestId: safeResponseHeader(response, 'x-github-request-id'),
+    bodyBytes: bytes,
+    bodySha256: createHash('sha256').update(String(html || '')).digest('hex'),
+    totalScriptCount,
+    sameOriginScriptCount,
+  };
+}
+
+function frontendRepresentationNotReady(response, html, options) {
+  const evidence = frontendRepresentationEvidence(response, html, options);
+  const error = new Error(
+    `frontend HTML did not include any same-origin script assets; evidence=${JSON.stringify(evidence)}`,
+  );
+  error.code = FRONTEND_REPRESENTATION_NOT_READY;
+  error.evidence = evidence;
+  return error;
+}
+
+function normalizeRetryOffsets(offsets) {
+  if (!Array.isArray(offsets) || offsets.length === 0) {
+    throw new Error('frontend propagation retry offsets must be a non-empty array');
+  }
+  const normalized = offsets.map(Number);
+  if (
+    normalized[0] !== 0
+    || normalized.some((offset, index) => (
+      !Number.isSafeInteger(offset)
+      || offset < 0
+      || (index > 0 && offset <= normalized[index - 1])
+    ))
+  ) {
+    throw new Error('frontend propagation retry offsets must start at zero and increase as safe non-negative integers');
+  }
+  return normalized;
+}
+
+async function waitUntilOffset({ startedAt, offsetMs, now, sleep }) {
+  while (true) {
+    const remainingMs = (startedAt + offsetMs) - now();
+    if (remainingMs <= 0) return;
+    await sleep(Math.min(remainingMs, MAX_RETRY_WAIT_CHUNK_MS));
+  }
+}
+
+function remainingFetchTimeoutMs({ deadlineAt, now, maximumMs = 60_000 }) {
+  if (!Number.isFinite(deadlineAt)) return maximumMs;
+  const remainingMs = deadlineAt - now();
+  if (remainingMs <= 0) {
+    const error = new Error('frontend propagation deadline elapsed before the next public fetch');
+    error.code = FRONTEND_REPRESENTATION_NOT_READY;
+    throw error;
+  }
+  return Math.max(1, Math.min(maximumMs, remainingMs));
+}
+
 async function collectJsonProbe(url, { timeoutMs = DEFAULT_RELEASE_PROBE_TIMEOUT_MS } = {}) {
   const startedAt = Date.now();
   try {
@@ -665,22 +770,41 @@ export function resolveFrontendScriptUrls(html = '', documentUrl = '') {
     .filter(assetUrl => new URL(assetUrl).origin === resolvedDocumentUrl.origin));
 }
 
-export async function readFrontendBundle(frontendUrl) {
-  const cacheBust = `releasePreflight=${Date.now()}`;
-  const separator = frontendUrl.includes('?') ? '&' : '?';
-  const { response, text: html } = await fetchText(`${frontendUrl}${separator}${cacheBust}`, {
+export async function readFrontendBundle(frontendUrl, {
+  fetchTextImpl = fetchText,
+  cacheBustValue = Date.now(),
+  deadlineAt = Number.POSITIVE_INFINITY,
+  now = Date.now,
+} = {}) {
+  const probeUrl = new URL(frontendUrl);
+  probeUrl.searchParams.set('releasePreflight', String(cacheBustValue));
+  const { response, text: html } = await fetchTextImpl(probeUrl.toString(), {
     headers: { Accept: 'text/html' },
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(remainingFetchTimeoutMs({ deadlineAt, now })),
   });
   assertOk(response.status === 200, `frontend URL must return 200. HTTP ${response.status}: ${frontendUrl}`);
+  const mediaType = responseMediaType(response);
+  assertOk(
+    mediaType === 'text/html',
+    `frontend URL must return text/html. content-type=${safeDiagnosticExcerpt(mediaType || 'missing', 80)}: ${frontendUrl}`,
+  );
 
   const documentUrl = response.url || frontendUrl;
+  const totalScriptCount = extractScriptUrls(html).length;
   const assetUrls = resolveFrontendScriptUrls(html, documentUrl);
-  assertOk(assetUrls.length > 0, 'frontend HTML did not include any same-origin script assets');
+  if (assetUrls.length === 0) {
+    throw frontendRepresentationNotReady(response, html, {
+      frontendUrl,
+      totalScriptCount,
+      sameOriginScriptCount: assetUrls.length,
+    });
+  }
 
   const assets = [];
   for (const assetUrl of assetUrls) {
-    const asset = await fetchText(assetUrl, { signal: AbortSignal.timeout(60_000) });
+    const asset = await fetchTextImpl(assetUrl, {
+      signal: AbortSignal.timeout(remainingFetchTimeoutMs({ deadlineAt, now })),
+    });
     assertOk(asset.response.status === 200, `frontend asset must return 200. HTTP ${asset.response.status}: ${assetUrl}`);
     assets.push({ url: assetUrl, text: asset.text });
   }
@@ -691,6 +815,64 @@ export async function readFrontendBundle(frontendUrl) {
     assets,
     combinedText: [html, ...assets.map(asset => asset.text)].join('\n'),
   };
+}
+
+export async function readFrontendBundleWithPropagationRetry(frontendUrl, {
+  retryOffsetsMs = FRONTEND_PROPAGATION_RETRY_OFFSETS_MS,
+  readBundle = readFrontendBundle,
+  now = Date.now,
+  sleep = delayMs => new Promise(resolve => setTimeout(resolve, delayMs)),
+  onRetry = ({ attempt, totalAttempts, nextOffsetMs, error }) => {
+    console.warn(
+      `[release-preflight] frontend representation not ready attempt=${attempt}/${totalAttempts}`
+      + ` status=${error?.evidence?.status ?? 'unknown'}`
+      + ` sameOriginScripts=${error?.evidence?.sameOriginScriptCount ?? 'unknown'}`
+      + ` retryAt=+${Math.round(nextOffsetMs / 1000)}s`,
+    );
+  },
+} = {}) {
+  const offsets = normalizeRetryOffsets(retryOffsetsMs);
+  const startedAt = now();
+  const deadlineAt = startedAt + offsets.at(-1) + FRONTEND_PROPAGATION_FINAL_FETCH_TIMEOUT_MS;
+  let lastError;
+  let attempts = 0;
+  for (let index = 0; index < offsets.length; index += 1) {
+    await waitUntilOffset({ startedAt, offsetMs: offsets[index], now, sleep });
+    attempts = index + 1;
+    try {
+      return await readBundle(frontendUrl, {
+        cacheBustValue: `${now()}-${index + 1}`,
+        deadlineAt,
+        now,
+      });
+    } catch (error) {
+      if (error?.code !== FRONTEND_REPRESENTATION_NOT_READY) throw error;
+      // Preserve the last public representation evidence if the runner wakes
+      // after the hard deadline and no subsequent fetch can safely start.
+      if (error?.evidence || !lastError) lastError = error;
+      if (index === offsets.length - 1) break;
+      onRetry({
+        attempt: index + 1,
+        totalAttempts: offsets.length,
+        nextOffsetMs: offsets[index + 1],
+        error,
+      });
+    }
+  }
+  const evidence = {
+    ...(lastError?.evidence || {}),
+    attempts,
+    durationMs: Math.max(0, now() - startedAt),
+    deadlineMs: offsets.at(-1) + FRONTEND_PROPAGATION_FINAL_FETCH_TIMEOUT_MS,
+    retryOffsetsMs: offsets,
+  };
+  const terminalError = new Error(
+    `frontend representation remained unavailable after ${offsets.length} attempts through`
+    + ` +${Math.round(offsets.at(-1) / 1000)}s; evidence=${JSON.stringify(evidence)}`,
+  );
+  terminalError.code = FRONTEND_REPRESENTATION_NOT_READY;
+  terminalError.evidence = evidence;
+  throw terminalError;
 }
 
 export function extractFrontendBuildMarkerFromBundle(text = '') {
@@ -787,10 +969,17 @@ async function main() {
 
   let frontend = null;
   let frontendCollectionError = '';
+  let frontendCollectionEvidence = null;
   try {
-    frontend = await readFrontendBundle(frontendUrl);
+    frontend = await readFrontendBundleWithPropagationRetry(frontendUrl);
   } catch (error) {
     frontendCollectionError = safeDiagnosticExcerpt(error instanceof Error ? error.message : String(error));
+    frontendCollectionEvidence = error?.evidence || null;
+    if (error?.code === FRONTEND_REPRESENTATION_NOT_READY && frontendCollectionEvidence) {
+      console.error(
+        `[release-preflight] frontend representation terminal evidence=${JSON.stringify(frontendCollectionEvidence)}`,
+      );
+    }
   }
 
   const frontendText = frontend?.combinedText || '';
@@ -803,13 +992,16 @@ async function main() {
   const frontendEvidence = {
     ok: Boolean(frontendBuild.commit) && expectedApiFound && !frontendCollectionError,
     url: frontendUrl,
-    status: frontend ? 200 : null,
+    status: frontend ? 200 : (frontendCollectionEvidence?.status ?? null),
     timeoutMs: 60_000,
     timedOut: /abort|timeout/i.test(frontendCollectionError),
     error: frontendCollectionError || (!frontendBuild.commit
       ? 'frontend build marker was not found in public bundle'
       : (!expectedApiFound ? `frontend bundle does not contain expected API URL ${apiUrl}` : '')),
-    bodyExcerpt: '',
+    bodyExcerpt: frontendCollectionEvidence
+      ? `bytes=${frontendCollectionEvidence.bodyBytes ?? 'unknown'} sha256=${frontendCollectionEvidence.bodySha256 || 'missing'}`
+      : '',
+    durationMs: frontendCollectionEvidence?.durationMs,
   };
 
   const versionProbe = await collectJsonProbe(`${apiUrl}/api/version`);

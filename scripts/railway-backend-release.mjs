@@ -447,6 +447,7 @@ function buildCommit(json = {}) {
 
 export function validateRuntimeGate(probes = {}, expected = {}) {
   const commit = validateExactGitSha(expected.commit, 'expected release commit');
+  const deploymentId = required(expected.deploymentId, 'expected deployment ID');
   const requiredProbes = [
     ['/health', probes.health],
     ['/health/ready', probes.readiness],
@@ -458,19 +459,23 @@ export function validateRuntimeGate(probes = {}, expected = {}) {
       throw new Error(`${path} must return HTTP 200 with JSON ok=true`);
     }
     const observedCommit = buildCommit(probe.json);
-    if (observedCommit && observedCommit !== commit) {
+    if (observedCommit !== commit) {
       throw new Error(`${path} build commit mismatch`);
+    }
+    const observedDeploymentId = String(
+      probe?.json?.build?.deployment?.railwayDeploymentId || '',
+    ).trim();
+    if (observedDeploymentId !== deploymentId) {
+      throw new Error(`${path} Railway deployment ID mismatch`);
     }
   }
 
-  const versionCommit = buildCommit(probes.version?.json);
-  if (versionCommit !== commit) throw new Error('/api/version build commit mismatch');
   const observedReleaseType = releaseType(probes.version?.json?.build?.releaseType);
   if (!ALLOWED_RUNTIME_RELEASE_TYPES.has(observedReleaseType)) {
     throw new Error('/api/version build release type must be backend or full-stack');
   }
 
-  return { commit, releaseType: observedReleaseType };
+  return { commit, deploymentId, releaseType: observedReleaseType };
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 30_000) {
@@ -629,7 +634,7 @@ async function jsonProbe(baseUrl, path) {
   }
 }
 
-async function pollRuntime({ apiBaseUrl, expectedCommit, attempts, intervalMs }) {
+async function pollRuntime({ apiBaseUrl, expectedCommit, expectedDeploymentId, attempts, intervalMs }) {
   let lastError = new Error('runtime gate was not attempted');
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const [health, readiness, version] = await Promise.all([
@@ -638,7 +643,10 @@ async function pollRuntime({ apiBaseUrl, expectedCommit, attempts, intervalMs })
       jsonProbe(apiBaseUrl, '/api/version'),
     ]);
     try {
-      const result = validateRuntimeGate({ health, readiness, version }, { commit: expectedCommit });
+      const result = validateRuntimeGate(
+        { health, readiness, version },
+        { commit: expectedCommit, deploymentId: expectedDeploymentId },
+      );
       console.log(`[railway-backend-release] runtime gate PASS attempt=${attempt}`);
       return result;
     } catch (error) {
@@ -723,6 +731,7 @@ async function main() {
   const runtime = await pollRuntime({
     apiBaseUrl,
     expectedCommit: context.commit,
+    expectedDeploymentId: deploymentId,
     attempts: args.runtimeAttempts,
     intervalMs: args.runtimeIntervalMs,
   });
@@ -738,6 +747,7 @@ async function main() {
     `- environment ID: \`${target.environmentId}\``,
     `- service ID: \`${target.serviceId}\``,
     `- exact commit: \`${runtime.commit}\``,
+    `- verified runtime deployment ID: \`${runtime.deploymentId}\``,
     `- runtime release type: \`${runtime.releaseType}\``,
     '- gates: Railway SUCCESS + deployment provenance + `/health` + `/health/ready` + `/api/version`',
   ]);

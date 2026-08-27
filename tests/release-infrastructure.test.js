@@ -23,6 +23,7 @@ const railwayConfigSource = readFileSync(new URL('../server/railway.toml', impor
 
 const expected = {
   commit: '5f071fc531c870fa2422320efe64bc83cafe509e',
+  deploymentId: 'deployment-1',
   projectId: 'project-1',
   environmentId: 'environment-1',
   serviceId: 'service-1',
@@ -115,7 +116,11 @@ function resolvedFileConfigFixture(overrides = {}) {
 }
 
 function runtimeProbes(overrides = {}) {
-  const build = { commitFull: expected.commit, releaseType: 'backend' };
+  const build = {
+    commitFull: expected.commit,
+    releaseType: 'backend',
+    deployment: { railwayDeploymentId: expected.deploymentId },
+  };
   return {
     health: { status: 200, json: { ok: true, build } },
     readiness: { status: 200, json: { ok: true, build } },
@@ -430,6 +435,7 @@ test('deployment provenance requires the returned deployment ID, target IDs, SUC
 test('runtime gate requires all health endpoints and the exact backend commit', () => {
   assert.deepEqual(validateRuntimeGate(runtimeProbes(), expected), {
     commit: expected.commit,
+    deploymentId: expected.deploymentId,
     releaseType: 'backend',
   });
   assert.throws(
@@ -437,11 +443,47 @@ test('runtime gate requires all health endpoints and the exact backend commit', 
     /\/health must return HTTP 200/,
   );
   assert.throws(
+    () => validateRuntimeGate(runtimeProbes({ health: { status: 200, json: { ok: true } } }), expected),
+    /\/health build commit mismatch/,
+  );
+  assert.throws(
+    () => validateRuntimeGate(runtimeProbes({ health: { status: 200, json: { ok: true, build: { commitFull: expected.commit } } } }), expected),
+    /\/health Railway deployment ID mismatch/,
+  );
+  assert.throws(
+    () => validateRuntimeGate(runtimeProbes({ readiness: { status: 200, json: { ok: true } } }), expected),
+    /\/health\/ready build commit mismatch/,
+  );
+  assert.throws(
+    () => validateRuntimeGate(runtimeProbes({ readiness: { status: 200, json: { ok: true, build: { commitFull: expected.commit } } } }), expected),
+    /\/health\/ready Railway deployment ID mismatch/,
+  );
+  assert.throws(
     () => validateRuntimeGate(runtimeProbes({ version: { status: 200, json: { ok: true, build: { commitFull: 'a'.repeat(40), releaseType: 'backend' } } } }), expected),
     /build commit mismatch/,
   );
   assert.throws(
     () => validateRuntimeGate(runtimeProbes({ version: { status: 200, json: { ok: true, build: { commitFull: expected.commit, releaseType: 'unknown' } } } }), expected),
+    /Railway deployment ID mismatch/,
+  );
+  assert.throws(
+    () => validateRuntimeGate(runtimeProbes({ version: { status: 200, json: { ok: true, build: { commitFull: expected.commit, releaseType: 'backend' } } } }), expected),
+    /Railway deployment ID mismatch/,
+  );
+  assert.throws(
+    () => validateRuntimeGate(runtimeProbes({ version: { status: 200, json: { ok: true, build: { commitFull: expected.commit, releaseType: 'backend', deployment: { railwayDeploymentId: 'other-deployment' } } } } }), expected),
+    /Railway deployment ID mismatch/,
+  );
+  assert.throws(
+    () => validateRuntimeGate(runtimeProbes({ health: { status: 200, json: { ok: true, build: { commitFull: expected.commit, releaseType: 'backend', deployment: { railwayDeploymentId: 'other-deployment' } } } } }), expected),
+    /Railway deployment ID mismatch/,
+  );
+  assert.throws(
+    () => validateRuntimeGate(runtimeProbes({ readiness: { status: 200, json: { ok: true, build: { commitFull: expected.commit, releaseType: 'backend', deployment: { railwayDeploymentId: 'other-deployment' } } } } }), expected),
+    /\/health\/ready Railway deployment ID mismatch/,
+  );
+  assert.throws(
+    () => validateRuntimeGate(runtimeProbes({ version: { status: 200, json: { ok: true, build: { commitFull: expected.commit, releaseType: 'unknown', deployment: { railwayDeploymentId: expected.deploymentId } } } } }), expected),
     /release type must be backend or full-stack/,
   );
 });

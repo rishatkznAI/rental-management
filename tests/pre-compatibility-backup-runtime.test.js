@@ -15,8 +15,10 @@ const {
   databaseLogicalDigest,
 } = require('../server/lib/pre-compatibility-backup.js');
 const {
+  buildInfo,
   createExclusiveSourceProvider,
   openVerifiedReadOnlyDatabase,
+  registerBackupOnlyHealthRoutes,
 } = require('../server/pre-compatibility-backup-server.js');
 const {
   registerPreCompatibilityBackupControlRoutes,
@@ -1010,6 +1012,88 @@ test('Railway wrapper selects the isolated server only for the raw exact enable 
   assert.equal(resolveServerEntry({}), 'server.js');
   assert.equal(resolveServerEntry({ SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED: ' true' }), 'server.js');
   assert.equal(resolveServerEntry({ SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED: 'true' }), 'pre-compatibility-backup-server.js');
+});
+
+test('backup-only build identity exposes the exact release, deployment, and replica', () => {
+  const keys = [
+    'RAILWAY_GIT_COMMIT_SHA',
+    'RAILWAY_DEPLOYMENT_ID',
+    'RAILWAY_REPLICA_ID',
+    'RELEASE_TYPE',
+    'RELEASE_PREFLIGHT_RELEASE_TYPE',
+    'RAILWAY_RELEASE_TYPE',
+  ];
+  const previous = new Map(keys.map(key => [key, {
+    present: Object.hasOwn(process.env, key),
+    value: process.env[key],
+  }]));
+  try {
+    process.env.RAILWAY_GIT_COMMIT_SHA = 'a'.repeat(40);
+    process.env.RAILWAY_DEPLOYMENT_ID = 'deployment-exact';
+    process.env.RAILWAY_REPLICA_ID = 'replica-exact';
+    process.env.RELEASE_TYPE = 'backend';
+    delete process.env.RELEASE_PREFLIGHT_RELEASE_TYPE;
+    delete process.env.RAILWAY_RELEASE_TYPE;
+    const identity = buildInfo();
+    assert.equal(identity.commitFull, 'a'.repeat(40));
+    assert.equal(identity.releaseType, 'backend');
+    assert.deepEqual(identity.release, { type: 'backend' });
+    assert.equal(identity.deployment.railwayDeploymentId, 'deployment-exact');
+    assert.equal(identity.deployment.railwayReplicaId, 'replica-exact');
+
+    delete process.env.RELEASE_TYPE;
+    process.env.RAILWAY_RELEASE_TYPE = 'full-stack';
+    assert.equal(buildInfo().releaseType, 'full-stack');
+  } finally {
+    for (const [key, state] of previous) {
+      if (state.present) process.env[key] = state.value;
+      else delete process.env[key];
+    }
+  }
+});
+
+test('backup-only health routes expose one exact build and deployment identity on every probe', async () => {
+  const keys = [
+    'RAILWAY_GIT_COMMIT_SHA',
+    'RAILWAY_DEPLOYMENT_ID',
+    'RAILWAY_REPLICA_ID',
+    'RELEASE_TYPE',
+    'RELEASE_PREFLIGHT_RELEASE_TYPE',
+    'RAILWAY_RELEASE_TYPE',
+  ];
+  const previous = new Map(keys.map(key => [key, {
+    present: Object.hasOwn(process.env, key),
+    value: process.env[key],
+  }]));
+  try {
+    process.env.RAILWAY_GIT_COMMIT_SHA = 'c'.repeat(40);
+    process.env.RAILWAY_DEPLOYMENT_ID = 'deployment-health';
+    process.env.RAILWAY_REPLICA_ID = 'replica-health';
+    process.env.RELEASE_TYPE = 'backend';
+    delete process.env.RELEASE_PREFLIGHT_RELEASE_TYPE;
+    delete process.env.RAILWAY_RELEASE_TYPE;
+
+    const app = express();
+    registerBackupOnlyHealthRoutes(app);
+    await withServer(app, async baseUrl => {
+      for (const route of ['/health', '/health/ready', '/api/version']) {
+        const response = await fetch(`${baseUrl}${route}`);
+        const body = await response.json();
+        assert.equal(response.status, 200);
+        assert.equal(body.ok, true);
+        assert.equal(body.mode, 'pre-compatibility-backup-only');
+        assert.equal(body.build.commitFull, 'c'.repeat(40));
+        assert.equal(body.build.deployment.railwayDeploymentId, 'deployment-health');
+        assert.equal(body.build.deployment.railwayReplicaId, 'replica-health');
+        assert.equal(body.build.releaseType, 'backend');
+      }
+    });
+  } finally {
+    for (const [key, state] of previous) {
+      if (state.present) process.env[key] = state.value;
+      else delete process.env[key];
+    }
+  }
 });
 
 test('backup-only production server exposes only async control routes backed by the isolated worker', () => {

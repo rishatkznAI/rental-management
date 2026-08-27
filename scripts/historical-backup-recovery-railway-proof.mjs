@@ -84,7 +84,10 @@ export function createRecoveryConfigurationConservationProof({
   const variableEntries = Object.entries(resolvedVariables)
     .sort(([left], [right]) => (left < right ? -1 : (left > right ? 1 : 0)));
   if (variableEntries.some(([key, value]) => (
-    !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+    // Preserve the one legacy empty-key Railway entry as opaque state. It is
+    // fingerprinted with its exact private value and must remain identical;
+    // no other nonstandard key is accepted.
+    (key !== '' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
     || typeof value !== 'string'
   ))) {
     throw new Error('Railway resolved target-service variable inventory is invalid');
@@ -112,6 +115,11 @@ export function createRecoveryConfigurationConservationProof({
       'skytech.historical-backup-recovery.resolved-variable-key-inventory.v1',
     ),
     resolvedVariableCount: variableEntries.length,
+    legacyEmptyVariableKeyPresent: Object.hasOwn(resolvedVariables, ''),
+    legacyNonstandardVariableCount: Object.hasOwn(resolvedVariables, '') ? 1 : 0,
+    legacyEmptyVariableKeyValueEmitted: false,
+    legacyEmptyVariablePolicy:
+      'optional one-key opaque legacy state; exact value and key presence are fingerprinted',
     authority: 'decrypted environment.config target service + Railway rendered variables query',
     rawValuesEmitted: false,
   };

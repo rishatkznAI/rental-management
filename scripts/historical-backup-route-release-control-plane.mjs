@@ -213,7 +213,10 @@ export function parsePrivateVariableSnapshot(source) {
     throw new Error('Railway variable snapshot must be a nonempty object');
   }
   if (Object.entries(parsed).some(([key, value]) => (
-    !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+    // Railway preserves one historical empty-key entry in this production
+    // inventory. Keep it opaque and conservation-only; every other key must
+    // retain strict environment-variable syntax and every value stays exact.
+    (key !== '' && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
     || typeof value !== 'string'
   ))) {
     throw new Error('Railway variable snapshot has an invalid shape');
@@ -418,6 +421,11 @@ export async function createRouteReleaseControlPlaneProof({
     backupExpectedShaKey: HISTORICAL_BACKUP_EXPECTED_SHA_KEY,
     backupExpectedSha: pin,
     variableCount: Object.keys(variables).length,
+    legacyEmptyVariableKeyPresent: Object.hasOwn(variables, ''),
+    legacyNonstandardVariableCount: Object.hasOwn(variables, '') ? 1 : 0,
+    legacyEmptyVariableKeyValueEmitted: false,
+    legacyEmptyVariablePolicy:
+      'optional one-key opaque legacy state; exact value conserved by private inventory comparisons',
     rawVariableValuesEmitted: false,
     railwayVariableSourcesExact: true,
     railwayVariableSourceAuthority: 'exact private CLI inventory equals GraphQL rendered variables query',

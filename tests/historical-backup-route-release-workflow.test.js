@@ -436,9 +436,9 @@ test('failure or cancellation restoration is first after the terminal chain and 
   const frontendStart = workflow.indexOf('- name: Verify frontend conservation', rollbackStart);
   const rollback = workflow.slice(rollbackStart, frontendStart);
   assert.ok(terminalApiStart > 0 && rollbackStart > terminalApiStart && frontendStart > rollbackStart);
-  const firstAlwaysAfterTerminalChain = workflow.indexOf('if: always()', terminalApiStart);
-  assert.ok(firstAlwaysAfterTerminalChain > rollbackStart && firstAlwaysAfterTerminalChain < frontendStart);
-  assert.match(rollback, /PRIOR_NON_SUCCESS: \$\{\{ failure\(\) \|\| cancelled\(\) \}\}/);
+  assert.match(rollback, /if: failure\(\) \|\| cancelled\(\)\n\s+env:/);
+  assert.doesNotMatch(workflow, /\$\{\{\s*(?:failure|cancelled)\(\)/);
+  assert.doesNotMatch(rollback, /PRIOR_NON_SUCCESS/);
   assert.doesNotMatch(rollback, /PRIOR_FAILURE: \$\{\{ failure\(\) \}\}/);
   assert.ok(rollback.indexOf('test -e "$IRREVERSIBLE_MARKER"') < rollback.indexOf('railway variable set'));
   assert.match(rollback, /irreversible marker: `PRESENT`/);

@@ -387,9 +387,8 @@ jobs:
             --output "$TERMINAL_API_PROOF_FILE"
 
       - name: Roll back only a pre-deploy staged pin after non-success
-        if: always()
+        if: failure() || cancelled()
         env:
-          PRIOR_NON_SUCCESS: ${{ failure() || cancelled() }}
           EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
           EXPECTED_ACTIVE_BACKEND_SHA: ${{ inputs.expected_active_backend_sha }}
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
@@ -398,17 +397,13 @@ jobs:
         run: |
           set -euo pipefail
           cleanup_non_success_evidence() {
-            if test "$PRIOR_NON_SUCCESS" = "true" \
-              && test -n "${ROUTE_RELEASE_EVIDENCE_DIRECTORY:-}" \
+            if test -n "${ROUTE_RELEASE_EVIDENCE_DIRECTORY:-}" \
               && test "$ROUTE_RELEASE_EVIDENCE_DIRECTORY" = "$RUNNER_TEMP/skytech-historical-backup-route-release"; then
               set +e
               rm -rf "$ROUTE_RELEASE_EVIDENCE_DIRECTORY"
             fi
           }
           trap cleanup_non_success_evidence EXIT
-          if test "$PRIOR_NON_SUCCESS" != "true"; then
-            exit 0
-          fi
           if test -z "${STAGE_ATTEMPT_MARKER:-}" || test ! -e "$STAGE_ATTEMPT_MARKER"; then
             exit 0
           fi

@@ -242,6 +242,11 @@ jobs:
           const effectiveServices = objectValue(effectiveEnvironmentConfig.services);
           const effectiveServiceConfig = objectValue(effectiveServices[process.env.RAILWAY_SERVICE_ID]);
           const effectiveSource = objectValue(effectiveServiceConfig.source);
+          const effectiveSourceBranch = effectiveSource.branch;
+          const effectiveSourceBranchIsAbsent = effectiveSourceBranch === undefined
+            || effectiveSourceBranch === null
+            || effectiveSourceBranch === '';
+          const deploymentSourceBranch = metadata.branch;
           const effectiveSourceCommitSha = String(effectiveSource.commitSha || '').trim().toLowerCase();
           if (effectiveSourceCommitSha && !/^[a-f0-9]{40}$/.test(effectiveSourceCommitSha)) {
             throw new Error('effective source commitSha is not an exact lowercase SHA');
@@ -285,7 +290,8 @@ jobs:
             [Object.keys(effectiveServices).length > 0, 'effective Railway services config is empty'],
             [Object.hasOwn(effectiveServices, process.env.RAILWAY_SERVICE_ID), 'target service is absent from effective config'],
             [effectiveSource.repo === process.env.EXPECTED_REPOSITORY, 'effective source repository mismatch'],
-            [effectiveSource.branch === process.env.RAILWAY_SOURCE_BRANCH, 'effective source branch mismatch'],
+            [effectiveSourceBranchIsAbsent || effectiveSourceBranch === process.env.RAILWAY_SOURCE_BRANCH, 'effective source branch conflicts with expected branch'],
+            [typeof deploymentSourceBranch === 'string' && deploymentSourceBranch === process.env.RAILWAY_SOURCE_BRANCH, 'deployment metadata source branch mismatch'],
             [!effectiveSourceCommitSha || effectiveSourceCommitSha === process.env.EXPECTED_DEPLOYED_SHA, 'effective source commitSha mismatch'],
             [effectiveSource.rootDirectory === process.env.RAILWAY_SOURCE_ROOT_DIRECTORY, 'effective source root mismatch'],
             [effectiveSource.image === undefined || effectiveSource.image === null || effectiveSource.image === '', 'effective source unexpectedly uses an image'],
@@ -308,7 +314,8 @@ jobs:
               id: process.env.RAILWAY_SERVICE_ID,
               source: {
                 repo: effectiveSource.repo,
-                branch: effectiveSource.branch,
+                branch: effectiveSourceBranchIsAbsent ? null : effectiveSourceBranch,
+                deploymentMetadataBranch: deploymentSourceBranch,
                 commitSha: effectiveSourceCommitSha || null,
                 rootDirectory: effectiveSource.rootDirectory,
                 image: null,
@@ -1240,6 +1247,11 @@ jobs:
           const effectiveServices = objectValue(effectiveEnvironmentConfig.services);
           const effectiveServiceConfig = objectValue(effectiveServices[process.env.RAILWAY_SERVICE_ID]);
           const effectiveSource = objectValue(effectiveServiceConfig.source);
+          const effectiveSourceBranch = effectiveSource.branch;
+          const effectiveSourceBranchIsAbsent = effectiveSourceBranch === undefined
+            || effectiveSourceBranch === null
+            || effectiveSourceBranch === '';
+          const deploymentSourceBranch = metadata.branch;
           const effectiveSourceCommitSha = String(effectiveSource.commitSha || '').trim().toLowerCase();
           if (effectiveSourceCommitSha && !/^[a-f0-9]{40}$/.test(effectiveSourceCommitSha)) {
             throw new Error('effective source commitSha is not an exact lowercase SHA');
@@ -1283,7 +1295,8 @@ jobs:
             [Object.keys(effectiveServices).length > 0, 'effective Railway services config is empty'],
             [Object.hasOwn(effectiveServices, process.env.RAILWAY_SERVICE_ID), 'target service is absent from effective config'],
             [effectiveSource.repo === process.env.EXPECTED_REPOSITORY, 'effective source repository mismatch'],
-            [effectiveSource.branch === process.env.RAILWAY_SOURCE_BRANCH, 'effective source branch mismatch'],
+            [effectiveSourceBranchIsAbsent || effectiveSourceBranch === process.env.RAILWAY_SOURCE_BRANCH, 'effective source branch conflicts with expected branch'],
+            [typeof deploymentSourceBranch === 'string' && deploymentSourceBranch === process.env.RAILWAY_SOURCE_BRANCH, 'deployment metadata source branch mismatch'],
             [!effectiveSourceCommitSha || effectiveSourceCommitSha === process.env.EXPECTED_DEPLOYED_SHA, 'effective source commitSha mismatch'],
             [effectiveSource.rootDirectory === process.env.RAILWAY_SOURCE_ROOT_DIRECTORY, 'effective source root mismatch'],
             [effectiveSource.image === undefined || effectiveSource.image === null || effectiveSource.image === '', 'effective source unexpectedly uses an image'],
@@ -1306,7 +1319,8 @@ jobs:
               id: process.env.RAILWAY_SERVICE_ID,
               source: {
                 repo: effectiveSource.repo,
-                branch: effectiveSource.branch,
+                branch: effectiveSourceBranchIsAbsent ? null : effectiveSourceBranch,
+                deploymentMetadataBranch: deploymentSourceBranch,
                 commitSha: effectiveSourceCommitSha || null,
                 rootDirectory: effectiveSource.rootDirectory,
                 image: null,

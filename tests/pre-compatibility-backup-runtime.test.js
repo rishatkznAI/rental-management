@@ -1379,7 +1379,16 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
     assert.match(railwayProofStep, /effectiveDeployPreDeployCommandIsAbsent/);
     assert.match(railwayProofStep, /preDeployCommand: null/);
     assert.match(railwayProofStep, /effectiveSource\.repo === process\.env\.EXPECTED_REPOSITORY/);
-    assert.match(railwayProofStep, /effectiveSource\.branch === process\.env\.RAILWAY_SOURCE_BRANCH/);
+    assert.match(railwayProofStep, /const effectiveSourceBranch = effectiveSource\.branch/);
+    assert.match(railwayProofStep, /effectiveSourceBranchIsAbsent = effectiveSourceBranch === undefined[\s\S]*effectiveSourceBranch === null[\s\S]*effectiveSourceBranch === ''/);
+    assert.match(railwayProofStep, /const deploymentSourceBranch = metadata\.branch/);
+    assert.match(railwayProofStep, /effectiveSourceBranchIsAbsent \|\| effectiveSourceBranch === process\.env\.RAILWAY_SOURCE_BRANCH/);
+    assert.match(railwayProofStep, /typeof deploymentSourceBranch === 'string' && deploymentSourceBranch === process\.env\.RAILWAY_SOURCE_BRANCH/);
+    assert.match(railwayProofStep, /branch: effectiveSourceBranchIsAbsent \? null : effectiveSourceBranch/);
+    assert.match(railwayProofStep, /deploymentMetadataBranch: deploymentSourceBranch/);
+    assert.doesNotMatch(railwayProofStep, /String\(effectiveSource\.branch/);
+    assert.doesNotMatch(railwayProofStep, /String\(metadata\.branch/);
+    assert.doesNotMatch(railwayProofStep, /effectiveSource\.branch === process\.env\.RAILWAY_SOURCE_BRANCH/);
     assert.match(railwayProofStep, /effectiveSource\.rootDirectory === process\.env\.RAILWAY_SOURCE_ROOT_DIRECTORY/);
     assert.match(railwayProofStep, /effectiveVolumeMountIds\.length === 1/);
     assert.match(railwayProofStep, /effectiveVolumeMountIds\[0\] === process\.env\.RAILWAY_VOLUME_ID/);

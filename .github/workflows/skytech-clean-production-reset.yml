@@ -109,6 +109,24 @@ jobs:
           npm install --global @railway/cli@5.45.0
           test "$(railway --version)" = "railway 5.45.0"
 
+      - name: Validate off-volume backup prerequisites before invocation
+        env:
+          PRELIMINARY_BACKUP_TOKEN: ${{ secrets.SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN }}
+          BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$PRELIMINARY_BACKUP_TOKEN" != *$'\n'* && "$PRELIMINARY_BACKUP_TOKEN" != *$'\r'* ]]
+          [[ "$BACKUP_ENCRYPTION_PASSPHRASE" != *$'\n'* && "$BACKUP_ENCRYPTION_PASSPHRASE" != *$'\r'* ]]
+          test "$(printf '%s' "$PRELIMINARY_BACKUP_TOKEN" | wc -c)" -ge 32
+          test "$(printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | wc -c)" -ge 32
+          test "$PRODUCTION_API_ORIGIN" = "https://rental-management-production-35bc.up.railway.app"
+          command -v curl > /dev/null
+          command -v gpg > /dev/null
+          command -v unzip > /dev/null
+          command -v sqlite3 > /dev/null
+
       - name: Prove one exact active Railway deployment and one running replica before backup
         env:
           EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
@@ -636,14 +654,17 @@ jobs:
       - name: Download and verify the plaintext backup and durable receipt from Railway
         env:
           EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          PRELIMINARY_BACKUP_TOKEN: ${{ secrets.SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN }}
+          BACKUP_DOWNLOAD_DIRECTORY: ${{ runner.temp }}/skytech-pre-compatibility-download
+          BACKUP_PLAINTEXT_ARCHIVE: ${{ runner.temp }}/skytech-pre-compatibility-download/backup.zip
+          BACKUP_DOWNLOADED_RECEIPT: ${{ runner.temp }}/skytech-pre-compatibility-download/receipt.json
         shell: bash
         run: |
           set -euo pipefail
           umask 077
-          [[ "$RAILWAY_TOKEN" != *$'\n'* && "$RAILWAY_TOKEN" != *$'\r'* ]]
-          test -n "$RAILWAY_TOKEN"
-          echo "::add-mask::$RAILWAY_TOKEN"
+          [[ "$PRELIMINARY_BACKUP_TOKEN" != *$'\n'* && "$PRELIMINARY_BACKUP_TOKEN" != *$'\r'* ]]
+          test "$(printf '%s' "$PRELIMINARY_BACKUP_TOKEN" | wc -c)" -ge 32
+          echo "::add-mask::$PRELIMINARY_BACKUP_TOKEN"
           filename="$(jq -er '.backup.filename' reset-response.json)"
           expected_sha="$(jq -er '.backup.sha256' reset-response.json)"
           expected_size="$(jq -er '.backup.size' reset-response.json)"
@@ -654,26 +675,160 @@ jobs:
           [[ "$expected_size" =~ ^[1-9][0-9]*$ ]]
           test "$receipt_filename" = "skytech-pre-compatibility-backup-receipt.json"
           [[ "$receipt_sha" =~ ^[a-f0-9]{64}$ ]]
-          cd "$RUNNER_TEMP/skytech-clean-reset-target"
-          railway volume \
-            --project "$RAILWAY_PROJECT_ID" \
-            --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_SERVICE_ID" \
-            files --volume "$RAILWAY_VOLUME_ID" download \
-            "/backups/$filename" "$GITHUB_WORKSPACE/skytech-clean-reset-backup.zip" --overwrite
-          railway volume \
-            --project "$RAILWAY_PROJECT_ID" \
-            --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_SERVICE_ID" \
-            files --volume "$RAILWAY_VOLUME_ID" download \
-            "/backups/$receipt_filename" "$GITHUB_WORKSPACE/skytech-clean-reset-backup-receipt.json" --overwrite
-          cd "$GITHUB_WORKSPACE"
-          chmod 600 skytech-clean-reset-backup.zip skytech-clean-reset-backup-receipt.json
-          test "$(sha256sum skytech-clean-reset-backup.zip | awk '{print $1}')" = "$expected_sha"
-          test "$(stat -c '%s' skytech-clean-reset-backup.zip)" = "$expected_size"
-          test "$(sha256sum skytech-clean-reset-backup-receipt.json | awk '{print $1}')" = "$receipt_sha"
-          unzip -tqq skytech-clean-reset-backup.zip
           request_nonce="$(cat "$RUNNER_TEMP/skytech-pre-compatibility-backup-request-nonce")"
+          [[ "$request_nonce" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          protected_headers="$RUNNER_TEMP/skytech-pre-compatibility-download-curl-headers"
+          receipt_headers="$RUNNER_TEMP/skytech-pre-compatibility-download-receipt-headers"
+          archive_headers="$RUNNER_TEMP/skytech-pre-compatibility-download-archive-headers"
+          terminal_receipt_headers="$RUNNER_TEMP/skytech-pre-compatibility-download-terminal-receipt-headers"
+          terminal_receipt="$BACKUP_DOWNLOAD_DIRECTORY/receipt-terminal.json"
+          test "$BACKUP_DOWNLOAD_DIRECTORY" = "$RUNNER_TEMP/skytech-pre-compatibility-download"
+          test "$BACKUP_PLAINTEXT_ARCHIVE" = "$BACKUP_DOWNLOAD_DIRECTORY/backup.zip"
+          test "$BACKUP_DOWNLOADED_RECEIPT" = "$BACKUP_DOWNLOAD_DIRECTORY/receipt.json"
+          test "$terminal_receipt" = "$BACKUP_DOWNLOAD_DIRECTORY/receipt-terminal.json"
+          test ! -e "$BACKUP_DOWNLOAD_DIRECTORY"
+          download_step_complete=false
+          cleanup_download_transients() {
+            rm -f "$protected_headers" "$receipt_headers" "$archive_headers" "$terminal_receipt_headers" "$terminal_receipt"
+            if [ "$download_step_complete" != true ]; then
+              rm -rf "$BACKUP_DOWNLOAD_DIRECTORY"
+            fi
+          }
+          trap cleanup_download_transients EXIT
+          install -d -m 700 "$BACKUP_DOWNLOAD_DIRECTORY"
+          test "$(stat -c '%a' "$BACKUP_DOWNLOAD_DIRECTORY")" = "700"
+          {
+            printf 'X-Skytech-Pre-Compatibility-Backup-Token: %s\n' "$PRELIMINARY_BACKUP_TOKEN"
+            printf 'X-Skytech-Pre-Compatibility-Backup-Nonce: %s\n' "$request_nonce"
+            printf 'X-Skytech-Pre-Compatibility-Backup-Source-Commit: %s\n' "$EXPECTED_DEPLOYED_SHA"
+          } > "$protected_headers"
+          chmod 600 "$protected_headers"
+          test "$(stat -c '%a' "$protected_headers")" = "600"
+          base_url="$PRODUCTION_API_ORIGIN/api/admin/skytech-pre-compatibility-backup/artifacts"
+          receipt_http_status="$(curl \
+            --fail --silent --show-error \
+            --proto '=https' --tlsv1.2 \
+            --max-redirs 0 \
+            --connect-timeout 15 --max-time 300 \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            --request GET \
+            --header 'Accept-Encoding: identity' \
+            --header "@$protected_headers" \
+            --dump-header "$receipt_headers" \
+            --output "$BACKUP_DOWNLOADED_RECEIPT" \
+            --write-out '%{http_code}\n%{url_effective}\n%{num_redirects}' \
+            "$base_url/receipt")"
+          mapfile -t receipt_curl_fields <<< "$receipt_http_status"
+          test "${#receipt_curl_fields[@]}" = "3"
+          test "${receipt_curl_fields[0]}" = "200"
+          test "${receipt_curl_fields[1]}" = "$base_url/receipt"
+          test "${receipt_curl_fields[2]}" = "0"
+          archive_http_status="$(curl \
+            --fail --silent --show-error \
+            --proto '=https' --tlsv1.2 \
+            --max-redirs 0 \
+            --connect-timeout 15 --max-time 1800 \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            --request GET \
+            --header 'Accept-Encoding: identity' \
+            --header "@$protected_headers" \
+            --dump-header "$archive_headers" \
+            --output "$BACKUP_PLAINTEXT_ARCHIVE" \
+            --write-out '%{http_code}\n%{url_effective}\n%{num_redirects}' \
+            "$base_url/archive")"
+          mapfile -t archive_curl_fields <<< "$archive_http_status"
+          test "${#archive_curl_fields[@]}" = "3"
+          test "${archive_curl_fields[0]}" = "200"
+          test "${archive_curl_fields[1]}" = "$base_url/archive"
+          test "${archive_curl_fields[2]}" = "0"
+          read_exact_header() {
+            local header_name="$1"
+            local header_file="$2"
+            awk -v wanted="$header_name" '
+              BEGIN { IGNORECASE = 1; count = 0 }
+              {
+                sub(/\r$/, "")
+                prefix = wanted ":"
+                if (tolower(substr($0, 1, length(prefix))) == tolower(prefix)) {
+                  value = substr($0, length(prefix) + 1)
+                  sub(/^[[:space:]]+/, "", value)
+                  values[++count] = value
+                }
+              }
+              END {
+                if (count != 1 || values[1] == "") exit 1
+                print values[1]
+              }
+            ' "$header_file"
+          }
+          reject_response_header() {
+            local header_name="$1"
+            local header_file="$2"
+            if awk -v wanted="$header_name" '
+              {
+                sub(/\r$/, "")
+                prefix = wanted ":"
+                if (tolower(substr($0, 1, length(prefix))) == tolower(prefix)) found = 1
+              }
+              END { exit(found ? 0 : 1) }
+            ' "$header_file"; then
+              return 1
+            fi
+          }
+          receipt_content_sha="$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$receipt_headers")"
+          receipt_header_sha="$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$receipt_headers")"
+          receipt_source_commit="$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$receipt_headers")"
+          receipt_content_length="$(read_exact_header 'Content-Length' "$receipt_headers")"
+          receipt_content_type="$(read_exact_header 'Content-Type' "$receipt_headers")"
+          receipt_disposition="$(read_exact_header 'Content-Disposition' "$receipt_headers")"
+          archive_content_sha="$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$archive_headers")"
+          archive_receipt_sha="$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$archive_headers")"
+          archive_source_commit="$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$archive_headers")"
+          archive_content_length="$(read_exact_header 'Content-Length' "$archive_headers")"
+          archive_content_type="$(read_exact_header 'Content-Type' "$archive_headers")"
+          archive_disposition="$(read_exact_header 'Content-Disposition' "$archive_headers")"
+          receipt_cache_control="$(read_exact_header 'Cache-Control' "$receipt_headers")"
+          receipt_nosniff="$(read_exact_header 'X-Content-Type-Options' "$receipt_headers")"
+          receipt_csp="$(read_exact_header 'Content-Security-Policy' "$receipt_headers")"
+          receipt_hsts="$(read_exact_header 'Strict-Transport-Security' "$receipt_headers")"
+          archive_cache_control="$(read_exact_header 'Cache-Control' "$archive_headers")"
+          archive_nosniff="$(read_exact_header 'X-Content-Type-Options' "$archive_headers")"
+          archive_csp="$(read_exact_header 'Content-Security-Policy' "$archive_headers")"
+          archive_hsts="$(read_exact_header 'Strict-Transport-Security' "$archive_headers")"
+          test "$receipt_content_sha" = "$receipt_sha"
+          test "$receipt_header_sha" = "$receipt_sha"
+          test "$receipt_source_commit" = "$EXPECTED_DEPLOYED_SHA"
+          test "$archive_content_sha" = "$expected_sha"
+          test "$archive_receipt_sha" = "$receipt_sha"
+          test "$archive_source_commit" = "$EXPECTED_DEPLOYED_SHA"
+          [[ "$receipt_content_length" =~ ^[1-9][0-9]*$ ]]
+          test "$archive_content_length" = "$expected_size"
+          test "$receipt_content_type" = "application/json; charset=utf-8"
+          test "$receipt_disposition" = "attachment; filename=\"$receipt_filename\""
+          test "$archive_content_type" = "application/zip"
+          test "$archive_disposition" = "attachment; filename=\"$filename\""
+          test "$receipt_cache_control" = "no-store"
+          test "$archive_cache_control" = "no-store"
+          test "$receipt_nosniff" = "nosniff"
+          test "$archive_nosniff" = "nosniff"
+          test "$receipt_csp" = "default-src 'none'; frame-ancestors 'none'"
+          test "$archive_csp" = "default-src 'none'; frame-ancestors 'none'"
+          test "$receipt_hsts" = "max-age=31536000; includeSubDomains"
+          test "$archive_hsts" = "max-age=31536000; includeSubDomains"
+          for response_headers in "$receipt_headers" "$archive_headers"; do
+            reject_response_header 'Location' "$response_headers"
+            reject_response_header 'Content-Encoding' "$response_headers"
+            reject_response_header 'Access-Control-Allow-Origin' "$response_headers"
+            reject_response_header 'Access-Control-Allow-Credentials' "$response_headers"
+          done
+          chmod 600 "$BACKUP_PLAINTEXT_ARCHIVE" "$BACKUP_DOWNLOADED_RECEIPT"
+          test "$(stat -c '%a' "$BACKUP_PLAINTEXT_ARCHIVE")" = "600"
+          test "$(stat -c '%a' "$BACKUP_DOWNLOADED_RECEIPT")" = "600"
+          test "$(sha256sum "$BACKUP_PLAINTEXT_ARCHIVE" | awk '{print $1}')" = "$expected_sha"
+          test "$(stat -c '%s' "$BACKUP_PLAINTEXT_ARCHIVE")" = "$expected_size"
+          test "$(sha256sum "$BACKUP_DOWNLOADED_RECEIPT" | awk '{print $1}')" = "$receipt_sha"
+          test "$(stat -c '%s' "$BACKUP_DOWNLOADED_RECEIPT")" = "$receipt_content_length"
+          unzip -tqq "$BACKUP_PLAINTEXT_ARCHIVE"
           jq -e \
             --arg requestNonce "$request_nonce" \
             --arg deployedSha "$EXPECTED_DEPLOYED_SHA" \
@@ -722,7 +877,44 @@ jobs:
               and .runtime.deployment.railwayReplicaId == $apiRuntime.replicaId
               and .runtime.deployment.railwayEnvironment == "production"
               and .runtime.deployment.railwayService == "rental-management"
-            ' skytech-clean-reset-backup-receipt.json > /dev/null
+            ' "$BACKUP_DOWNLOADED_RECEIPT" > /dev/null
+          terminal_receipt_http_status="$(curl \
+            --fail --silent --show-error \
+            --proto '=https' --tlsv1.2 \
+            --max-redirs 0 \
+            --connect-timeout 15 --max-time 300 \
+            --retry 3 --retry-delay 2 --retry-all-errors \
+            --request GET \
+            --header 'Accept-Encoding: identity' \
+            --header "@$protected_headers" \
+            --dump-header "$terminal_receipt_headers" \
+            --output "$terminal_receipt" \
+            --write-out '%{http_code}\n%{url_effective}\n%{num_redirects}' \
+            "$base_url/receipt")"
+          mapfile -t terminal_receipt_curl_fields <<< "$terminal_receipt_http_status"
+          test "${#terminal_receipt_curl_fields[@]}" = "3"
+          test "${terminal_receipt_curl_fields[0]}" = "200"
+          test "${terminal_receipt_curl_fields[1]}" = "$base_url/receipt"
+          test "${terminal_receipt_curl_fields[2]}" = "0"
+          chmod 600 "$terminal_receipt"
+          test "$(stat -c '%a' "$terminal_receipt")" = "600"
+          test "$(stat -c '%s' "$terminal_receipt")" = "$receipt_content_length"
+          test "$(sha256sum "$terminal_receipt" | awk '{print $1}')" = "$receipt_sha"
+          cmp --silent "$BACKUP_DOWNLOADED_RECEIPT" "$terminal_receipt"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$terminal_receipt_headers")" = "$receipt_sha"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$terminal_receipt_headers")" = "$receipt_sha"
+          test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$terminal_receipt_headers")" = "$EXPECTED_DEPLOYED_SHA"
+          test "$(read_exact_header 'Content-Length' "$terminal_receipt_headers")" = "$receipt_content_length"
+          test "$(read_exact_header 'Content-Type' "$terminal_receipt_headers")" = "application/json; charset=utf-8"
+          test "$(read_exact_header 'Content-Disposition' "$terminal_receipt_headers")" = "attachment; filename=\"$receipt_filename\""
+          test "$(read_exact_header 'Cache-Control' "$terminal_receipt_headers")" = "no-store"
+          test "$(read_exact_header 'X-Content-Type-Options' "$terminal_receipt_headers")" = "nosniff"
+          test "$(read_exact_header 'Content-Security-Policy' "$terminal_receipt_headers")" = "default-src 'none'; frame-ancestors 'none'"
+          test "$(read_exact_header 'Strict-Transport-Security' "$terminal_receipt_headers")" = "max-age=31536000; includeSubDomains"
+          reject_response_header 'Location' "$terminal_receipt_headers"
+          reject_response_header 'Content-Encoding' "$terminal_receipt_headers"
+          reject_response_header 'Access-Control-Allow-Origin' "$terminal_receipt_headers"
+          reject_response_header 'Access-Control-Allow-Credentials' "$terminal_receipt_headers"
           jq -cS '{
             receiptVersion,
             purpose,
@@ -739,12 +931,45 @@ jobs:
               replicaId: .runtime.deployment.railwayReplicaId,
               environment: .runtime.deployment.railwayEnvironment,
               service: .runtime.deployment.railwayService
-            }
-          }' skytech-clean-reset-backup-receipt.json > backup-receipt-identity.json
+              }
+            }' "$BACKUP_DOWNLOADED_RECEIPT" > backup-receipt-identity.json
+          install -m 600 "$BACKUP_DOWNLOADED_RECEIPT" skytech-clean-reset-backup-receipt.json
+          jq -nS \
+            --arg sourceCommit "$EXPECTED_DEPLOYED_SHA" \
+            --arg receiptFilename "$receipt_filename" \
+            --arg receiptSha256 "$receipt_sha" \
+            --argjson receiptSizeBytes "$receipt_content_length" \
+            --arg archiveFilename "$filename" \
+            --arg archiveSha256 "$expected_sha" \
+            --argjson archiveSizeBytes "$expected_size" '
+              {
+                transport: "authenticated-https-tls",
+                sshOrSftpUsed: false,
+                redirectsFollowed: false,
+                serverAndLocalDigestsMatched: true,
+                receiptReprobedAfterArchive: true,
+                terminalReceiptByteEquivalent: true,
+                sourceCommit: $sourceCommit,
+                receipt: {
+                  filename: $receiptFilename,
+                  sha256: $receiptSha256,
+                  sizeBytes: $receiptSizeBytes
+                },
+                archive: {
+                  filename: $archiveFilename,
+                  sha256: $archiveSha256,
+                  sizeBytes: $archiveSizeBytes
+                }
+              }
+            ' > preliminary-backup-download-transport.json
+          download_step_complete=true
+          cleanup_download_transients
+          trap - EXIT
 
       - name: Encrypt the verified Railway download without Railway credentials
         env:
           BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
+          BACKUP_PLAINTEXT_ARCHIVE: ${{ runner.temp }}/skytech-pre-compatibility-download/backup.zip
         shell: bash
         run: |
           set -euo pipefail
@@ -755,15 +980,15 @@ jobs:
           printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg \
             --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
             --symmetric --cipher-algo AES256 \
-            --output skytech-clean-reset-backup.zip.gpg skytech-clean-reset-backup.zip
+            --output skytech-clean-reset-backup.zip.gpg "$BACKUP_PLAINTEXT_ARCHIVE"
           test -s skytech-clean-reset-backup.zip.gpg
           jq -nS \
             --arg sha256 "$(sha256sum skytech-clean-reset-backup.zip.gpg | awk '{print $1}')" \
             --argjson sizeBytes "$(stat -c '%s' skytech-clean-reset-backup.zip.gpg)" '
               { encryptedArchiveSha256: $sha256, encryptedArchiveSizeBytes: $sizeBytes }
             ' > encrypted-artifact-before-upload.json
-          rm -f skytech-clean-reset-backup.zip
-          test ! -e skytech-clean-reset-backup.zip
+          rm -f "$BACKUP_PLAINTEXT_ARCHIVE"
+          test ! -e "$BACKUP_PLAINTEXT_ARCHIVE"
 
       - name: Store encrypted preliminary off-volume backup
         id: backup_artifact
@@ -1736,6 +1961,7 @@ jobs:
             api-runtime-identity-before.json
             api-runtime-identity-after.json
             backup-receipt-identity.json
+            preliminary-backup-download-transport.json
             backup-runtime-identity.json
             encrypted-artifact-before-upload.json
             stored-artifact-validation.json
@@ -1745,6 +1971,8 @@ jobs:
 
       - name: Remove transient backup files
         if: always()
+        env:
+          BACKUP_DOWNLOAD_DIRECTORY: ${{ runner.temp }}/skytech-pre-compatibility-download
         shell: bash
         run: |
           rm -f \
@@ -1755,8 +1983,13 @@ jobs:
             "$RUNNER_TEMP/skytech-pre-compatibility-backup-request-nonce" \
             "$RUNNER_TEMP/skytech-pre-compatibility-backup-initial-invocation" \
             "$RUNNER_TEMP/skytech-pre-compatibility-backup-curl-headers" \
+            "$RUNNER_TEMP/skytech-pre-compatibility-download-curl-headers" \
+            "$RUNNER_TEMP/skytech-pre-compatibility-download-receipt-headers" \
+            "$RUNNER_TEMP/skytech-pre-compatibility-download-archive-headers" \
+            "$RUNNER_TEMP/skytech-pre-compatibility-download-terminal-receipt-headers" \
             "$RUNNER_TEMP/skytech-pre-compatibility-terminal-curl-headers" \
             "$RUNNER_TEMP/skytech-pre-compatibility-stored-artifact.zip"
           rm -rf \
+            "$BACKUP_DOWNLOAD_DIRECTORY" \
             "$RUNNER_TEMP/skytech-pre-compatibility-stored-artifact" \
             "$RUNNER_TEMP/skytech-pre-compatibility-digest-verified-artifact"

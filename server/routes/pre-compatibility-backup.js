@@ -19,6 +19,19 @@ const {
 const OPERATION_LOCK_FILENAME = '.skytech-pre-compatibility-backup.lock.json';
 const RECEIPT_FILENAME = 'skytech-pre-compatibility-backup-receipt.json';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const SOURCE_COMMIT_PATTERN = /^[a-f0-9]{40}$/;
+const SOURCE_COMMIT_HEADER = 'x-skytech-pre-compatibility-backup-source-commit';
+const MAX_RECEIPT_BYTES = 4 * 1024 * 1024;
+const UNSUPPORTED_ARTIFACT_REQUEST_HEADERS = Object.freeze([
+  'range',
+  'if-range',
+  'if-match',
+  'if-none-match',
+  'if-modified-since',
+  'if-unmodified-since',
+  'transfer-encoding',
+]);
 
 function fail(code, message) {
   throw Object.assign(new Error(message), { code });
@@ -30,12 +43,161 @@ function safeEqual(left, right) {
   return a.length > 0 && a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function isRawIdentifier(value) {
+  return typeof value === 'string'
+    && value.length > 0
+    && value.length <= 128
+    && value === value.trim()
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+
+function isHistoricalReceiptRuntime(runtime, sourceCommit) {
+  const startedAt = String(runtime?.startedAt || '');
+  return Boolean(
+    runtime
+    && SOURCE_COMMIT_PATTERN.test(String(runtime.commitFull || ''))
+    && safeEqual(runtime.commitFull, sourceCommit)
+    && runtime.commit === runtime.commitFull.slice(0, 7)
+    && ['backend', 'full-stack'].includes(runtime.releaseType)
+    && runtime.release?.type === runtime.releaseType
+    && startedAt.length > 0
+    && !Number.isNaN(Date.parse(startedAt))
+    && new Date(startedAt).toISOString() === startedAt
+    && isRawIdentifier(runtime.deployment?.railwayDeploymentId)
+    && runtime.deployment?.railwayEnvironment === 'production'
+    && runtime.deployment?.railwayService === 'rental-management'
+    && isRawIdentifier(runtime.deployment?.railwayReplicaId)
+  );
+}
+
+function setArtifactResponseSecurityHeaders(_req, res, next) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+}
+
 function backupTimestamp(date = new Date()) {
   return date.toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
 }
 
 function sameStatIdentity(left, right) {
   return left?.dev === right?.dev && left?.ino === right?.ino;
+}
+
+function sameArtifactState(left, right) {
+  return Boolean(
+    left
+    && right
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.uid === right.uid
+    && left.gid === right.gid
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs,
+  );
+}
+
+function isPrivateArtifactFile(stat, effectiveUid) {
+  return Boolean(
+    stat?.isFile?.()
+    && !stat.isSymbolicLink?.()
+    && stat.nlink === 1
+    && stat.uid === effectiveUid
+    && (stat.mode & 0o7777) === 0o600
+    && Number.isSafeInteger(stat.size)
+    && stat.size > 0,
+  );
+}
+
+function assertPrivateArtifactHandle(handle) {
+  const descriptorStat = fs.fstatSync(handle.fd);
+  const pathStat = fs.lstatSync(handle.filePath);
+  if (
+    !isPrivateArtifactFile(descriptorStat, handle.effectiveUid)
+    || !isPrivateArtifactFile(pathStat, handle.effectiveUid)
+    || !sameArtifactState(handle.initialStat, descriptorStat)
+    || !sameArtifactState(handle.initialStat, pathStat)
+  ) {
+    fail('PRE_COMPATIBILITY_BACKUP_ARTIFACT_CHANGED', 'The preliminary backup artifact changed while bound.');
+  }
+  return descriptorStat;
+}
+
+function openPrivateArtifactFile(filePath, { expectedSize, maxSize } = {}) {
+  const effectiveUid = typeof process.geteuid === 'function' ? process.geteuid() : null;
+  if (!Number.isSafeInteger(effectiveUid) || effectiveUid < 0) {
+    fail('PRE_COMPATIBILITY_BACKUP_ARTIFACT_UNSAFE', 'The preliminary backup artifact owner is unavailable.');
+  }
+  const pathStat = fs.lstatSync(filePath);
+  if (
+    !isPrivateArtifactFile(pathStat, effectiveUid)
+    || (expectedSize !== undefined && pathStat.size !== expectedSize)
+    || (maxSize !== undefined && pathStat.size > maxSize)
+  ) {
+    fail('PRE_COMPATIBILITY_BACKUP_ARTIFACT_UNSAFE', 'The preliminary backup artifact is unsafe.');
+  }
+  const fd = fs.openSync(filePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  const handle = { effectiveUid, fd, filePath, initialStat: pathStat };
+  try {
+    assertPrivateArtifactHandle(handle);
+    return handle;
+  } catch (error) {
+    fs.closeSync(fd);
+    throw error;
+  }
+}
+
+function closeArtifactHandle(handle) {
+  if (!handle || handle.fd === undefined) return;
+  const fd = handle.fd;
+  handle.fd = undefined;
+  fs.closeSync(fd);
+}
+
+function readArtifactBytes(handle, maxSize) {
+  const stat = assertPrivateArtifactHandle(handle);
+  if (stat.size > maxSize) {
+    fail('PRE_COMPATIBILITY_BACKUP_ARTIFACT_UNSAFE', 'The preliminary backup artifact is too large.');
+  }
+  const bytes = Buffer.alloc(stat.size);
+  let position = 0;
+  while (position < bytes.length) {
+    const bytesRead = fs.readSync(handle.fd, bytes, position, bytes.length - position, position);
+    if (bytesRead === 0) {
+      fail('PRE_COMPATIBILITY_BACKUP_ARTIFACT_CHANGED', 'The preliminary backup artifact changed while reading.');
+    }
+    position += bytesRead;
+  }
+  assertPrivateArtifactHandle(handle);
+  return bytes;
+}
+
+function hashArtifactHandle(handle) {
+  const stat = assertPrivateArtifactHandle(handle);
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let position = 0;
+  while (position < stat.size) {
+    const bytesRead = fs.readSync(
+      handle.fd,
+      buffer,
+      0,
+      Math.min(buffer.length, stat.size - position),
+      position,
+    );
+    if (bytesRead === 0) {
+      fail('PRE_COMPATIBILITY_BACKUP_ARTIFACT_CHANGED', 'The preliminary backup artifact changed while hashing.');
+    }
+    hash.update(buffer.subarray(0, bytesRead));
+    position += bytesRead;
+  }
+  assertPrivateArtifactHandle(handle);
+  return hash.digest('hex');
 }
 
 function isOwnedStableDirectory(stat, { effectiveUid, device } = {}) {
@@ -149,11 +311,94 @@ function backupDirectoryPath(dbPath) {
   }
 }
 
-function backupOutputPath(dbPath, filename) {
+function existingPrivateBackupDirectoryPath(dbPath) {
+  const databaseDirectory = path.dirname(path.resolve(dbPath));
+  const backupDirectory = path.join(databaseDirectory, 'backups');
+  const effectiveUid = typeof process.geteuid === 'function' ? process.geteuid() : null;
+  let parentFd;
+  let directoryFd;
+  try {
+    if (!Number.isSafeInteger(effectiveUid) || effectiveUid < 0) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The effective backup runtime owner is unavailable.');
+    }
+    const parentPathStat = fs.lstatSync(databaseDirectory);
+    if (
+      !isOwnedStableDirectory(parentPathStat, { effectiveUid })
+      || fs.realpathSync(databaseDirectory) !== databaseDirectory
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup parent directory is unsafe.');
+    }
+    parentFd = fs.openSync(
+      databaseDirectory,
+      fs.constants.O_RDONLY
+        | (fs.constants.O_DIRECTORY || 0)
+        | (fs.constants.O_NOFOLLOW || 0),
+    );
+    const parentOpenedStat = fs.fstatSync(parentFd);
+    if (
+      !isOwnedStableDirectory(parentOpenedStat, { effectiveUid })
+      || !sameStatIdentity(parentPathStat, parentOpenedStat)
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup parent directory changed before opening.');
+    }
+    const directoryStat = fs.lstatSync(backupDirectory);
+    if (
+      !isOwnedStableDirectory(directoryStat, { effectiveUid, device: parentOpenedStat.dev })
+      || (directoryStat.mode & 0o777) !== 0o700
+      || fs.realpathSync(backupDirectory) !== backupDirectory
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory is unsafe.');
+    }
+    directoryFd = fs.openSync(
+      backupDirectory,
+      fs.constants.O_RDONLY
+        | (fs.constants.O_DIRECTORY || 0)
+        | (fs.constants.O_NOFOLLOW || 0),
+    );
+    const openedStat = fs.fstatSync(directoryFd);
+    if (
+      !isOwnedStableDirectory(openedStat, { effectiveUid, device: parentOpenedStat.dev })
+      || !sameStatIdentity(directoryStat, openedStat)
+      || (openedStat.mode & 0o777) !== 0o700
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory changed before opening.');
+    }
+    const pathStatAfter = fs.lstatSync(backupDirectory);
+    const parentPathStatAfter = fs.lstatSync(databaseDirectory);
+    if (
+      !sameStatIdentity(openedStat, pathStatAfter)
+      || !isOwnedStableDirectory(pathStatAfter, { effectiveUid, device: parentOpenedStat.dev })
+      || (pathStatAfter.mode & 0o777) !== 0o700
+      || fs.realpathSync(backupDirectory) !== backupDirectory
+      || !sameStatIdentity(parentOpenedStat, parentPathStatAfter)
+      || !isOwnedStableDirectory(parentPathStatAfter, { effectiveUid })
+      || fs.realpathSync(databaseDirectory) !== databaseDirectory
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory changed while binding.');
+    }
+    return backupDirectory;
+  } catch (error) {
+    if (error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE') throw error;
+    fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory could not be opened safely.');
+  } finally {
+    if (directoryFd !== undefined) {
+      try { fs.closeSync(directoryFd); } catch { /* directory validation already has an authoritative result */ }
+    }
+    if (parentFd !== undefined) {
+      try { fs.closeSync(parentFd); } catch { /* directory validation already has an authoritative result */ }
+    }
+  }
+}
+
+function backupArchivePath(backupDirectory, filename) {
   if (!/^skytech-pre-clean-reset-\d{8}T\d{6}Z\.zip$/.test(filename)) {
     fail('PRE_COMPATIBILITY_BACKUP_FILENAME_INVALID', 'Invalid preliminary backup filename.');
   }
-  return path.join(backupDirectoryPath(dbPath), filename);
+  return path.join(backupDirectory, filename);
+}
+
+function backupOutputPath(dbPath, filename) {
+  return backupArchivePath(backupDirectoryPath(dbPath), filename);
 }
 
 function writeAll(fd, bytes) {
@@ -375,31 +620,71 @@ function responseFromReceipt(receipt, receiptSha256, idempotent) {
   };
 }
 
-function validateCompletedReceipt({ receipt, requestNonce, runtime, dbPath, sourceHandle }) {
+function validateCompletedReceipt({
+  receipt,
+  requestNonce,
+  runtime,
+  sourceCommit,
+  dbPath,
+  sourceHandle,
+  startupSourceIdentity,
+  archiveHandle,
+  resolvedArchivePath,
+}) {
   assertBoundSourceHandle(sourceHandle);
+  const receiptSourceCommit = String(receipt?.runtime?.commitFull || '');
+  const historicalRuntimeMatches = runtime === undefined
+    && SOURCE_COMMIT_PATTERN.test(String(sourceCommit || ''))
+    && isHistoricalReceiptRuntime(receipt?.runtime, sourceCommit);
   if (
     receipt?.receiptVersion !== 1
     || receipt?.purpose !== 'pre-schema-compatibility-production-backup'
     || receipt?.status !== 'COMPLETE'
-    || receipt?.requestNonce !== requestNonce
+    || !safeEqual(receipt?.requestNonce, requestNonce)
     || !UUID_PATTERN.test(String(receipt?.operationId || ''))
-    || JSON.stringify(receipt.runtime) !== JSON.stringify(runtime)
+    || (runtime === undefined
+      ? !historicalRuntimeMatches
+      : JSON.stringify(receipt.runtime) !== JSON.stringify(runtime))
+    || (startupSourceIdentity && !sameSourceIdentity(startupSourceIdentity, sourceHandle.sourceIdentity))
     || !sameSourceIdentity(receipt?.source?.identity, sourceHandle.sourceIdentity)
     || receipt?.source?.queryOnly !== true
     || receipt?.source?.totalChangesBefore !== 0
     || receipt?.source?.totalChangesAfter !== 0
     || receipt?.source?.durableStateUnchanged !== true
+    || !durableSourceStateEqual(receipt?.source?.before, receipt?.source?.after)
+    || !Number.isSafeInteger(receipt?.archive?.size)
+    || receipt.archive.size <= 0
+    || !SHA256_PATTERN.test(String(receipt?.archive?.sha256 || ''))
+    || !SHA256_PATTERN.test(String(receipt?.archive?.logicalDatabaseSha256 || ''))
+    || !SHA256_PATTERN.test(String(receipt?.archive?.databaseFileSha256 || ''))
+    || !SHA256_PATTERN.test(String(receipt?.archive?.businessFileInventorySha256 || ''))
   ) {
     fail('PRE_COMPATIBILITY_BACKUP_RECEIPT_MISMATCH', 'The completed preliminary backup receipt does not match this request.');
   }
-  const archivePath = backupOutputPath(dbPath, receipt.archive?.filename);
+  const expectedArchivePath = backupArchivePath(
+    path.join(path.dirname(path.resolve(dbPath)), 'backups'),
+    receipt.archive?.filename,
+  );
+  const archivePath = resolvedArchivePath === undefined
+    ? backupOutputPath(dbPath, receipt.archive?.filename)
+    : resolvedArchivePath;
+  if (archivePath !== expectedArchivePath) {
+    fail('PRE_COMPATIBILITY_BACKUP_ARCHIVE_MISMATCH', 'The completed preliminary backup archive path is invalid.');
+  }
   const archiveStat = fs.lstatSync(archivePath);
+  const archiveSha256BeforeValidation = archiveHandle
+    ? hashArtifactHandle(archiveHandle)
+    : fileSha256(archivePath);
   if (
     !archiveStat.isFile()
     || archiveStat.isSymbolicLink()
     || archiveStat.nlink !== 1
     || archiveStat.size !== receipt.archive.size
-    || fileSha256(archivePath) !== receipt.archive.sha256
+    || (archiveHandle && (
+      archiveHandle.filePath !== archivePath
+      || !sameArtifactState(archiveHandle.initialStat, archiveStat)
+    ))
+    || archiveSha256BeforeValidation !== receipt.archive.sha256
   ) {
     fail('PRE_COMPATIBILITY_BACKUP_ARCHIVE_MISMATCH', 'The completed preliminary backup archive is missing or changed.');
   }
@@ -448,11 +733,15 @@ function validateCompletedReceipt({ receipt, requestNonce, runtime, dbPath, sour
       sourceFd: sourceHandle.sourceFd,
       sourceIdentity: sourceHandle.sourceIdentity,
     });
+    const archiveSha256AfterValidation = archiveHandle
+      ? hashArtifactHandle(archiveHandle)
+      : fileSha256(archivePath);
     if (
       totalChangesBefore !== 0
       || totalChangesAfter !== totalChangesBefore
       || !durableSourceStateEqual(stateAtSnapshot, currentState)
       || !durableSourceStateEqual(receipt.source.after, currentState)
+      || archiveSha256AfterValidation !== archiveSha256BeforeValidation
       || validation.logicalDatabaseSha256 !== receipt.archive.logicalDatabaseSha256
       || validation.extractedDatabaseSha256 !== receipt.archive.databaseFileSha256
       || validation.extractedDatabaseSize !== receipt.archive.databaseFileSize
@@ -466,6 +755,11 @@ function validateCompletedReceipt({ receipt, requestNonce, runtime, dbPath, sour
       try { db.exec('ROLLBACK'); } catch { /* original validation error wins */ }
     }
   }
+  return {
+    archivePath,
+    archiveSha256: archiveSha256BeforeValidation,
+    sourceCommit: receiptSourceCommit,
+  };
 }
 
 function createPreCompatibilityBackupHandlers({
@@ -486,15 +780,7 @@ function createPreCompatibilityBackupHandlers({
       if (assertPreCompatibilityBackupEnvironment(env, { dbPath, expectedEnvironment }) !== true) {
         return res.status(404).json({ ok: false, error: 'Not found' });
       }
-      const stat = fs.lstatSync(dbPath);
-      if (
-        isBackupOnlyRuntime() !== true
-        || !stat.isFile()
-        || stat.isSymbolicLink()
-        || stat.nlink !== 1
-        || path.resolve(dbPath) !== expectedEnvironment.sourceDbPath
-        || fs.realpathSync(dbPath) !== expectedEnvironment.sourceDbPath
-      ) {
+      if (isBackupOnlyRuntime() !== true) {
         return res.status(404).json({ ok: false, error: 'Not found' });
       }
     } catch {
@@ -509,7 +795,36 @@ function createPreCompatibilityBackupHandlers({
     ) {
       return res.status(403).json({ ok: false, error: 'Forbidden' });
     }
+    try {
+      const stat = fs.lstatSync(dbPath);
+      if (
+        !stat.isFile()
+        || stat.isSymbolicLink()
+        || stat.nlink !== 1
+        || path.resolve(dbPath) !== expectedEnvironment.sourceDbPath
+        || fs.realpathSync(dbPath) !== expectedEnvironment.sourceDbPath
+      ) {
+        return res.status(404).json({ ok: false, error: 'Not found' });
+      }
+    } catch {
+      return res.status(404).json({ ok: false, error: 'Not found' });
+    }
     req.preCompatibilityBackupNonce = requestNonce;
+    return next();
+  }
+
+  function requireArtifactDownloadRequest(req, res, next) {
+    const sourceCommit = String(req.headers[SOURCE_COMMIT_HEADER] || '');
+    if (!SOURCE_COMMIT_PATTERN.test(sourceCommit)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    if (
+      UNSUPPORTED_ARTIFACT_REQUEST_HEADERS.some(header => req.headers[header] !== undefined)
+      || (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0')
+    ) {
+      return res.status(400).json({ ok: false, error: 'Unsupported artifact request.' });
+    }
+    req.preCompatibilityBackupSourceCommit = sourceCommit;
     return next();
   }
 
@@ -538,7 +853,14 @@ function createPreCompatibilityBackupHandlers({
         sourceHandle = openSourceDatabase();
         assertBoundSourceHandle(sourceHandle);
         const receipt = readPrivateJsonFile(receiptPath);
-        validateCompletedReceipt({ receipt, requestNonce, runtime, dbPath, sourceHandle });
+        validateCompletedReceipt({
+          receipt,
+          requestNonce,
+          runtime,
+          dbPath,
+          sourceHandle,
+          startupSourceIdentity,
+        });
         return res.status(200).json(responseFromReceipt(receipt, fileSha256(receiptPath), true));
       }
       if (fs.existsSync(operationLockPath)) {
@@ -728,7 +1050,118 @@ function createPreCompatibilityBackupHandlers({
     }
   }
 
-  return { handleBackup, requireBackupCapability };
+  function handleArtifactDownload(artifact) {
+    return (req, res) => {
+      let receiptHandle;
+      let archiveHandle;
+      let sourceHandle;
+      let streamedHandle;
+      try {
+        const sourceCommit = req.preCompatibilityBackupSourceCommit;
+        if (typeof openSourceDatabase !== 'function') {
+          fail('PRE_COMPATIBILITY_BACKUP_SOURCE_UNAVAILABLE', 'The preliminary backup source is unavailable.');
+        }
+        const backupDirectory = existingPrivateBackupDirectoryPath(dbPath);
+        const receiptPath = path.join(backupDirectory, RECEIPT_FILENAME);
+        receiptHandle = openPrivateArtifactFile(receiptPath, { maxSize: MAX_RECEIPT_BYTES });
+        const receiptBytes = readArtifactBytes(receiptHandle, MAX_RECEIPT_BYTES);
+        let receipt;
+        try {
+          receipt = JSON.parse(receiptBytes.toString('utf8'));
+        } catch {
+          fail('PRE_COMPATIBILITY_BACKUP_RECEIPT_INVALID', 'The preliminary backup receipt is invalid.');
+        }
+        const canonicalReceiptBytes = Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`);
+        if (
+          canonicalReceiptBytes.length !== receiptBytes.length
+          || !crypto.timingSafeEqual(canonicalReceiptBytes, receiptBytes)
+        ) {
+          fail('PRE_COMPATIBILITY_BACKUP_RECEIPT_INVALID', 'The preliminary backup receipt is not canonical.');
+        }
+        if (
+          !safeEqual(receipt?.requestNonce, req.preCompatibilityBackupNonce)
+          || !safeEqual(receipt?.runtime?.commitFull, sourceCommit)
+        ) {
+          return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
+        const archivePath = backupArchivePath(backupDirectory, receipt?.archive?.filename);
+        archiveHandle = openPrivateArtifactFile(archivePath, { expectedSize: receipt?.archive?.size });
+        sourceHandle = openSourceDatabase();
+        const validated = validateCompletedReceipt({
+          receipt,
+          requestNonce: req.preCompatibilityBackupNonce,
+          sourceCommit,
+          dbPath,
+          sourceHandle,
+          startupSourceIdentity,
+          archiveHandle,
+          resolvedArchivePath: archivePath,
+        });
+        const receiptSha256Before = crypto.createHash('sha256').update(receiptBytes).digest('hex');
+        const receiptSha256After = hashArtifactHandle(receiptHandle);
+        if (receiptSha256After !== receiptSha256Before) {
+          fail('PRE_COMPATIBILITY_BACKUP_RECEIPT_CHANGED', 'The preliminary backup receipt changed during validation.');
+        }
+        sourceHandle.close();
+        sourceHandle = undefined;
+
+        streamedHandle = artifact === 'receipt' ? receiptHandle : archiveHandle;
+        const otherHandle = artifact === 'receipt' ? archiveHandle : receiptHandle;
+        closeArtifactHandle(otherHandle);
+        if (artifact === 'receipt') archiveHandle = undefined;
+        else receiptHandle = undefined;
+
+        const filename = artifact === 'receipt' ? RECEIPT_FILENAME : receipt.archive.filename;
+        const contentSha256 = artifact === 'receipt' ? receiptSha256Before : validated.archiveSha256;
+        const contentType = artifact === 'receipt' ? 'application/json; charset=utf-8' : 'application/zip';
+        assertPrivateArtifactHandle(streamedHandle);
+        res.status(200);
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Length', String(streamedHandle.initialStat.size));
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('X-Skytech-Pre-Compatibility-Backup-Content-SHA256', contentSha256);
+        res.setHeader('X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256', receiptSha256Before);
+        res.setHeader('X-Skytech-Pre-Compatibility-Backup-Source-Commit', validated.sourceCommit);
+
+        const stream = fs.createReadStream(null, {
+          fd: streamedHandle.fd,
+          autoClose: true,
+          start: 0,
+          end: streamedHandle.initialStat.size - 1,
+        });
+        streamedHandle.fd = undefined;
+        const destroyStream = () => stream.destroy();
+        res.once('close', destroyStream);
+        stream.once('close', () => res.removeListener('close', destroyStream));
+        stream.once('error', () => res.destroy());
+        stream.pipe(res);
+        return undefined;
+      } catch (error) {
+        process.stderr.write(`${JSON.stringify({
+          event: 'pre_compatibility_backup_artifact_failed',
+          artifact,
+          code: typeof error?.code === 'string' ? error.code : 'PRE_COMPATIBILITY_BACKUP_ARTIFACT_FAILED',
+        })}\n`);
+        if (res.headersSent) {
+          res.destroy();
+          return undefined;
+        }
+        return res.status(409).json({ ok: false, error: 'Backup artifact unavailable.' });
+      } finally {
+        try { sourceHandle?.close(); } catch { /* the generic request outcome is authoritative */ }
+        try { closeArtifactHandle(receiptHandle); } catch { /* the generic request outcome is authoritative */ }
+        try { closeArtifactHandle(archiveHandle); } catch { /* the generic request outcome is authoritative */ }
+        try { closeArtifactHandle(streamedHandle); } catch { /* the stream owns its descriptor after handoff */ }
+      }
+    };
+  }
+
+  return {
+    handleArtifactDownload,
+    handleBackup,
+    requireArtifactDownloadRequest,
+    requireBackupCapability,
+  };
 }
 
 function registerPreCompatibilityBackupRoute(router, options) {
@@ -744,7 +1177,11 @@ function registerPreCompatibilityBackupControlRoutes(router, { coordinator, ...o
   ) {
     fail('PRE_COMPATIBILITY_BACKUP_COORDINATOR_INVALID', 'A preliminary backup coordinator is required.');
   }
-  const { requireBackupCapability } = createPreCompatibilityBackupHandlers(options);
+  const {
+    handleArtifactDownload,
+    requireArtifactDownloadRequest,
+    requireBackupCapability,
+  } = createPreCompatibilityBackupHandlers(options);
   const endpoint = '/admin/skytech-pre-compatibility-backup';
 
   router.post(endpoint, requireBackupCapability, (req, res) => {
@@ -793,6 +1230,28 @@ function registerPreCompatibilityBackupControlRoutes(router, { coordinator, ...o
       workerStatusCode: operation.statusCode,
     });
   });
+
+  for (const artifact of ['receipt', 'archive']) {
+    const artifactEndpoint = `${endpoint}/artifacts/${artifact}`;
+    router.head(
+      artifactEndpoint,
+      setArtifactResponseSecurityHeaders,
+      requireBackupCapability,
+      (_req, res) => res.set('Allow', 'GET').status(405).json({ ok: false, error: 'Method not allowed.' }),
+    );
+    router.options(
+      artifactEndpoint,
+      setArtifactResponseSecurityHeaders,
+      (_req, res) => res.set('Allow', 'GET').status(405).json({ ok: false, error: 'Method not allowed.' }),
+    );
+    router.get(
+      artifactEndpoint,
+      setArtifactResponseSecurityHeaders,
+      requireBackupCapability,
+      requireArtifactDownloadRequest,
+      handleArtifactDownload(artifact),
+    );
+  }
 }
 
 async function executePreCompatibilityBackup({ requestNonce, ...options }) {

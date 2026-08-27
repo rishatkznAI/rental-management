@@ -19,6 +19,11 @@ const {
   executePreCompatibilityBackup,
   registerPreCompatibilityBackupControlRoutes,
 } = require('../server/routes/pre-compatibility-backup.js');
+const {
+  inspectFullBackupArchive,
+  readStoredZipEntry,
+} = require('../server/lib/full-backup-validation.js');
+const { buildZipArchiveFile } = require('../server/lib/zip-store.js');
 
 const TOKEN = 'b'.repeat(32);
 const SOURCE_COMMIT = 'a'.repeat(40);
@@ -29,6 +34,64 @@ const ARTIFACT_ENDPOINT = '/api/admin/skytech-pre-compatibility-backup/artifacts
 
 function sha256Bytes(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function rewriteCanonicalReceipt(receiptPath, mutate) {
+  const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
+  mutate(receipt);
+  fs.writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+  fs.chmodSync(receiptPath, 0o600);
+}
+
+function bindReceiptToCurrentArchive({ archivePath, receiptPath }) {
+  rewriteCanonicalReceipt(receiptPath, receipt => {
+    const archiveBytes = fs.readFileSync(archivePath);
+    receipt.archive.size = archiveBytes.length;
+    receipt.archive.sha256 = sha256Bytes(archiveBytes);
+  });
+}
+
+function corruptStoredEntryWithoutUpdatingCrc(archivePath, name) {
+  const archive = inspectFullBackupArchive(archivePath);
+  const entry = archive.entries.get(name);
+  assert.ok(entry && entry.size > 0);
+  const fd = fs.openSync(archivePath, 'r+');
+  try {
+    const local = Buffer.alloc(30);
+    fs.readSync(fd, local, 0, local.length, entry.localOffset);
+    const dataOffset = entry.localOffset + 30 + local.readUInt16LE(26) + local.readUInt16LE(28);
+    const byte = Buffer.alloc(1);
+    fs.readSync(fd, byte, 0, 1, dataOffset);
+    byte[0] ^= 0xff;
+    fs.writeSync(fd, byte, 0, 1, dataOffset);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+async function rewriteArchiveEntries(archivePath, mutate) {
+  const archive = inspectFullBackupArchive(archivePath);
+  const entries = [...archive.entries.keys()].map(name => ({
+    name,
+    data: readStoredZipEntry(archive, name),
+    mtime: new Date('2026-08-26T12:34:56.000Z'),
+  }));
+  const result = mutate(entries);
+  const replacementPath = `${archivePath}.replacement`;
+  await buildZipArchiveFile(entries, replacementPath);
+  fs.chmodSync(replacementPath, 0o600);
+  fs.renameSync(replacementPath, archivePath);
+  return result;
+}
+
+async function rewriteArchiveManifest(archivePath, mutate) {
+  return rewriteArchiveEntries(archivePath, entries => {
+    const manifestEntry = entries.find(entry => entry.name === 'manifest.json');
+    const manifest = JSON.parse(manifestEntry.data.toString('utf8'));
+    mutate(manifest);
+    manifestEntry.data = Buffer.from(JSON.stringify(manifest, null, 2));
+  });
 }
 
 function createFixture() {
@@ -163,11 +226,7 @@ async function withDownloadServer(
 ) {
   const expected = expectedEnvironment(fixture.dbPath);
   const currentEnvironment = frozenEnvironment(fixture.dbPath, currentCommit);
-  const sourceProvider = createExclusiveSourceProvider(openVerifiedReadOnlyDatabase({
-    dbPath: fixture.dbPath,
-    expectedEnvironment: expected,
-    env: currentEnvironment,
-  }));
+  let sourceOpenCalls = 0;
   const app = express();
   const router = express.Router();
   registerPreCompatibilityBackupControlRoutes(router, {
@@ -176,19 +235,19 @@ async function withDownloadServer(
       status() { return null; },
     },
     dbPath: fixture.dbPath,
-    openSourceDatabase: () => sourceProvider.acquire(),
-    startupSourceIdentity: sourceProvider.sourceIdentity,
+    openSourceDatabase: () => {
+      sourceOpenCalls += 1;
+      throw new Error('artifact GET must not bind the mutable live SQLite source');
+    },
     expectedEnvironment: expected,
     isBackupOnlyRuntime: () => true,
     env: { ...currentEnvironment, ...routeEnvironmentOverrides },
   });
   app.use('/api', router);
   app.use((_req, res) => res.status(404).json({ ok: false, error: 'Not found' }));
-  try {
-    return await withServer(app, operation);
-  } finally {
-    sourceProvider.close();
-  }
+  const result = await withServer(app, operation);
+  assert.equal(sourceOpenCalls, 0);
+  return result;
 }
 
 function artifactHeaders({
@@ -318,6 +377,131 @@ test('artifact downloads recover a historical deploy with exact bytes, hashes, a
   }
 });
 
+test('historical validation stays bound to the one private receipt and archive descriptor', async () => {
+  const fixture = createFixture();
+  const originalOpenSync = fs.openSync;
+  try {
+    const completed = await createCompletedBackup(fixture);
+    const expectedArchiveBytes = fs.readFileSync(completed.archivePath);
+    const openCounts = new Map([
+      [completed.receiptPath, 0],
+      [completed.archivePath, 0],
+    ]);
+    fs.openSync = function guardedOpenSync(candidate, ...args) {
+      if (openCounts.has(candidate)) {
+        const nextCount = openCounts.get(candidate) + 1;
+        openCounts.set(candidate, nextCount);
+        if (nextCount > 1) throw new Error('historical artifact path was reopened after descriptor binding');
+      }
+      return originalOpenSync.call(this, candidate, ...args);
+    };
+    await withDownloadServer(fixture, async baseUrl => {
+      const response = await fetch(`${baseUrl}${ARTIFACT_ENDPOINT}/archive`, {
+        headers: artifactHeaders(),
+        redirect: 'manual',
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), expectedArchiveBytes);
+    });
+    assert.equal(openCounts.get(completed.receiptPath), 1);
+    assert.equal(openCounts.get(completed.archivePath), 1);
+  } finally {
+    fs.openSync = originalOpenSync;
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('artifact streaming stays bound to validated bytes if the original archive inode changes at handoff', async () => {
+  const fixture = createFixture();
+  const originalCreateReadStream = fs.createReadStream;
+  try {
+    const completed = await createCompletedBackup(fixture);
+    const expectedArchiveBytes = fs.readFileSync(completed.archivePath);
+    const expectedArchiveSha256 = sha256Bytes(expectedArchiveBytes);
+    let originalArchiveMutated = false;
+    fs.createReadStream = function mutateOriginalAtStreamHandoff(candidate, options) {
+      if (
+        !originalArchiveMutated
+        && candidate === null
+        && Number.isSafeInteger(options?.fd)
+      ) {
+        const originalFd = fs.openSync(completed.archivePath, 'r+');
+        try {
+          const finalOffset = expectedArchiveBytes.length - 1;
+          const byte = Buffer.alloc(1);
+          fs.readSync(originalFd, byte, 0, 1, finalOffset);
+          byte[0] ^= 0xff;
+          fs.writeSync(originalFd, byte, 0, 1, finalOffset);
+          fs.fsyncSync(originalFd);
+        } finally {
+          fs.closeSync(originalFd);
+        }
+        originalArchiveMutated = true;
+      }
+      return originalCreateReadStream.call(this, candidate, options);
+    };
+
+    await withDownloadServer(fixture, async baseUrl => {
+      const response = await fetch(`${baseUrl}${ARTIFACT_ENDPOINT}/archive`, {
+        headers: artifactHeaders(),
+        redirect: 'manual',
+      });
+      assert.equal(response.status, 200);
+      assert.equal(
+        response.headers.get('x-skytech-pre-compatibility-backup-content-sha256'),
+        expectedArchiveSha256,
+      );
+      const deliveredBytes = Buffer.from(await response.arrayBuffer());
+      assert.equal(sha256Bytes(deliveredBytes), expectedArchiveSha256);
+      assert.deepEqual(deliveredBytes, expectedArchiveBytes);
+    });
+    assert.equal(originalArchiveMutated, true);
+    assert.notDeepEqual(fs.readFileSync(completed.archivePath), expectedArchiveBytes);
+  } finally {
+    fs.createReadStream = originalCreateReadStream;
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('historical validation removes its private SQLite temp directory after extraction failure', async () => {
+  const fixture = createFixture();
+  const originalOpenSync = fs.openSync;
+  const temporaryPrefix = 'skytech-pre-compatibility-history-';
+  const temporaryDirectories = () => fs.readdirSync(os.tmpdir())
+    .filter(name => name.startsWith(temporaryPrefix))
+    .sort();
+  try {
+    await createCompletedBackup(fixture);
+    const before = temporaryDirectories();
+    let injected = false;
+    fs.openSync = function failingExtractionOpen(candidate, ...args) {
+      if (
+        !injected
+        && typeof candidate === 'string'
+        && path.basename(candidate) === 'app.sqlite'
+        && path.basename(path.dirname(candidate)).startsWith(temporaryPrefix)
+      ) {
+        injected = true;
+        throw Object.assign(new Error('injected extraction failure'), { code: 'EIO' });
+      }
+      return originalOpenSync.call(this, candidate, ...args);
+    };
+    const { result: response } = await captureStderr(() => withDownloadServer(
+      fixture,
+      baseUrl => fetch(`${baseUrl}${ARTIFACT_ENDPOINT}/archive`, {
+        headers: artifactHeaders(),
+        redirect: 'manual',
+      }),
+    ));
+    assert.equal(injected, true);
+    assert.equal(response.status, 409);
+    assert.deepEqual(temporaryDirectories(), before);
+  } finally {
+    fs.openSync = originalOpenSync;
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test('artifact routes preserve the token and nonce gate and require the exact receipt source commit', async () => {
   const fixture = createFixture();
   try {
@@ -428,7 +612,7 @@ test('artifact routes preserve the token and nonce gate and require the exact re
         assert.equal(response.status, 403);
         assert.deepEqual(await response.json(), { ok: false, error: 'Forbidden' });
       });
-      const { result: missingDirectoryResponse } = await captureStderr(() => withDownloadServer(
+      const { result: missingDirectoryResponse, output } = await captureStderr(() => withDownloadServer(
         fixture,
         baseUrl => fetch(`${baseUrl}${ARTIFACT_ENDPOINT}/receipt`, {
           headers: artifactHeaders(),
@@ -441,6 +625,9 @@ test('artifact routes preserve the token and nonce gate and require the exact re
       );
       assert.equal(fs.existsSync(backupDirectory), false);
       assert.equal(fs.existsSync(heldBackupDirectory), true);
+      assert.doesNotMatch(output, new RegExp(TOKEN));
+      assert.doesNotMatch(output, new RegExp(REQUEST_NONCE));
+      assert.doesNotMatch(output, new RegExp(SOURCE_COMMIT));
     } finally {
       fs.renameSync(heldBackupDirectory, backupDirectory);
     }
@@ -508,6 +695,8 @@ test('artifact downloads fail closed for symlinks, non-0600 modes, and multiple 
         assert.equal(response.headers.get('access-control-allow-origin'), null);
         assert.equal(response.headers.get('location'), null);
         assert.doesNotMatch(output, new RegExp(TOKEN));
+        assert.doesNotMatch(output, new RegExp(REQUEST_NONCE));
+        assert.doesNotMatch(output, new RegExp(SOURCE_COMMIT));
         testCase.verify?.(completed);
       } finally {
         fs.rmSync(fixture.root, { recursive: true, force: true });
@@ -516,24 +705,108 @@ test('artifact downloads fail closed for symlinks, non-0600 modes, and multiple 
   }
 });
 
-test('artifact downloads revalidate receipt, archive, source inode/state, SQLite, and business inventory', async t => {
+test('artifact downloads preserve exact historical bytes after live DB, WAL, business-file, or inode changes', async t => {
+  for (const testCase of [
+    {
+      name: 'business-file state changes',
+      mutate(fixture) {
+        fs.writeFileSync(fixture.businessFilePath, 'legitimate-post-backup-business-photo');
+      },
+    },
+    {
+      name: 'SQLite and WAL state change',
+      mutate(fixture) {
+        const db = new Database(fixture.dbPath);
+        db.pragma('journal_mode = WAL');
+        db.prepare('UPDATE app_data SET json = ? WHERE name = ?')
+          .run(JSON.stringify([{ id: 'C-2', name: 'Current live client' }]), 'clients');
+        assert.equal(fs.existsSync(`${fixture.dbPath}-wal`), true);
+        return () => db.close();
+      },
+    },
+    {
+      name: 'SQLite inode is legitimately replaced',
+      mutate(fixture) {
+        const oldInode = fs.statSync(fixture.dbPath).ino;
+        const replacementPath = path.join(fixture.root, 'replacement.sqlite');
+        fs.copyFileSync(fixture.dbPath, replacementPath);
+        fs.renameSync(replacementPath, fixture.dbPath);
+        assert.notEqual(fs.statSync(fixture.dbPath).ino, oldInode);
+      },
+    },
+  ]) {
+    await t.test(testCase.name, async () => {
+      const fixture = createFixture();
+      let cleanup;
+      try {
+        const completed = await createCompletedBackup(fixture);
+        const historicalReceiptBytes = fs.readFileSync(completed.receiptPath);
+        const historicalArchiveBytes = fs.readFileSync(completed.archivePath);
+        cleanup = testCase.mutate(fixture, completed);
+
+        const { output } = await captureStderr(() => withDownloadServer(fixture, async baseUrl => {
+          for (const [artifact, expectedBytes] of [
+            ['receipt', historicalReceiptBytes],
+            ['archive', historicalArchiveBytes],
+          ]) {
+            const response = await fetch(`${baseUrl}${ARTIFACT_ENDPOINT}/${artifact}`, {
+              headers: artifactHeaders(),
+              redirect: 'manual',
+            });
+            assert.equal(response.status, 200, artifact);
+            assert.deepEqual(Buffer.from(await response.arrayBuffer()), expectedBytes, artifact);
+          }
+        }));
+        assert.doesNotMatch(output, new RegExp(TOKEN));
+        assert.doesNotMatch(output, new RegExp(REQUEST_NONCE));
+      } finally {
+        try { cleanup?.(); } catch { /* fixture cleanup remains authoritative */ }
+        fs.rmSync(fixture.root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('artifact downloads revalidate receipt, archive bytes, every ZIP entry, manifest, and archived contents', async t => {
   for (const testCase of [
     {
       name: 'receipt hash mutation',
       mutate(_fixture, { receiptPath }) {
-        const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
-        receipt.archive.sha256 = '0'.repeat(64);
-        fs.writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
-        fs.chmodSync(receiptPath, 0o600);
+        rewriteCanonicalReceipt(receiptPath, receipt => {
+          receipt.archive.sha256 = '0'.repeat(64);
+        });
+      },
+    },
+    {
+      name: 'noncanonical receipt bytes',
+      mutate(_fixture, { receiptPath }) {
+        fs.appendFileSync(receiptPath, ' ');
       },
     },
     {
       name: 'historical receipt runtime mutation',
       mutate(_fixture, { receiptPath }) {
-        const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
-        receipt.runtime.deployment.railwayEnvironment = 'staging';
-        fs.writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
-        fs.chmodSync(receiptPath, 0o600);
+        rewriteCanonicalReceipt(receiptPath, receipt => {
+          receipt.runtime.deployment.railwayEnvironment = 'staging';
+        });
+      },
+    },
+    {
+      name: 'numeric coercions in string-valued captured source identity fields',
+      mutate(_fixture, { receiptPath }) {
+        rewriteCanonicalReceipt(receiptPath, receipt => {
+          receipt.source.identity.dev = Number(receipt.source.identity.dev);
+          receipt.source.identity.ino = Number(receipt.source.identity.ino);
+          for (const phase of ['before', 'after']) {
+            for (const file of ['database', 'wal', 'shm']) {
+              const state = receipt.source[phase][file];
+              if (state?.exists !== true) continue;
+              for (const field of ['dev', 'ino', 'mode', 'mtimeMs', 'ctimeMs']) {
+                state[field] = Number(state[field]);
+              }
+            }
+          }
+        });
       },
     },
     {
@@ -553,24 +826,70 @@ test('artifact downloads revalidate receipt, archive, source inode/state, SQLite
       },
     },
     {
-      name: 'business inventory mutation',
-      mutate(fixture) { fs.writeFileSync(fixture.businessFilePath, 'mutated-business-photo'); },
-    },
-    {
-      name: 'SQLite state mutation',
-      mutate(fixture) {
-        const db = new Database(fixture.dbPath);
-        db.prepare('UPDATE app_data SET json = ? WHERE name = ?')
-          .run(JSON.stringify([{ id: 'C-2', name: 'Mutated client' }]), 'clients');
-        db.close();
+      name: 'internal entry CRC corruption with a receipt-bound outer archive hash',
+      mutate(_fixture, completed) {
+        corruptStoredEntryWithoutUpdatingCrc(completed.archivePath, 'README-backup.txt');
+        bindReceiptToCurrentArchive(completed);
       },
     },
     {
-      name: 'SQLite inode replacement',
-      mutate(fixture) {
-        const replacementPath = path.join(fixture.root, 'replacement.sqlite');
-        fs.copyFileSync(fixture.dbPath, replacementPath);
-        fs.renameSync(replacementPath, fixture.dbPath);
+      name: 'valid-CRC archived business-file corruption with a receipt-bound outer archive hash',
+      async mutate(_fixture, completed) {
+        await rewriteArchiveEntries(completed.archivePath, entries => {
+          const businessEntry = entries.find(entry => entry.name === 'files/uploads/equipment/photo.jpg');
+          assert.ok(businessEntry?.data?.length > 0);
+          businessEntry.data[0] ^= 0xff;
+        });
+        bindReceiptToCurrentArchive(completed);
+      },
+    },
+    {
+      name: 'valid-CRC SQLite corruption with receipt-bound outer and database hashes',
+      async mutate(_fixture, completed) {
+        const databaseSha256 = await rewriteArchiveEntries(completed.archivePath, entries => {
+          const databaseEntry = entries.find(entry => entry.name === 'database/app.sqlite');
+          assert.ok(databaseEntry?.data?.length > 0);
+          databaseEntry.data[0] ^= 0xff;
+          return sha256Bytes(databaseEntry.data);
+        });
+        bindReceiptToCurrentArchive(completed);
+        rewriteCanonicalReceipt(completed.receiptPath, receipt => {
+          receipt.archive.databaseFileSha256 = databaseSha256;
+        });
+      },
+    },
+    {
+      name: 'valid-CRC manifest inconsistency with a receipt-bound outer archive hash',
+      async mutate(_fixture, completed) {
+        await rewriteArchiveManifest(completed.archivePath, manifest => {
+          manifest.files.localFilesCount += 1;
+        });
+        bindReceiptToCurrentArchive(completed);
+      },
+    },
+    {
+      name: 'stringly typed manifest counts with a receipt-bound outer archive hash',
+      async mutate(_fixture, completed) {
+        await rewriteArchiveManifest(completed.archivePath, manifest => {
+          for (const key of [
+            'includedFilesCount',
+            'localFilesCount',
+            'embeddedPhotosCount',
+            'skippedFilesCount',
+          ]) {
+            manifest[key] = String(manifest[key]);
+          }
+          for (const key of [
+            'includedCount',
+            'includedFilesCount',
+            'localFilesCount',
+            'embeddedPhotosCount',
+            'skippedFilesCount',
+          ]) {
+            manifest.files[key] = String(manifest.files[key]);
+          }
+        });
+        bindReceiptToCurrentArchive(completed);
       },
     },
   ]) {
@@ -578,7 +897,7 @@ test('artifact downloads revalidate receipt, archive, source inode/state, SQLite
       const fixture = createFixture();
       try {
         const completed = await createCompletedBackup(fixture);
-        testCase.mutate(fixture, completed);
+        await testCase.mutate(fixture, completed);
         const { result: response, output } = await captureStderr(() => withDownloadServer(
           fixture,
           baseUrl => fetch(`${baseUrl}${ARTIFACT_ENDPOINT}/archive`, {
@@ -591,6 +910,8 @@ test('artifact downloads revalidate receipt, archive, source inode/state, SQLite
         assert.equal(response.headers.get('x-skytech-pre-compatibility-backup-content-sha256'), null);
         assert.equal(response.headers.get('x-skytech-pre-compatibility-backup-source-commit'), null);
         assert.doesNotMatch(output, new RegExp(TOKEN));
+        assert.doesNotMatch(output, new RegExp(REQUEST_NONCE));
+        assert.doesNotMatch(output, new RegExp(SOURCE_COMMIT));
       } finally {
         fs.rmSync(fixture.root, { recursive: true, force: true });
       }

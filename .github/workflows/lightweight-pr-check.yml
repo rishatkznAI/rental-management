@@ -45,3 +45,11 @@ jobs:
 
       - name: Run API security route tests
         run: node --test tests/api-security-routes.test.js
+
+      - name: Run historical backup recovery security tests
+        run: >-
+          node --test
+          tests/pre-compatibility-backup-artifact-download.test.js
+          tests/pre-compatibility-backup-runtime.test.js
+          tests/historical-backup-recovery-workflow.test.js
+          tests/historical-backup-route-release-workflow.test.js

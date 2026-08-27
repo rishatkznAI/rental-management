@@ -86,6 +86,27 @@ export type AppDisabledDetail = {
   message: string;
 };
 
+export type PublicVersionInfo = {
+  ok: true;
+  app?: {
+    disabled?: boolean;
+    message?: string;
+  };
+};
+
+export async function getPublicVersion(): Promise<PublicVersionInfo> {
+  const response = await fetch(`${API_BASE_URL}/api/version`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+    credentials: 'omit',
+    redirect: 'error',
+  });
+  if (!response.ok) throw new ApiError('/api/version is unavailable', response.status);
+  const payload = await response.json().catch(() => null) as PublicVersionInfo | null;
+  if (!payload || payload.ok !== true) throw new Error('/api/version must return JSON with ok=true');
+  return payload;
+}
+
 export type PaginationMeta = {
   page: number;
   pageSize: number;

@@ -17,6 +17,19 @@ test('frontend login persists bearer token under the auth token key', () => {
   assert.match(apiSource, /window\.localStorage\.removeItem\(AUTH_TOKEN_KEY\)/);
 });
 
+test('frontend conservation boot probe is public, credentialless, and rejects redirects', () => {
+  assert.match(authContextSource, /getPublicVersion\(\)/);
+  const start = apiSource.indexOf('export async function getPublicVersion');
+  const end = apiSource.indexOf('\nexport type PaginationMeta', start);
+  assert.ok(start >= 0 && end > start);
+  const publicVersionSource = apiSource.slice(start, end);
+  assert.match(publicVersionSource, /headers: \{ Accept: 'application\/json' \}/);
+  assert.match(publicVersionSource, /credentials: 'omit'/);
+  assert.match(publicVersionSource, /redirect: 'error'/);
+  assert.match(publicVersionSource, /payload\.ok !== true/);
+  assert.doesNotMatch(publicVersionSource, /Authorization|Bearer|getToken|Content-Type/);
+});
+
 test('frontend stores and restores the authenticated user snapshot', () => {
   assert.match(authContextSource, /const AUTH_USER_KEY = 'app_auth_user'/);
   assert.match(authContextSource, /function readStoredUser\(\): AuthUser \| null/);

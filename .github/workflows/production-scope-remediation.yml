@@ -86,7 +86,7 @@ jobs:
     steps:
       - name: Mask and validate secrets
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
           REMEDIATION_SIGNING_SECRET: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET }}
           BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
           MODE: ${{ inputs.mode }}
@@ -110,18 +110,17 @@ jobs:
 
       - name: Verify exact Railway target and deployed commit
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
           EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
         run: |
           [[ "$EXPECTED_DEPLOYED_SHA" =~ ^[a-f0-9]{40}$ ]]
           target_dir="$RUNNER_TEMP/production-scope-remediation-target"
           mkdir -p "$target_dir"
           cd "$target_dir"
-          railway link \
+          railway status \
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_SERVICE_ID"
-          railway status --json > railway-status.json
+            --json > railway-status.json
           test "$(jq -r '.id' railway-status.json)" = "$RAILWAY_PROJECT_ID"
           jq -e \
             --arg environment "$RAILWAY_ENVIRONMENT_ID" \
@@ -326,14 +325,18 @@ jobs:
       - name: Download, verify, and encrypt coherent backup off-volume
         if: inputs.mode == 'backup'
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
           BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
         run: |
           filename="$(jq -er '.result.receipt.filename' remediation-response.json)"
           expected_sha="$(jq -er '.result.receipt.sha256' remediation-response.json)"
           expected_size="$(jq -er '.result.receipt.sizeBytes' remediation-response.json)"
           cd "$RUNNER_TEMP/production-scope-remediation-target"
-          railway volume files --volume "$RAILWAY_VOLUME_ID" download \
+          railway volume \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            files --volume "$RAILWAY_VOLUME_ID" download \
             "/backups/$filename" "$GITHUB_WORKSPACE/remediation-backup.zip" --overwrite
           test "$(sha256sum "$GITHUB_WORKSPACE/remediation-backup.zip" | awk '{print $1}')" = "$expected_sha"
           test "$(stat -c '%s' "$GITHUB_WORKSPACE/remediation-backup.zip")" = "$expected_size"

@@ -1137,6 +1137,11 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
   assert.match(workflow, /concurrency:[\s\S]*group: production-release/);
   assert.match(deployWorkflow, /concurrency:[\s\S]*group: production-release/);
   assert.match(remediationWorkflow, /concurrency:[\s\S]*group: production-release/);
+  for (const protectedWorkflow of [workflow, remediationWorkflow]) {
+    assert.match(protectedWorkflow, /npm install --global @railway\/cli@5\.45\.0/);
+    assert.match(protectedWorkflow, /test "\$\(railway --version\)" = "railway 5\.45\.0"/);
+    assert.doesNotMatch(protectedWorkflow, /@railway\/cli@4\.60\.0/);
+  }
   assert.match(workflow, /EXPECTED_REPOSITORY: rishatkznAI\/rental-management/);
   assert.match(workflow, /EXPECTED_REF: refs\/heads\/main/);
   assert.match(workflow, /test "\$GITHUB_REPOSITORY" = "\$EXPECTED_REPOSITORY"/);

@@ -37,6 +37,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
+const {
+  productionFrontendOrigins,
+} = require('./lib/production-frontend-origins');
 const fetch   = require('node-fetch');
 const crypto  = require('crypto');
 const path    = require('path');
@@ -372,16 +375,13 @@ try {
 }
 
 const ALLOWED_ORIGINS = [
-  'https://rishatkznai.github.io',        // GitHub Pages (production)
+  ...productionFrontendOrigins(),
   ...(!isProductionRuntime() ? [
     'http://localhost:5173',               // Vite dev server
     'http://127.0.0.1:5173',               // Vite dev server (Playwright / local)
     'http://localhost:4173',               // Vite preview
     'http://127.0.0.1:4173',               // Vite preview (Playwright / local)
   ] : []),
-  ...(process.env.CORS_ORIGIN             // Railway / любой другой домен через env
-    ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()).filter(origin => origin && origin !== '*')
-    : []),
 ];
 const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i;
 app.use(cors({

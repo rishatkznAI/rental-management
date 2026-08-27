@@ -14,6 +14,9 @@ const {
 const {
   createPreCompatibilityBackupCoordinator,
 } = require('./lib/pre-compatibility-backup-coordinator');
+const {
+  productionFrontendOrigins,
+} = require('./lib/production-frontend-origins');
 
 const STARTED_AT = new Date().toISOString();
 const DB_PATH = process.env.DB_PATH;
@@ -268,13 +271,7 @@ function buildInfo() {
 }
 
 function backupOnlyVersionAllowedOrigins() {
-  return new Set([
-    'https://rishatkznai.github.io',
-    ...String(process.env.CORS_ORIGIN || '')
-      .split(',')
-      .map(origin => origin.trim())
-      .filter(origin => origin && origin !== '*'),
-  ]);
+  return productionFrontendOrigins();
 }
 
 function backupOnlyVersionCors(req, res, next) {

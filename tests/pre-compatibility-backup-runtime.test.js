@@ -1607,7 +1607,7 @@ test('backup-only version CORS grants only a credentialless public GET to an exa
     registerBackupOnlyHealthRoutes(app);
     app.use((_req, response) => response.status(404).json({ ok: false, error: 'Not found' }));
     await withServer(app, async baseUrl => {
-      const trustedOrigin = 'https://rishatkznai.github.io';
+      const trustedOrigin = 'https://app.skytech-rent.ru';
       const preflight = await fetch(`${baseUrl}/api/version`, {
         method: 'OPTIONS',
         headers: {
@@ -1628,12 +1628,19 @@ test('backup-only version CORS grants only a credentialless public GET to an exa
       assert.equal(versionBody.app.disabled, true);
       assert.equal(versionBody.mode, 'pre-compatibility-backup-only');
 
-      const disallowed = await fetch(`${baseUrl}/api/version`, {
-        headers: { Origin: 'https://untrusted.example' },
-      });
-      assert.equal(disallowed.status, 403);
-      assert.equal(disallowed.headers.has('access-control-allow-origin'), false);
-      assert.deepEqual(await disallowed.json(), { ok: false, error: 'Forbidden' });
+      for (const disallowedOrigin of [
+        'https://untrusted.example',
+        'https://app.skytech-rent.ru.evil.example',
+        'http://app.skytech-rent.ru',
+        'https://app.skytech-rent.ru/',
+      ]) {
+        const disallowed = await fetch(`${baseUrl}/api/version`, {
+          headers: { Origin: disallowedOrigin },
+        });
+        assert.equal(disallowed.status, 403, disallowedOrigin);
+        assert.equal(disallowed.headers.has('access-control-allow-origin'), false, disallowedOrigin);
+        assert.deepEqual(await disallowed.json(), { ok: false, error: 'Forbidden' }, disallowedOrigin);
+      }
 
       const health = await fetch(`${baseUrl}/health`, { headers: { Origin: trustedOrigin } });
       assert.equal(health.status, 200);

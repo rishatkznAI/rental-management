@@ -34,31 +34,119 @@ function backupTimestamp(date = new Date()) {
   return date.toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
 }
 
+function sameStatIdentity(left, right) {
+  return left?.dev === right?.dev && left?.ino === right?.ino;
+}
+
+function isOwnedStableDirectory(stat, { effectiveUid, device } = {}) {
+  return Boolean(
+    stat?.isDirectory?.()
+    && !stat.isSymbolicLink?.()
+    && stat.uid === effectiveUid
+    && (device === undefined || stat.dev === device)
+    && (stat.mode & 0o7000) === 0
+    && (stat.mode & 0o700) === 0o700
+    && (stat.mode & 0o022) === 0,
+  );
+}
+
 function backupDirectoryPath(dbPath) {
   const databaseDirectory = path.dirname(path.resolve(dbPath));
   const backupDirectory = path.join(databaseDirectory, 'backups');
-  let directoryStat;
+  const effectiveUid = typeof process.geteuid === 'function' ? process.geteuid() : null;
+  let parentFd;
+  let directoryFd;
   try {
-    directoryStat = fs.lstatSync(backupDirectory);
+    if (!Number.isSafeInteger(effectiveUid) || effectiveUid < 0) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The effective backup runtime owner is unavailable.');
+    }
+    const parentPathStat = fs.lstatSync(databaseDirectory);
+    if (
+      !isOwnedStableDirectory(parentPathStat, { effectiveUid })
+      || fs.realpathSync(databaseDirectory) !== databaseDirectory
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup parent directory is unsafe.');
+    }
+    parentFd = fs.openSync(
+      databaseDirectory,
+      fs.constants.O_RDONLY
+        | (fs.constants.O_DIRECTORY || 0)
+        | (fs.constants.O_NOFOLLOW || 0),
+    );
+    const parentOpenedStat = fs.fstatSync(parentFd);
+    if (
+      !isOwnedStableDirectory(parentOpenedStat, { effectiveUid })
+      || !sameStatIdentity(parentPathStat, parentOpenedStat)
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup parent directory changed before opening.');
+    }
+
+    let directoryStat;
+    try {
+      directoryStat = fs.lstatSync(backupDirectory);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      fs.mkdirSync(backupDirectory, { recursive: false, mode: 0o700 });
+      fs.fsyncSync(parentFd);
+      directoryStat = fs.lstatSync(backupDirectory);
+    }
+    if (
+      !isOwnedStableDirectory(directoryStat, { effectiveUid, device: parentOpenedStat.dev })
+      || fs.realpathSync(backupDirectory) !== backupDirectory
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory is unsafe.');
+    }
+    directoryFd = fs.openSync(
+      backupDirectory,
+      fs.constants.O_RDONLY
+        | (fs.constants.O_DIRECTORY || 0)
+        | (fs.constants.O_NOFOLLOW || 0),
+    );
+    const openedStat = fs.fstatSync(directoryFd);
+    if (
+      !isOwnedStableDirectory(openedStat, { effectiveUid, device: parentOpenedStat.dev })
+      || !sameStatIdentity(directoryStat, openedStat)
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory changed before opening.');
+    }
+    if ((openedStat.mode & 0o777) !== 0o700) {
+      fs.fchmodSync(directoryFd, 0o700);
+    }
+    fs.fsyncSync(directoryFd);
+    const privateStat = fs.fstatSync(directoryFd);
+    if (
+      !isOwnedStableDirectory(privateStat, { effectiveUid, device: parentOpenedStat.dev })
+      || !sameStatIdentity(openedStat, privateStat)
+      || (privateStat.mode & 0o777) !== 0o700
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory is not private.');
+    }
+
+    const pathStat = fs.lstatSync(backupDirectory);
+    const parentPathStatAfter = fs.lstatSync(databaseDirectory);
+    if (
+      !isOwnedStableDirectory(pathStat, { effectiveUid, device: parentOpenedStat.dev })
+      || !sameStatIdentity(privateStat, pathStat)
+      || (pathStat.mode & 0o777) !== 0o700
+      || fs.realpathSync(backupDirectory) !== backupDirectory
+      || !isOwnedStableDirectory(parentPathStatAfter, { effectiveUid })
+      || !sameStatIdentity(parentOpenedStat, parentPathStatAfter)
+      || fs.realpathSync(databaseDirectory) !== databaseDirectory
+    ) {
+      fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory changed after securing.');
+    }
+    return backupDirectory;
   } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
-    fs.mkdirSync(backupDirectory, { recursive: false, mode: 0o700 });
-    fs.chmodSync(backupDirectory, 0o700);
-    fsyncDirectory(databaseDirectory);
-    directoryStat = fs.lstatSync(backupDirectory);
+    if (error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE') throw error;
+    fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory could not be secured.');
+  } finally {
+    if (directoryFd !== undefined) {
+      try { fs.closeSync(directoryFd); } catch { /* directory validation already has an authoritative result */ }
+    }
+    if (parentFd !== undefined) {
+      try { fs.closeSync(parentFd); } catch { /* directory validation already has an authoritative result */ }
+    }
   }
-  if (
-    !directoryStat.isDirectory()
-    || directoryStat.isSymbolicLink()
-    || fs.realpathSync(backupDirectory) !== backupDirectory
-  ) {
-    fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory is unsafe.');
-  }
-  directoryStat = fs.lstatSync(backupDirectory);
-  if ((directoryStat.mode & 0o077) !== 0) {
-    fail('PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE', 'The preliminary backup directory is not private.');
-  }
-  return backupDirectory;
 }
 
 function backupOutputPath(dbPath, filename) {
@@ -84,43 +172,59 @@ function createExclusiveDurableFile(filePath, bytes) {
       | (fs.constants.O_NOFOLLOW || 0),
     0o600,
   );
+  let outputStat;
   try {
     fs.fchmodSync(fd, 0o600);
     writeAll(fd, bytes);
     fs.fsyncSync(fd);
     const stat = fs.fstatSync(fd);
-    if (!stat.isFile() || stat.nlink !== 1 || stat.size !== bytes.length || (stat.mode & 0o077) !== 0) {
+    if (!stat.isFile() || stat.nlink !== 1 || stat.size !== bytes.length || (stat.mode & 0o7777) !== 0o600) {
       fail('PRE_COMPATIBILITY_BACKUP_OUTPUT_UNSAFE', 'A preliminary backup control file is unsafe.');
     }
+    outputStat = stat;
   } finally {
     fs.closeSync(fd);
   }
   fsyncDirectory(path.dirname(filePath));
+  return outputStat;
 }
 
-function publishAtomicBuffer(finalPath, bytes, operationId, onPublished = () => {}) {
+function linkExclusive(sourcePath, finalPath) {
+  try {
+    fs.linkSync(sourcePath, finalPath);
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      fail('PRE_COMPATIBILITY_BACKUP_ALREADY_EXISTS', 'A preliminary backup output already exists.');
+    }
+    throw error;
+  }
+}
+
+function publishAtomicBuffer(finalPath, bytes, operationId) {
   if (fs.existsSync(finalPath)) {
     fail('PRE_COMPATIBILITY_BACKUP_ALREADY_EXISTS', 'A preliminary backup output already exists.');
   }
   const temporaryPath = path.join(path.dirname(finalPath), `.${path.basename(finalPath)}.${operationId}.tmp`);
-  try {
-    createExclusiveDurableFile(temporaryPath, bytes);
-    if (fs.existsSync(finalPath)) {
-      fail('PRE_COMPATIBILITY_BACKUP_ALREADY_EXISTS', 'A preliminary backup output already exists.');
-    }
-    fs.linkSync(temporaryPath, finalPath);
-    onPublished();
-    fs.unlinkSync(temporaryPath);
-    fsyncDirectory(path.dirname(finalPath));
-    const stat = fs.lstatSync(finalPath);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) {
-      fail('PRE_COMPATIBILITY_BACKUP_OUTPUT_UNSAFE', 'The published preliminary backup output is unsafe.');
-    }
-    return stat;
-  } catch (error) {
-    try { fs.rmSync(temporaryPath, { force: true }); } catch { /* original error wins */ }
-    throw error;
+  const temporaryStat = createExclusiveDurableFile(temporaryPath, bytes);
+  if (fs.existsSync(finalPath)) {
+    fail('PRE_COMPATIBILITY_BACKUP_ALREADY_EXISTS', 'A preliminary backup output already exists.');
   }
+  linkExclusive(temporaryPath, finalPath);
+  fs.unlinkSync(temporaryPath);
+  fsyncDirectory(path.dirname(finalPath));
+  const stat = fs.lstatSync(finalPath);
+  if (
+    !stat.isFile()
+    || stat.isSymbolicLink()
+    || stat.nlink !== 1
+    || (stat.mode & 0o7777) !== 0o600
+    || !sameStatIdentity(stat, temporaryStat)
+    || stat.size !== temporaryStat.size
+    || stat.uid !== temporaryStat.uid
+  ) {
+    fail('PRE_COMPATIBILITY_BACKUP_OUTPUT_UNSAFE', 'The published preliminary backup output is unsafe.');
+  }
+  return stat;
 }
 
 function publishAtomicFile(sourcePath, finalPath, operationId) {
@@ -131,6 +235,7 @@ function publishAtomicFile(sourcePath, finalPath, operationId) {
   const sourceFd = fs.openSync(sourcePath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   const temporaryPath = path.join(path.dirname(finalPath), `.${path.basename(finalPath)}.${operationId}.tmp`);
   let targetFd;
+  let targetIdentity;
   let size = 0;
   const buffer = Buffer.allocUnsafe(1024 * 1024);
   try {
@@ -170,28 +275,36 @@ function publishAtomicFile(sourcePath, finalPath, operationId) {
       || !targetStat.isFile()
       || targetStat.nlink !== 1
       || targetStat.size !== size
-      || (targetStat.mode & 0o077) !== 0
+      || (targetStat.mode & 0o7777) !== 0o600
     ) {
       fail('PRE_COMPATIBILITY_BACKUP_ARCHIVE_CHANGED', 'The preliminary backup archive changed before publication.');
     }
+    targetIdentity = targetStat;
     fs.closeSync(targetFd);
     targetFd = undefined;
     fs.closeSync(sourceFd);
     if (fs.existsSync(finalPath)) {
       fail('PRE_COMPATIBILITY_BACKUP_ALREADY_EXISTS', 'A preliminary backup output already exists.');
     }
-    fs.linkSync(temporaryPath, finalPath);
+    linkExclusive(temporaryPath, finalPath);
     fs.unlinkSync(temporaryPath);
     fsyncDirectory(path.dirname(finalPath));
     const finalStat = fs.lstatSync(finalPath);
-    if (!finalStat.isFile() || finalStat.isSymbolicLink() || finalStat.nlink !== 1 || finalStat.size !== size) {
+    if (
+      !finalStat.isFile()
+      || finalStat.isSymbolicLink()
+      || finalStat.nlink !== 1
+      || finalStat.size !== size
+      || (finalStat.mode & 0o7777) !== 0o600
+      || !sameStatIdentity(finalStat, targetIdentity)
+      || finalStat.uid !== targetIdentity.uid
+    ) {
       fail('PRE_COMPATIBILITY_BACKUP_OUTPUT_UNSAFE', 'The published preliminary backup archive is unsafe.');
     }
     return finalStat;
   } finally {
     if (targetFd !== undefined) fs.closeSync(targetFd);
     try { fs.closeSync(sourceFd); } catch { /* it may already be closed after successful copy */ }
-    try { fs.rmSync(temporaryPath, { force: true }); } catch { /* original error wins */ }
   }
 }
 
@@ -408,8 +521,6 @@ function createPreCompatibilityBackupHandlers({
     let backup = null;
     let sourceHandle = null;
     let outputPath = null;
-    let published = false;
-    let receiptCommitted = false;
     let transactionStarted = false;
     let operationStage = 'authorize';
     const requestNonce = req.preCompatibilityBackupNonce;
@@ -509,7 +620,6 @@ function createPreCompatibilityBackupHandlers({
       outputPath = backupOutputPath(dbPath, filename);
       const outputStat = publishAtomicFile(backup.path, outputPath, operationId);
       operationStage = 'archive-published';
-      published = true;
       const archiveSha256BeforeValidation = fileSha256(outputPath);
       const publishedValidation = validatePreCompatibilityBackup({
         sourceDb: db,
@@ -598,21 +708,12 @@ function createPreCompatibilityBackupHandlers({
       const receiptBytes = Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`);
       const receiptSha256 = crypto.createHash('sha256').update(receiptBytes).digest('hex');
       const response = responseFromReceipt(receipt, receiptSha256, false);
-      publishAtomicBuffer(receiptPath, receiptBytes, operationId, () => {
-        receiptCommitted = true;
-      });
+      publishAtomicBuffer(receiptPath, receiptBytes, operationId);
       operationStage = 'receipt-published';
       return res.status(201).json(response);
     } catch (error) {
       if (transactionStarted) {
         try { sourceHandle?.db?.exec('ROLLBACK'); } catch { /* original error wins */ }
-      }
-      if (!receiptCommitted && published && outputPath && fs.existsSync(outputPath)) {
-        try {
-          fs.rmSync(outputPath, { force: false });
-          fsyncDirectory(path.dirname(outputPath));
-          published = false;
-        } catch { /* persistent lock still prevents unsafe retry */ }
       }
       process.stderr.write(`${JSON.stringify({
         event: 'pre_compatibility_backup_failed',
@@ -622,9 +723,6 @@ function createPreCompatibilityBackupHandlers({
       return res.status(409).json({ ok: false, error: 'Preliminary backup failed.' });
     } finally {
       try { sourceHandle?.close(); } catch { /* request outcome is already fixed */ }
-      if (!published && outputPath && fs.existsSync(outputPath)) {
-        try { fs.rmSync(outputPath, { force: true }); } catch { /* persistent lock prevents reuse */ }
-      }
       try { if (backup) cleanupBackupArchive(backup); } catch { /* durable outcome must not be replaced by temp cleanup */ }
       operationInFlight = false;
     }

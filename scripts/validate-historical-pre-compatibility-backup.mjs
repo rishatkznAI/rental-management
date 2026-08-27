@@ -28,9 +28,11 @@ export const HISTORICAL_PRE_COMPATIBILITY_BACKUP = Object.freeze({
   requestNonce: '108970e3-9adf-4369-ba48-dff4fcfb1d20',
   archiveFilename: 'skytech-pre-clean-reset-20260827T143126Z.zip',
   archiveSize: 11_930_936,
+  archiveSha256: '2ae3d46e2e0606d21476a820e0063e64c8638e8dbc6f660e6a1f85118b819437',
   receiptFilename: 'skytech-pre-compatibility-backup-receipt.json',
   receiptSize: 3_835,
-  generatedAt: '2026-08-27T14:31:26.000Z',
+  receiptSha256: '6fdd362ede52d66225ed53910b7ef49b8db364658b47516b9274c5988ed3959c',
+  generatedAt: '2026-08-27T14:31:26.467Z',
   databaseIncludedAs: 'database/app.sqlite',
   databaseSourcePath: 'app.sqlite',
   sourceDatabasePath: '/data/app.sqlite',
@@ -335,7 +337,7 @@ function validateReceipt(receipt) {
     [receipt?.archive?.size === expected.archiveSize, 'historical archive size mismatch'],
     [receipt?.archive?.generatedAt === expected.generatedAt, 'historical archive timestamp mismatch'],
     [receipt?.archive?.databaseIncludedAs === expected.databaseIncludedAs, 'historical database archive path mismatch'],
-    [SHA256_PATTERN.test(String(receipt?.archive?.sha256 || '')), 'archive SHA-256 is invalid'],
+    [receipt?.archive?.sha256 === expected.archiveSha256, 'historical archive SHA-256 mismatch'],
     [SHA256_PATTERN.test(String(receipt?.archive?.databaseFileSha256 || '')), 'database file SHA-256 is invalid'],
     [SHA256_PATTERN.test(String(receipt?.archive?.logicalDatabaseSha256 || '')), 'logical database SHA-256 is invalid'],
     [SHA256_PATTERN.test(String(receipt?.archive?.businessFileInventorySha256 || '')), 'business inventory SHA-256 is invalid'],
@@ -375,6 +377,8 @@ export function validateManifest(manifest, receipt, archive) {
   ]);
   const checks = [
     [manifest?.generatedAt === expected.generatedAt, 'manifest generation timestamp mismatch'],
+    [manifest?.generatedAt === receipt?.archive?.generatedAt,
+      'manifest and receipt archive timestamps mismatch'],
     [manifest?.backupSize === expected.archiveSize, 'manifest archive size mismatch'],
     [manifest?.appName === 'Skytech Rental Management', 'manifest app identity mismatch'],
     [equalJson(manifest?.appVersion, receipt.runtime), 'manifest runtime provenance mismatch'],
@@ -465,6 +469,10 @@ export function validateHistoricalPreCompatibilityBackup({ receiptPath, archiveP
       expected.receiptSize,
       'historical receipt',
     );
+    const receiptSha256 = sha256Bytes(receiptBytes);
+    if (receiptSha256 !== expected.receiptSha256) {
+      throw new Error('historical receipt SHA-256 mismatch');
+    }
     let receipt;
     try {
       receipt = JSON.parse(receiptBytes.toString('utf8'));
@@ -479,7 +487,6 @@ export function validateHistoricalPreCompatibilityBackup({ receiptPath, archiveP
       throw new Error('historical receipt is not in its exact canonical byte representation');
     }
     validateReceipt(receipt);
-    const receiptSha256 = sha256Bytes(receiptBytes);
     const archiveSnapshot = createPrivateValidationSnapshot({
       sourcePath: archivePath,
       snapshotPath: archiveSnapshotPath,

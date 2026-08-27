@@ -12,6 +12,7 @@ import {
   validateRailwayStatus,
 } from '../scripts/historical-backup-recovery-railway-proof.mjs';
 import {
+  HISTORICAL_PRE_COMPATIBILITY_BACKUP,
   createPrivateValidationSnapshot,
   validateCapturedFileState,
   validateCapturedSourceBinding,
@@ -93,7 +94,23 @@ test('workflow and validator bind the one exact historical receipt and archive',
     assert.equal(workflow.includes(exactValue), true, `workflow must bind ${exactValue}`);
     assert.equal(backupValidator.includes(exactValue.replace('11930936', '11_930_936').replace('3835', '3_835')), true);
   }
-  assert.match(backupValidator, /generatedAt: '2026-08-27T14:31:26\.000Z'/);
+  assert.match(backupValidator, /generatedAt: '2026-08-27T14:31:26\.467Z'/);
+  assert.match(backupValidator, /archiveSha256: '2ae3d46e2e0606d21476a820e0063e64c8638e8dbc6f660e6a1f85118b819437'/);
+  assert.match(backupValidator, /receiptSha256: '6fdd362ede52d66225ed53910b7ef49b8db364658b47516b9274c5988ed3959c'/);
+  assert.match(backupValidator, /receiptSha256 !== expected\.receiptSha256/);
+  assert.match(backupValidator, /receipt\?\.archive\?\.sha256 === expected\.archiveSha256/);
+  assert.deepEqual(
+    {
+      generatedAt: HISTORICAL_PRE_COMPATIBILITY_BACKUP.generatedAt,
+      receiptSha256: HISTORICAL_PRE_COMPATIBILITY_BACKUP.receiptSha256,
+      archiveSha256: HISTORICAL_PRE_COMPATIBILITY_BACKUP.archiveSha256,
+    },
+    {
+      generatedAt: '2026-08-27T14:31:26.467Z',
+      receiptSha256: '6fdd362ede52d66225ed53910b7ef49b8db364658b47516b9274c5988ed3959c',
+      archiveSha256: '2ae3d46e2e0606d21476a820e0063e64c8638e8dbc6f660e6a1f85118b819437',
+    },
+  );
   assert.match(backupValidator, /historical receipt is not in its exact canonical byte representation/);
   assert.match(backupValidator, /inspectFullBackupArchive/);
   assert.match(backupValidator, /validateStoredZipEntry/);
@@ -175,7 +192,7 @@ test('independent recovery manifest validation rejects unknown roots, entry drif
     },
   };
   const manifest = {
-    generatedAt: '2026-08-27T14:31:26.000Z',
+    generatedAt: '2026-08-27T14:31:26.467Z',
     backupSize: 11_930_936,
     appName: 'Skytech Rental Management',
     appVersion: runtime,
@@ -201,6 +218,7 @@ test('independent recovery manifest validation rejects unknown roots, entry drif
   const receipt = {
     runtime,
     archive: {
+      generatedAt: '2026-08-27T14:31:26.467Z',
       collectionCounts: {},
       includedFilesCount: 0,
       businessFileCount: 0,
@@ -248,6 +266,18 @@ test('independent recovery manifest validation rejects unknown roots, entry drif
   assert.throws(
     () => validateManifest(divergentProvenance, receipt, { entries: exactEntries }),
     /runtime provenance mismatch/,
+  );
+  const divergentTimestampReceipt = structuredClone(receipt);
+  divergentTimestampReceipt.archive.generatedAt = '2026-08-27T14:31:26.468Z';
+  assert.throws(
+    () => validateManifest(manifest, divergentTimestampReceipt, { entries: exactEntries }),
+    /manifest and receipt archive timestamps mismatch/,
+  );
+  const wrongSecond = structuredClone(manifest);
+  wrongSecond.generatedAt = '2026-08-27T14:31:27.467Z';
+  assert.throws(
+    () => validateManifest(wrongSecond, receipt, { entries: exactEntries }),
+    /manifest generation timestamp mismatch/,
   );
 });
 

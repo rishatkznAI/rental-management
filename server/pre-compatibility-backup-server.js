@@ -244,9 +244,19 @@ function openExactReadOnlyDatabase() {
 
 function buildInfo() {
   const commitFull = process.env.RAILWAY_GIT_COMMIT_SHA;
+  const requestedReleaseType = [
+    process.env.RELEASE_TYPE,
+    process.env.RELEASE_PREFLIGHT_RELEASE_TYPE,
+    process.env.RAILWAY_RELEASE_TYPE,
+  ].map(value => String(value || '').trim().toLowerCase()).find(Boolean) || '';
+  const releaseType = ['backend', 'full-stack'].includes(requestedReleaseType)
+    ? requestedReleaseType
+    : 'unknown';
   return {
     commit: commitFull.slice(0, 7),
     commitFull,
+    releaseType,
+    release: { type: releaseType },
     startedAt: STARTED_AT,
     deployment: {
       railwayDeploymentId: process.env.RAILWAY_DEPLOYMENT_ID,
@@ -255,6 +265,26 @@ function buildInfo() {
       railwayReplicaId: process.env.RAILWAY_REPLICA_ID,
     },
   };
+}
+
+function registerBackupOnlyHealthRoutes(app) {
+  app.get('/health', (_req, res) => res.json({
+    ok: true,
+    build: buildInfo(),
+    mode: 'pre-compatibility-backup-only',
+  }));
+  app.get('/health/ready', (_req, res) => res.json({
+    ok: true,
+    ready: true,
+    build: buildInfo(),
+    mode: 'pre-compatibility-backup-only',
+  }));
+  app.get('/api/version', (_req, res) => res.json({
+    ok: true,
+    build: buildInfo(),
+    app: { disabled: true },
+    mode: 'pre-compatibility-backup-only',
+  }));
 }
 
 function createApp() {
@@ -282,14 +312,7 @@ function createApp() {
     next();
   });
   app.use(express.json({ limit: '2kb', strict: true }));
-  app.get('/health', (_req, res) => res.json({ ok: true, mode: 'pre-compatibility-backup-only' }));
-  app.get('/health/ready', (_req, res) => res.json({ ok: true, ready: true, mode: 'pre-compatibility-backup-only' }));
-  app.get('/api/version', (_req, res) => res.json({
-    ok: true,
-    build: buildInfo(),
-    app: { disabled: true },
-    mode: 'pre-compatibility-backup-only',
-  }));
+  registerBackupOnlyHealthRoutes(app);
   const router = express.Router();
   registerPreCompatibilityBackupControlRoutes(router, {
     coordinator: backupCoordinator,
@@ -347,5 +370,6 @@ module.exports = {
   createApp,
   openExactReadOnlyDatabase,
   openVerifiedReadOnlyDatabase,
+  registerBackupOnlyHealthRoutes,
   start,
 };

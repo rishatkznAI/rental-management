@@ -954,6 +954,9 @@ test('manual workflow is production-protected, target-pinned, and has no deploy 
   );
   assert.match(source, /^on:\n  workflow_dispatch:/m);
   assert.match(source, /environment: production/);
+  assert.match(source, /npm install --global @railway\/cli@5\.45\.0/);
+  assert.match(source, /test "\$\(railway --version\)" = "railway 5\.45\.0"/);
+  assert.doesNotMatch(source, /@railway\/cli@4\.60\.0/);
   assert.match(source, /1558b38d-bf16-4b50-9ee6-0871b7152116/);
   assert.match(source, /62833109-61cb-4600-9200-d624d6537a05/);
   assert.match(source, /b2016e92-3c50-4b00-800d-625a139b219c/);

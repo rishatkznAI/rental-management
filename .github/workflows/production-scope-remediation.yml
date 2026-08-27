@@ -103,7 +103,10 @@ jobs:
           fi
 
       - name: Install pinned Railway CLI
-        run: npm install --global @railway/cli@4.60.0
+        run: |
+          set -euo pipefail
+          npm install --global @railway/cli@5.45.0
+          test "$(railway --version)" = "railway 5.45.0"
 
       - name: Verify exact Railway target and deployed commit
         env:

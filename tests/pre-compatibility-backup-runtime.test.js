@@ -1100,6 +1100,84 @@ test('backup-only health routes expose one exact build and deployment identity o
   }
 });
 
+test('backup-only version CORS grants only a credentialless public GET to an exact trusted frontend origin', async () => {
+  const keys = [
+    'RAILWAY_GIT_COMMIT_SHA',
+    'RAILWAY_DEPLOYMENT_ID',
+    'RAILWAY_REPLICA_ID',
+    'RELEASE_TYPE',
+    'CORS_ORIGIN',
+  ];
+  const previous = new Map(keys.map(key => [key, {
+    present: Object.hasOwn(process.env, key),
+    value: process.env[key],
+  }]));
+  try {
+    process.env.RAILWAY_GIT_COMMIT_SHA = 'd'.repeat(40);
+    process.env.RAILWAY_DEPLOYMENT_ID = 'deployment-version-cors';
+    process.env.RAILWAY_REPLICA_ID = 'replica-version-cors';
+    process.env.RELEASE_TYPE = 'backend';
+    delete process.env.CORS_ORIGIN;
+
+    const app = express();
+    registerBackupOnlyHealthRoutes(app);
+    app.use((_req, response) => response.status(404).json({ ok: false, error: 'Not found' }));
+    await withServer(app, async baseUrl => {
+      const trustedOrigin = 'https://rishatkznai.github.io';
+      const preflight = await fetch(`${baseUrl}/api/version`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: trustedOrigin,
+          'Access-Control-Request-Method': 'GET',
+          'Access-Control-Request-Headers': 'authorization,content-type',
+        },
+      });
+      assert.equal(preflight.headers.has('access-control-allow-origin'), false);
+      assert.equal(preflight.headers.has('access-control-allow-credentials'), false);
+
+      const version = await fetch(`${baseUrl}/api/version`, { headers: { Origin: trustedOrigin } });
+      assert.equal(version.status, 200);
+      assert.equal(version.headers.get('access-control-allow-origin'), trustedOrigin);
+      assert.equal(version.headers.has('access-control-allow-credentials'), false);
+      assert.match(version.headers.get('vary') || '', /Origin/);
+      const versionBody = await version.json();
+      assert.equal(versionBody.app.disabled, true);
+      assert.equal(versionBody.mode, 'pre-compatibility-backup-only');
+
+      const disallowed = await fetch(`${baseUrl}/api/version`, {
+        headers: { Origin: 'https://untrusted.example' },
+      });
+      assert.equal(disallowed.status, 403);
+      assert.equal(disallowed.headers.has('access-control-allow-origin'), false);
+      assert.deepEqual(await disallowed.json(), { ok: false, error: 'Forbidden' });
+
+      const health = await fetch(`${baseUrl}/health`, { headers: { Origin: trustedOrigin } });
+      assert.equal(health.status, 200);
+      assert.equal(health.headers.has('access-control-allow-origin'), false);
+
+      const login = await fetch(`${baseUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { Origin: trustedOrigin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'must-not-exist@example.invalid', password: 'must-not-exist' }),
+      });
+      assert.equal(login.status, 404);
+      assert.equal(login.headers.has('access-control-allow-origin'), false);
+      assert.deepEqual(await login.json(), { ok: false, error: 'Not found' });
+
+      const backupControl = await fetch(`${baseUrl}/api/admin/skytech-pre-compatibility-backup`, {
+        method: 'OPTIONS',
+        headers: { Origin: trustedOrigin },
+      });
+      assert.equal(backupControl.headers.has('access-control-allow-origin'), false);
+    });
+  } finally {
+    for (const [key, state] of previous) {
+      if (state.present) process.env[key] = state.value;
+      else delete process.env[key];
+    }
+  }
+});
+
 test('backup-only production server exposes only async control routes backed by the isolated worker', () => {
   const serverSource = fs.readFileSync(new URL('../server/pre-compatibility-backup-server.js', import.meta.url), 'utf8');
   const coordinatorSource = fs.readFileSync(new URL('../server/lib/pre-compatibility-backup-coordinator.js', import.meta.url), 'utf8');
@@ -1112,6 +1190,10 @@ test('backup-only production server exposes only async control routes backed by 
   assert.match(serverSource, /res\.setHeader\('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'"\)/);
   assert.match(serverSource, /res\.setHeader\('Strict-Transport-Security', 'max-age=31536000; includeSubDomains'\)/);
   assert.match(serverSource, /res\.setHeader\('X-Content-Type-Options', 'nosniff'\)/);
+  assert.match(serverSource, /app\.get\('\/api\/version', backupOnlyVersionCors/);
+  assert.doesNotMatch(serverSource, /app\.options\('\/api\/version'/);
+  assert.match(serverSource, /res\.setHeader\('Access-Control-Allow-Origin', origin\)/);
+  assert.doesNotMatch(serverSource, /app\.use\(backupOnlyVersionCors\)/);
   assert.match(coordinatorSource, /fork\(filename, \[\], options\)/);
   assert.match(coordinatorSource, /stdio: \['ignore', 'ignore', 'inherit', 'ipc'\]/);
   assert.doesNotMatch(coordinatorSource, /\bshell\s*:/);

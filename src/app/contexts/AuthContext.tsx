@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { ApiError, api, setToken, clearToken, getToken } from '../lib/api';
+import { ApiError, api, setToken, clearToken, getToken, getPublicVersion } from '../lib/api';
 import { tokenMarker, traceAuth } from '../lib/authDebug';
 
 export interface AuthUser {
@@ -162,7 +162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let disposed = false;
 
-    api.get<{ ok: boolean; app?: { disabled?: boolean; message?: string } }>('/api/version')
+    getPublicVersion()
       .then((result) => {
         if (disposed) return;
         if (result.app?.disabled) {

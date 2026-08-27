@@ -267,6 +267,27 @@ function buildInfo() {
   };
 }
 
+function backupOnlyVersionAllowedOrigins() {
+  return new Set([
+    'https://rishatkznai.github.io',
+    ...String(process.env.CORS_ORIGIN || '')
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(origin => origin && origin !== '*'),
+  ]);
+}
+
+function backupOnlyVersionCors(req, res, next) {
+  const origin = String(req.headers.origin || '').trim();
+  if (!origin) return next();
+  if (!backupOnlyVersionAllowedOrigins().has(origin)) {
+    return res.status(403).json({ ok: false, error: 'Forbidden' });
+  }
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.vary('Origin');
+  return next();
+}
+
 function registerBackupOnlyHealthRoutes(app) {
   app.get('/health', (_req, res) => res.json({
     ok: true,
@@ -279,7 +300,7 @@ function registerBackupOnlyHealthRoutes(app) {
     build: buildInfo(),
     mode: 'pre-compatibility-backup-only',
   }));
-  app.get('/api/version', (_req, res) => res.json({
+  app.get('/api/version', backupOnlyVersionCors, (_req, res) => res.json({
     ok: true,
     build: buildInfo(),
     app: { disabled: true },
@@ -365,6 +386,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  backupOnlyVersionCors,
   buildInfo,
   createExclusiveSourceProvider,
   createApp,

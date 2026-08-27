@@ -30,6 +30,7 @@ const DEPLOY_TOOLING_PATTERNS = [
   /^scripts\/release-classifier\.mjs$/,
   /^scripts\/release-conservation-contract\.mjs$/,
   /^scripts\/release-preflight\.mjs$/,
+  /^scripts\/frontend-release-snapshot\.mjs$/,
   /^scripts\/release-targeted-smoke\.mjs$/,
   /^scripts\/frontend-build-marker\.mjs$/,
   /^scripts\/backend-release-marker\.mjs$/,
@@ -161,14 +162,49 @@ export function classifyReleaseChangedFiles(changedFiles = []) {
   };
 }
 
+const MANUAL_RELEASE_TYPES = new Set([
+  'frontend-only',
+  'backend',
+  'full-stack',
+  'deploy-tooling',
+  'frontend-deploy-tooling',
+]);
+
+export function validateRequestedReleaseType(result = {}, requestedReleaseType = '') {
+  const requested = String(requestedReleaseType || '').trim().toLowerCase();
+  if (!requested) throw new Error('manual release type is required');
+  if (!MANUAL_RELEASE_TYPES.has(requested)) {
+    throw new Error(`unknown manual release type "${requested}"`);
+  }
+  const detected = String(result.releaseType || '').trim().toLowerCase();
+  if (!detected || detected === 'unknown' || detected === 'docs-only') {
+    throw new Error(`manual release cannot use unresolved classifier result "${detected || 'missing'}"`);
+  }
+  if (requested !== detected) {
+    throw new Error(`manual release type mismatch: requested=${requested} detected=${detected}`);
+  }
+  return requested;
+}
+
 function parseArgs(argv) {
-  const args = { changedFilesFile: '', githubOutput: '', githubSummary: '', expectedCommit: '' };
+  const args = {
+    changedFilesFile: '',
+    githubOutput: '',
+    githubSummary: '',
+    expectedCommit: '',
+    requestedReleaseType: '',
+    requestedReleaseTypeProvided: false,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--changed-files-file') args.changedFilesFile = argv[++index] || '';
     else if (arg === '--github-output') args.githubOutput = argv[++index] || '';
     else if (arg === '--github-summary') args.githubSummary = argv[++index] || '';
     else if (arg === '--expected-commit') args.expectedCommit = argv[++index] || '';
+    else if (arg === '--requested-release-type') {
+      args.requestedReleaseTypeProvided = true;
+      args.requestedReleaseType = argv[++index] || '';
+    }
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
@@ -187,14 +223,18 @@ function main() {
   if (!args.changedFilesFile) throw new Error('--changed-files-file is required');
   const files = readFileSync(args.changedFilesFile, 'utf8').split(/\r?\n/).filter(Boolean);
   const result = classifyReleaseChangedFiles(files);
+  const manualReleaseType = args.requestedReleaseTypeProvided
+    ? validateRequestedReleaseType(result, args.requestedReleaseType)
+    : '';
   appendLine(args.githubOutput, `release_type=${result.releaseType}`);
   appendLine(args.githubOutput, `changed_files=${result.changedFiles.join(',')}`);
   appendLine(args.githubOutput, `requires_backend=${result.requiresBackendDeploy}`);
 
-  if (result.allowed) {
+  if (result.allowed || manualReleaseType) {
     appendLine(args.githubSummary, '### Release classification');
     appendLine(args.githubSummary, '');
-    appendLine(args.githubSummary, '- event: push');
+    appendLine(args.githubSummary, `- event: ${manualReleaseType ? 'workflow_dispatch' : 'push'}`);
+    if (manualReleaseType) appendLine(args.githubSummary, `- requested release_type: \`${manualReleaseType}\``);
     appendLine(args.githubSummary, `- release_type: \`${result.releaseType}\``);
     if (args.expectedCommit) appendLine(args.githubSummary, `- expected commit: \`${args.expectedCommit}\``);
     appendLine(args.githubSummary, '- changed files:');

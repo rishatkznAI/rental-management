@@ -65,7 +65,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-scope-remediation
+  group: production-release
   cancel-in-progress: false
 
 jobs:

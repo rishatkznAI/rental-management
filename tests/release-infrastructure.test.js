@@ -260,6 +260,63 @@ test('correct railway.toml fails when the strict root directory is wrong', () =>
   );
 });
 
+test('pre-deploy commands fail closed in committed, resolved, and deployment metadata', () => {
+  const withCommittedPreDeploy = `${railwayConfigSource.trim()}\npreDeployCommand = "node migrate.js"\n`;
+  assert.throws(
+    () => validateRailwayTarget(targetFixture(), expected, withCommittedPreDeploy),
+    /committed Railway pre-deploy command must be absent/,
+  );
+  assert.throws(
+    () => validateRailwayTarget(
+      targetFixture(),
+      expected,
+      `${railwayConfigSource.trim()}\n"preDeployCommand" = "node migrate.js"\n`,
+    ),
+    /committed Railway pre-deploy command must be absent/,
+  );
+
+  const instance = targetFixture().serviceInstance;
+  assert.throws(
+    () => validateRailwayTarget(targetFixture({
+      serviceInstance: {
+        ...instance,
+        resolvedFileConfig: resolvedFileConfigFixture({
+          fileManifest: {
+            deploy: {
+              healthcheckPath: '/health',
+              startCommand: 'node scripts/start-with-release-type.cjs',
+              preDeployCommand: 'node migrate.js',
+            },
+          },
+        }),
+      },
+    }), expected, railwayConfigSource),
+    /resolved file pre-deploy command must be absent/,
+  );
+
+  const deployment = deploymentFixture();
+  assert.throws(
+    () => validateRailwayTarget(targetFixture({
+      serviceInstance: {
+        ...instance,
+        activeDeployments: [deploymentFixture({
+          meta: {
+            ...deployment.meta,
+            serviceManifest: {
+              deploy: {
+                healthcheckPath: '/health',
+                startCommand: 'node scripts/start-with-release-type.cjs',
+                preDeployCommand: ['node', 'migrate.js'],
+              },
+            },
+          },
+        })],
+      },
+    }), expected, railwayConfigSource),
+    /resolved service pre-deploy command must be absent/,
+  );
+});
+
 test('effective deployment metadata conflict fails despite correct railway.toml', () => {
   const conflictingDeployment = deploymentFixture({
     meta: {

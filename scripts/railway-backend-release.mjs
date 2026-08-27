@@ -193,9 +193,13 @@ export function parseRailwayDeployConfig(source = '') {
       continue;
     }
     if (section !== 'deploy') continue;
-    const assignment = line.match(/^(startCommand|healthcheckPath)\s*=\s*(.+)$/);
+    const assignment = line.match(/^("(?:\\.|[^"\\])*"|'[^']*'|[A-Za-z0-9_-]+)\s*=\s*(.+)$/);
     if (!assignment) continue;
-    const [, key, rawValue] = assignment;
+    const [, rawKey, rawValue] = assignment;
+    const key = rawKey.startsWith('"')
+      ? JSON.parse(rawKey)
+      : (rawKey.startsWith("'") ? rawKey.slice(1, -1) : rawKey);
+    if (!['startCommand', 'healthcheckPath', 'preDeployCommand'].includes(key)) continue;
     if (Object.hasOwn(result, key)) {
       throw new Error(`committed Railway config has duplicate deploy.${key}`);
     }
@@ -220,7 +224,14 @@ function effectiveDeployValues(value = {}) {
   return {
     healthcheckPath: String(deploy.healthcheckPath || '').trim(),
     startCommand: String(deploy.startCommand || '').trim(),
+    preDeployCommand: deploy.preDeployCommand,
   };
+}
+
+function isAbsentPreDeployCommand(value) {
+  return value === undefined
+    || value === null
+    || (typeof value === 'string' && value.trim() === '');
 }
 
 function validateEffectiveDeploymentMetadata(deployment = {}, expected = {}) {
@@ -234,10 +245,13 @@ function validateEffectiveDeploymentMetadata(deployment = {}, expected = {}) {
     [normalizeConfigFile(meta.configFile) === expected.configFile, 'effective deployment config file mismatch'],
     [fileValues.healthcheckPath === expected.healthcheckPath, 'effective deployment healthcheck path mismatch'],
     [fileValues.startCommand === expected.startCommand, 'effective deployment start command mismatch'],
+    [isAbsentPreDeployCommand(fileValues.preDeployCommand), 'effective deployment pre-deploy command must be absent'],
     [resolvedValues.healthcheckPath === expected.healthcheckPath, 'resolved service healthcheck path mismatch'],
     [resolvedValues.startCommand === expected.startCommand, 'resolved service start command mismatch'],
+    [isAbsentPreDeployCommand(resolvedValues.preDeployCommand), 'resolved service pre-deploy command must be absent'],
     [mapping['deploy.healthcheckPath'] === '$.deploy.healthcheckPath', 'healthcheck path is not proven file-managed'],
     [mapping['deploy.startCommand'] === '$.deploy.startCommand', 'start command is not proven file-managed'],
+    [!Object.hasOwn(mapping, 'deploy.preDeployCommand'), 'pre-deploy command unexpectedly has a file mapping'],
   ];
   if (repository) {
     checks.push([normalizeRepository(meta.repo) === repository, 'effective deployment repository mismatch']);
@@ -335,6 +349,7 @@ export function validateRailwayEffectiveConfig(data = {}, expected = {}, railway
   const committedChecks = [
     [committed.healthcheckPath === config.healthcheckPath, 'committed Railway healthcheck path mismatch'],
     [committed.startCommand === config.startCommand, 'committed Railway start command mismatch'],
+    [!Object.hasOwn(committed, 'preDeployCommand'), 'committed Railway pre-deploy command must be absent'],
   ];
   const rawChecks = [
     [!rawHealthcheckPath || rawHealthcheckPath === config.healthcheckPath, 'Railway healthcheck path mismatch'],
@@ -370,8 +385,10 @@ export function validateRailwayEffectiveConfig(data = {}, expected = {}, railway
     [String(resolved.resolvedAt || '').trim(), 'resolved file config timestamp is missing'],
     [resolvedManifest.healthcheckPath === config.healthcheckPath, 'resolved file healthcheck path mismatch'],
     [resolvedManifest.startCommand === config.startCommand, 'resolved file start command mismatch'],
+    [isAbsentPreDeployCommand(resolvedManifest.preDeployCommand), 'resolved file pre-deploy command must be absent'],
     [resolvedMapping['deploy.healthcheckPath'] === '$.deploy.healthcheckPath', 'resolved healthcheck path is not proven file-managed'],
     [resolvedMapping['deploy.startCommand'] === '$.deploy.startCommand', 'resolved start command is not proven file-managed'],
+    [!Object.hasOwn(resolvedMapping, 'deploy.preDeployCommand'), 'resolved pre-deploy command unexpectedly has a file mapping'],
   ];
   const failedEvidence = evidenceChecks.find(([ok]) => !ok);
   if (failedEvidence) {

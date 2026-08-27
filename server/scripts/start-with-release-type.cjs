@@ -22,8 +22,14 @@ function resolveReleaseEnv(env = process.env) {
   return nextEnv;
 }
 
+function resolveServerEntry(env = process.env) {
+  return env.SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED === 'true'
+    ? 'pre-compatibility-backup-server.js'
+    : 'server.js';
+}
+
 function start() {
-  const child = spawn(process.execPath, ['server.js'], {
+  const child = spawn(process.execPath, [resolveServerEntry(process.env)], {
     stdio: 'inherit',
     env: resolveReleaseEnv(process.env),
   });
@@ -49,4 +55,5 @@ if (require.main === module) {
 
 module.exports = {
   resolveReleaseEnv,
+  resolveServerEntry,
 };

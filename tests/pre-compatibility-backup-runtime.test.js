@@ -25,6 +25,8 @@ const {
   registerBackupOnlyHealthRoutes,
 } = require('../server/pre-compatibility-backup-server.js');
 const {
+  backupDirectoryPath,
+  executePreCompatibilityBackup,
   registerPreCompatibilityBackupControlRoutes,
   registerPreCompatibilityBackupRoute,
 } = require('../server/routes/pre-compatibility-backup.js');
@@ -203,6 +205,32 @@ function frozenEnvironment(dbPath) {
   };
 }
 
+function directBackupOptions({ fixture, sourceProvider, requestNonce, operationId, startedAt }) {
+  const env = frozenEnvironment(fixture.dbPath);
+  return {
+    requestNonce,
+    dbPath: fixture.dbPath,
+    openSourceDatabase: () => sourceProvider.acquire(),
+    startupSourceIdentity: sourceProvider.sourceIdentity,
+    buildInfo: () => ({
+      commit: env.RAILWAY_GIT_COMMIT_SHA.slice(0, 7),
+      commitFull: env.RAILWAY_GIT_COMMIT_SHA,
+      startedAt: '2026-08-26T00:00:00.000Z',
+      deployment: {
+        railwayDeploymentId: env.RAILWAY_DEPLOYMENT_ID,
+        railwayEnvironment: 'production',
+        railwayService: 'rental-management',
+        railwayReplicaId: env.RAILWAY_REPLICA_ID,
+      },
+    }),
+    expectedEnvironment: expectedEnvironment(fixture.dbPath),
+    isBackupOnlyRuntime: () => true,
+    env,
+    now: () => new Date(startedAt),
+    randomUUID: () => operationId,
+  };
+}
+
 async function withServer(app, operation) {
   const server = await new Promise(resolve => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
@@ -253,6 +281,287 @@ test('pre-compatibility environment gate requires the exact raw runtime SHA and 
   } finally {
     fixture.writerDb.close();
     fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('backup directory safely tightens benign legacy permissions without changing existing archives', () => {
+  for (const legacyMode of [0o755, 0o750]) {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-directory-')));
+    const backupDirectory = path.join(root, 'backups');
+    try {
+      fs.mkdirSync(backupDirectory, { mode: legacyMode });
+      fs.chmodSync(backupDirectory, legacyMode);
+      const archives = [
+        ['skytech-pre-clean-reset-20260818T150232Z.zip', 'legacy-backup-one'],
+        ['skytech-pre-clean-reset-20260820T064647Z.zip', 'legacy-backup-two'],
+        ['skytech-pre-clean-reset-20260820T074532Z.zip', 'legacy-backup-three'],
+      ].map(([name, content]) => {
+        const filename = path.join(backupDirectory, name);
+        fs.writeFileSync(filename, content, { mode: 0o600 });
+        fs.chmodSync(filename, 0o600);
+        const stat = fs.lstatSync(filename);
+        return { name, filename, sha256: sha256(filename), ino: stat.ino, size: stat.size, mode: stat.mode & 0o777 };
+      });
+
+      assert.equal(backupDirectoryPath(path.join(root, 'app.sqlite')), backupDirectory);
+      assert.equal(backupDirectoryPath(path.join(root, 'app.sqlite')), backupDirectory);
+
+      assert.equal(fs.lstatSync(backupDirectory).mode & 0o777, 0o700);
+      assert.deepEqual(fs.readdirSync(backupDirectory).sort(), archives.map(({ name }) => name).sort());
+      for (const archive of archives) {
+        const stat = fs.lstatSync(archive.filename);
+        assert.equal(stat.ino, archive.ino);
+        assert.equal(stat.size, archive.size);
+        assert.equal(stat.mode & 0o777, archive.mode);
+        assert.equal(sha256(archive.filename), archive.sha256);
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('backup directory creates a fresh owner-private directory idempotently', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-directory-fresh-')));
+  const backupDirectory = path.join(root, 'backups');
+  try {
+    assert.equal(backupDirectoryPath(path.join(root, 'app.sqlite')), backupDirectory);
+    assert.equal(backupDirectoryPath(path.join(root, 'app.sqlite')), backupDirectory);
+    const stat = fs.lstatSync(backupDirectory);
+    assert.equal(stat.isDirectory(), true);
+    assert.equal(stat.isSymbolicLink(), false);
+    assert.equal(stat.uid, process.geteuid());
+    assert.equal(stat.mode & 0o7777, 0o700);
+    assert.deepEqual(fs.readdirSync(backupDirectory), []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('backup directory rejects writable and special legacy modes without changing their contents', () => {
+  for (const unsafeMode of [0o775, 0o777, 0o1755]) {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-directory-mode-')));
+    const backupDirectory = path.join(root, 'backups');
+    const sentinel = path.join(backupDirectory, 'legacy.zip');
+    try {
+      fs.mkdirSync(backupDirectory, { mode: unsafeMode });
+      fs.chmodSync(backupDirectory, unsafeMode);
+      fs.writeFileSync(sentinel, 'legacy-backup-bytes', { mode: 0o600 });
+      const before = fs.lstatSync(sentinel);
+      const beforeSha = sha256(sentinel);
+
+      assert.throws(
+        () => backupDirectoryPath(path.join(root, 'app.sqlite')),
+        error => error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE',
+      );
+
+      assert.equal(fs.lstatSync(backupDirectory).mode & 0o7777, unsafeMode);
+      assert.equal(fs.lstatSync(sentinel).ino, before.ino);
+      assert.equal(sha256(sentinel), beforeSha);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('backup directory rejects an unsafe writable parent before creating any child', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-parent-')));
+  try {
+    fs.chmodSync(root, 0o770);
+    assert.throws(
+      () => backupDirectoryPath(path.join(root, 'app.sqlite')),
+      error => error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE',
+    );
+    assert.equal(fs.existsSync(path.join(root, 'backups')), false);
+  } finally {
+    fs.chmodSync(root, 0o700);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('backup directory refuses a legacy symlink without changing its target', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-directory-symlink-')));
+  const targetDirectory = path.join(root, 'legacy-backups');
+  const backupDirectory = path.join(root, 'backups');
+  const legacyArchive = path.join(targetDirectory, 'skytech-pre-clean-reset-20260820T074532Z.zip');
+  try {
+    fs.mkdirSync(targetDirectory, { mode: 0o755 });
+    fs.chmodSync(targetDirectory, 0o755);
+    fs.writeFileSync(legacyArchive, 'legacy-backup-bytes', { mode: 0o600 });
+    fs.symlinkSync(targetDirectory, backupDirectory, 'dir');
+    const archiveShaBefore = sha256(legacyArchive);
+
+    assert.throws(
+      () => backupDirectoryPath(path.join(root, 'app.sqlite')),
+      error => error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE',
+    );
+
+    assert.equal(fs.lstatSync(targetDirectory).mode & 0o777, 0o755);
+    assert.equal(sha256(legacyArchive), archiveShaBefore);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('backup directory rejects a file and dangling symlink without replacing either path', () => {
+  for (const kind of ['file', 'dangling-symlink']) {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-directory-path-')));
+    const backupDirectory = path.join(root, 'backups');
+    try {
+      if (kind === 'file') fs.writeFileSync(backupDirectory, 'not-a-directory', { mode: 0o600 });
+      else fs.symlinkSync(path.join(root, 'missing-target'), backupDirectory, 'dir');
+      const before = fs.lstatSync(backupDirectory);
+
+      assert.throws(
+        () => backupDirectoryPath(path.join(root, 'app.sqlite')),
+        error => error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE',
+      );
+
+      const after = fs.lstatSync(backupDirectory);
+      assert.equal(after.ino, before.ino);
+      assert.equal(after.mode, before.mode);
+      assert.equal(after.isSymbolicLink(), kind === 'dangling-symlink');
+      if (kind === 'file') assert.equal(fs.readFileSync(backupDirectory, 'utf8'), 'not-a-directory');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('backup directory rejects a foreign-owner identity without chmod', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-directory-owner-')));
+  const backupDirectory = path.join(root, 'backups');
+  const sentinel = path.join(backupDirectory, 'legacy.zip');
+  try {
+    fs.mkdirSync(backupDirectory, { mode: 0o755 });
+    fs.chmodSync(backupDirectory, 0o755);
+    fs.writeFileSync(sentinel, 'legacy-backup-bytes', { mode: 0o600 });
+    const lstatSync = fs.lstatSync.bind(fs);
+    t.mock.method(fs, 'lstatSync', (filename, ...args) => {
+      const stat = lstatSync(filename, ...args);
+      if (filename !== backupDirectory) return stat;
+      return new Proxy(stat, {
+        get(target, property) {
+          if (property === 'uid') return target.uid + 1;
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    });
+
+    assert.throws(
+      () => backupDirectoryPath(path.join(root, 'app.sqlite')),
+      error => error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE',
+    );
+
+    assert.equal(lstatSync(backupDirectory).mode & 0o777, 0o755);
+    assert.equal(sha256(sentinel), crypto.createHash('sha256').update('legacy-backup-bytes').digest('hex'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('backup directory fails closed when the validated path is replaced before descriptor open', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-directory-race-')));
+  const backupDirectory = path.join(root, 'backups');
+  const replacementDirectory = path.join(root, 'replacement-backups');
+  const displacedDirectory = path.join(root, 'displaced-backups');
+  const originalArchive = path.join(backupDirectory, 'original.zip');
+  const replacementArchive = path.join(replacementDirectory, 'replacement.zip');
+  try {
+    fs.mkdirSync(backupDirectory, { mode: 0o755 });
+    fs.mkdirSync(replacementDirectory, { mode: 0o755 });
+    fs.chmodSync(backupDirectory, 0o755);
+    fs.chmodSync(replacementDirectory, 0o755);
+    fs.writeFileSync(originalArchive, 'original-backup-bytes', { mode: 0o600 });
+    fs.writeFileSync(replacementArchive, 'replacement-backup-bytes', { mode: 0o600 });
+    const originalArchiveSha = sha256(originalArchive);
+    const replacementArchiveSha = sha256(replacementArchive);
+    const openSync = fs.openSync.bind(fs);
+    let replaced = false;
+    t.mock.method(fs, 'openSync', (filename, ...args) => {
+      if (!replaced && filename === backupDirectory) {
+        replaced = true;
+        fs.renameSync(backupDirectory, displacedDirectory);
+        fs.renameSync(replacementDirectory, backupDirectory);
+      }
+      return openSync(filename, ...args);
+    });
+
+    assert.throws(
+      () => backupDirectoryPath(path.join(root, 'app.sqlite')),
+      error => error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE',
+    );
+
+    assert.equal(replaced, true);
+    assert.equal(fs.lstatSync(displacedDirectory).mode & 0o777, 0o755);
+    assert.equal(fs.lstatSync(backupDirectory).mode & 0o777, 0o755);
+    assert.equal(sha256(path.join(displacedDirectory, 'original.zip')), originalArchiveSha);
+    assert.equal(sha256(path.join(backupDirectory, 'replacement.zip')), replacementArchiveSha);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('backup directory detects a path replacement around fchmod without changing the replacement', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-directory-fchmod-race-')));
+  const backupDirectory = path.join(root, 'backups');
+  const replacementDirectory = path.join(root, 'replacement-backups');
+  const displacedDirectory = path.join(root, 'displaced-backups');
+  const replacementArchive = path.join(replacementDirectory, 'replacement.zip');
+  try {
+    fs.mkdirSync(backupDirectory, { mode: 0o755 });
+    fs.mkdirSync(replacementDirectory, { mode: 0o755 });
+    fs.chmodSync(backupDirectory, 0o755);
+    fs.chmodSync(replacementDirectory, 0o755);
+    fs.writeFileSync(replacementArchive, 'replacement-backup-bytes', { mode: 0o600 });
+    const replacementSha = sha256(replacementArchive);
+    const fchmodSync = fs.fchmodSync.bind(fs);
+    let replaced = false;
+    t.mock.method(fs, 'fchmodSync', (fd, mode) => {
+      fchmodSync(fd, mode);
+      if (!replaced) {
+        replaced = true;
+        fs.renameSync(backupDirectory, displacedDirectory);
+        fs.renameSync(replacementDirectory, backupDirectory);
+      }
+    });
+
+    assert.throws(
+      () => backupDirectoryPath(path.join(root, 'app.sqlite')),
+      error => error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE',
+    );
+
+    assert.equal(replaced, true);
+    assert.equal(fs.lstatSync(displacedDirectory).mode & 0o777, 0o700);
+    assert.equal(fs.lstatSync(backupDirectory).mode & 0o777, 0o755);
+    assert.equal(sha256(path.join(backupDirectory, 'replacement.zip')), replacementSha);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('backup directory fails closed on fchmod failure before creating control artifacts', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pre-compatibility-backup-directory-fchmod-')));
+  const backupDirectory = path.join(root, 'backups');
+  const sentinel = path.join(backupDirectory, 'legacy.zip');
+  try {
+    fs.mkdirSync(backupDirectory, { mode: 0o755 });
+    fs.chmodSync(backupDirectory, 0o755);
+    fs.writeFileSync(sentinel, 'legacy-backup-bytes', { mode: 0o600 });
+    t.mock.method(fs, 'fchmodSync', () => {
+      throw Object.assign(new Error('injected fchmod failure'), { code: 'EIO' });
+    });
+
+    assert.throws(
+      () => backupDirectoryPath(path.join(root, 'app.sqlite')),
+      error => error?.code === 'PRE_COMPATIBILITY_BACKUP_DIRECTORY_UNSAFE',
+    );
+
+    assert.equal(fs.lstatSync(backupDirectory).mode & 0o777, 0o755);
+    assert.deepEqual(fs.readdirSync(backupDirectory), ['legacy.zip']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -350,9 +659,22 @@ test('backup-only route keeps the source query-only and exposes no reset operati
       assert.deepEqual(body.backup.sourceStateBefore.database, body.backup.sourceStateAfter.database);
       assert.deepEqual(body.backup.sourceStateBefore.wal, body.backup.sourceStateAfter.wal);
       assert.match(body.backup.sha256, /^[a-f0-9]{64}$/);
-      assert.equal(sha256(path.join(fixture.root, 'backups', body.backup.filename)), body.backup.sha256);
+      const archivePath = path.join(fixture.root, 'backups', body.backup.filename);
+      assert.equal(sha256(archivePath), body.backup.sha256);
+      const archiveStat = fs.lstatSync(archivePath);
+      assert.equal(archiveStat.isFile(), true);
+      assert.equal(archiveStat.isSymbolicLink(), false);
+      assert.equal(archiveStat.uid, process.geteuid());
+      assert.equal(archiveStat.nlink, 1);
+      assert.equal(archiveStat.mode & 0o7777, 0o600);
       const receiptPath = path.join(fixture.root, 'backups', body.backup.receiptFilename);
       assert.equal(sha256(receiptPath), body.backup.receiptSha256);
+      const receiptStat = fs.lstatSync(receiptPath);
+      assert.equal(receiptStat.isFile(), true);
+      assert.equal(receiptStat.isSymbolicLink(), false);
+      assert.equal(receiptStat.uid, process.geteuid());
+      assert.equal(receiptStat.nlink, 1);
+      assert.equal(receiptStat.mode & 0o7777, 0o600);
       const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'));
       assert.equal(receipt.status, 'COMPLETE');
       assert.equal(receipt.requestNonce, requestNonce);
@@ -391,6 +713,158 @@ test('backup-only route keeps the source query-only and exposes no reset operati
       assert.equal(differentNonce.status, 409);
     });
     assert.equal(sha256(fixture.dbPath), beforeSha);
+  } finally {
+    sourceProvider?.close();
+    if (fixture.writerDb.open) fixture.writerDb.close();
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('fixed-time output collision preserves the preexisting archive byte and inode exactly', async () => {
+  const fixture = createFixture();
+  const backupDirectory = path.join(path.dirname(fixture.dbPath), 'backups');
+  const existingArchive = path.join(backupDirectory, 'skytech-pre-clean-reset-20260826T123456Z.zip');
+  let sourceProvider;
+  try {
+    fixture.writerDb.close();
+    fs.mkdirSync(backupDirectory, { mode: 0o755 });
+    fs.chmodSync(backupDirectory, 0o755);
+    fs.writeFileSync(existingArchive, 'preexisting-archive-bytes', { mode: 0o600 });
+    fs.chmodSync(existingArchive, 0o600);
+    const before = fs.lstatSync(existingArchive);
+    const beforeSha = sha256(existingArchive);
+    sourceProvider = createExclusiveSourceProvider(openVerifiedReadOnlyDatabase({
+      dbPath: fixture.dbPath,
+      expectedEnvironment: expectedEnvironment(fixture.dbPath),
+      env: frozenEnvironment(fixture.dbPath),
+    }));
+
+    const result = await executePreCompatibilityBackup(directBackupOptions({
+      fixture,
+      sourceProvider,
+      requestNonce: '23232323-2323-4323-8323-232323232323',
+      operationId: '24242424-2424-4424-8424-242424242424',
+      startedAt: '2026-08-26T12:34:56.000Z',
+    }));
+
+    assert.equal(result.statusCode, 409);
+    const after = fs.lstatSync(existingArchive);
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.size, before.size);
+    assert.equal(after.mode & 0o777, 0o600);
+    assert.equal(sha256(existingArchive), beforeSha);
+    assert.equal(fs.lstatSync(backupDirectory).mode & 0o777, 0o700);
+    assert.deepEqual(fs.readdirSync(backupDirectory).sort(), [
+      '.skytech-pre-compatibility-backup.lock.json',
+      path.basename(existingArchive),
+    ]);
+  } finally {
+    sourceProvider?.close();
+    if (fixture.writerDb.open) fixture.writerDb.close();
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('raced-in output collision preserves the file that won the pathname', async t => {
+  const fixture = createFixture();
+  const backupDirectory = path.join(path.dirname(fixture.dbPath), 'backups');
+  const racedArchive = path.join(backupDirectory, 'skytech-pre-clean-reset-20260826T123456Z.zip');
+  let sourceProvider;
+  let racedStat;
+  try {
+    fixture.writerDb.close();
+    fs.mkdirSync(backupDirectory, { mode: 0o700 });
+    sourceProvider = createExclusiveSourceProvider(openVerifiedReadOnlyDatabase({
+      dbPath: fixture.dbPath,
+      expectedEnvironment: expectedEnvironment(fixture.dbPath),
+      env: frozenEnvironment(fixture.dbPath),
+    }));
+    const linkSync = fs.linkSync.bind(fs);
+    t.mock.method(fs, 'linkSync', (source, destination) => {
+      if (destination === racedArchive && !racedStat) {
+        fs.writeFileSync(racedArchive, 'raced-in-archive-bytes', { mode: 0o600, flag: 'wx' });
+        fs.chmodSync(racedArchive, 0o600);
+        racedStat = fs.lstatSync(racedArchive);
+      }
+      return linkSync(source, destination);
+    });
+
+    const result = await executePreCompatibilityBackup(directBackupOptions({
+      fixture,
+      sourceProvider,
+      requestNonce: '25252525-2525-4525-8525-252525252525',
+      operationId: '26262626-2626-4626-8626-262626262626',
+      startedAt: '2026-08-26T12:34:56.000Z',
+    }));
+
+    assert.equal(result.statusCode, 409);
+    assert.ok(racedStat);
+    const after = fs.lstatSync(racedArchive);
+    assert.equal(after.ino, racedStat.ino);
+    assert.equal(after.size, racedStat.size);
+    assert.equal(after.mode & 0o777, 0o600);
+    assert.equal(fs.readFileSync(racedArchive, 'utf8'), 'raced-in-archive-bytes');
+    const retainedTemporaryName = '.skytech-pre-clean-reset-20260826T123456Z.zip.26262626-2626-4626-8626-262626262626.tmp';
+    const retainedTemporaryStat = fs.lstatSync(path.join(backupDirectory, retainedTemporaryName));
+    assert.equal(retainedTemporaryStat.isFile(), true);
+    assert.equal(retainedTemporaryStat.isSymbolicLink(), false);
+    assert.equal(retainedTemporaryStat.nlink, 1);
+    assert.equal(retainedTemporaryStat.uid, process.geteuid());
+    assert.equal(retainedTemporaryStat.mode & 0o7777, 0o600);
+    assert.deepEqual(fs.readdirSync(backupDirectory).sort(), [
+      retainedTemporaryName,
+      '.skytech-pre-compatibility-backup.lock.json',
+      path.basename(racedArchive),
+    ].sort());
+  } finally {
+    sourceProvider?.close();
+    if (fixture.writerDb.open) fixture.writerDb.close();
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('preexisting private temp collision is preserved byte-for-byte and never promoted', async () => {
+  const fixture = createFixture();
+  const backupDirectory = path.join(path.dirname(fixture.dbPath), 'backups');
+  const operationId = '27272727-2727-4727-8727-272727272727';
+  const finalArchive = path.join(backupDirectory, 'skytech-pre-clean-reset-20260826T123456Z.zip');
+  const existingTemporary = path.join(
+    backupDirectory,
+    `.skytech-pre-clean-reset-20260826T123456Z.zip.${operationId}.tmp`,
+  );
+  let sourceProvider;
+  try {
+    fixture.writerDb.close();
+    fs.mkdirSync(backupDirectory, { mode: 0o700 });
+    fs.writeFileSync(existingTemporary, 'preexisting-temp-bytes', { mode: 0o600 });
+    fs.chmodSync(existingTemporary, 0o600);
+    const before = fs.lstatSync(existingTemporary);
+    const beforeSha = sha256(existingTemporary);
+    sourceProvider = createExclusiveSourceProvider(openVerifiedReadOnlyDatabase({
+      dbPath: fixture.dbPath,
+      expectedEnvironment: expectedEnvironment(fixture.dbPath),
+      env: frozenEnvironment(fixture.dbPath),
+    }));
+
+    const result = await executePreCompatibilityBackup(directBackupOptions({
+      fixture,
+      sourceProvider,
+      requestNonce: '28282828-2828-4828-8828-282828282828',
+      operationId,
+      startedAt: '2026-08-26T12:34:56.000Z',
+    }));
+
+    assert.equal(result.statusCode, 409);
+    const after = fs.lstatSync(existingTemporary);
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.size, before.size);
+    assert.equal(after.mode & 0o7777, 0o600);
+    assert.equal(sha256(existingTemporary), beforeSha);
+    assert.equal(fs.existsSync(finalArchive), false);
+    assert.deepEqual(fs.readdirSync(backupDirectory).sort(), [
+      path.basename(existingTemporary),
+      '.skytech-pre-compatibility-backup.lock.json',
+    ].sort());
   } finally {
     sourceProvider?.close();
     if (fixture.writerDb.open) fixture.writerDb.close();
@@ -621,7 +1095,7 @@ test('startup inode replacement is rejected before an archive or receipt can pub
   }
 });
 
-test('a WAL commit during backup invalidates the attempt and removes the unpublished archive', async () => {
+test('a WAL commit during backup invalidates the attempt and leaves the published archive unreceipted', async () => {
   const fixture = createFixture();
   const expected = expectedEnvironment(fixture.dbPath);
   const env = frozenEnvironment(fixture.dbPath);
@@ -681,7 +1155,9 @@ test('a WAL commit during backup invalidates the attempt and removes the unpubli
     });
     const outputs = fs.readdirSync(path.join(fixture.root, 'backups'));
     assert.ok(outputs.includes('.skytech-pre-compatibility-backup.lock.json'));
-    assert.equal(outputs.some(name => name.endsWith('.zip')), false);
+    const archives = outputs.filter(name => name.endsWith('.zip'));
+    assert.equal(archives.length, 1);
+    assert.equal(fs.lstatSync(path.join(fixture.root, 'backups', archives[0])).mode & 0o7777, 0o600);
     assert.equal(outputs.includes('skytech-pre-compatibility-backup-receipt.json'), false);
   } finally {
     if (concurrentWriterDb?.open) concurrentWriterDb.close();
@@ -760,7 +1236,8 @@ test('a WAL commit after the read snapshot is pinned cannot be hidden in the ini
     });
     const outputs = fs.readdirSync(path.join(fixture.root, 'backups'));
     assert.ok(outputs.includes('.skytech-pre-compatibility-backup.lock.json'));
-    assert.equal(outputs.some(name => name.endsWith('.zip')), false);
+    const archives = outputs.filter(name => name.endsWith('.zip'));
+    assert.equal(archives.length, 0);
     assert.equal(outputs.includes('skytech-pre-compatibility-backup-receipt.json'), false);
   } finally {
     if (concurrentWriterDb?.open) concurrentWriterDb.close();
@@ -838,7 +1315,9 @@ test('a WAL commit triggered by the final total_changes query is caught before r
     assert.equal(totalChangesQueries, 2);
     const outputs = fs.readdirSync(path.join(fixture.root, 'backups'));
     assert.ok(outputs.includes('.skytech-pre-compatibility-backup.lock.json'));
-    assert.equal(outputs.some(name => name.endsWith('.zip')), false);
+    const archives = outputs.filter(name => name.endsWith('.zip'));
+    assert.equal(archives.length, 1);
+    assert.equal(fs.lstatSync(path.join(fixture.root, 'backups', archives[0])).mode & 0o7777, 0o600);
     assert.equal(outputs.includes('skytech-pre-compatibility-backup-receipt.json'), false);
   } finally {
     if (concurrentWriterDb?.open) concurrentWriterDb.close();
@@ -954,6 +1433,7 @@ test('public backup control routes acknowledge quickly and keep status polling r
     status(identity) {
       if (identity.requestNonce !== requestNonce || identity.invocationId !== invocationId) return null;
       if (state === 'RUNNING') return { ...identity, status: 'RUNNING', statusCode: 202, body: null };
+      if (state === 'FAILED') return { ...identity, status: 'FAILED', statusCode: 409, body: null };
       return {
         ...identity,
         status: 'COMPLETE',
@@ -999,6 +1479,10 @@ test('public backup control routes acknowledge quickly and keep status polling r
       const running = await fetch(`${baseUrl}/api/admin/skytech-pre-compatibility-backup/status`, { headers: statusHeaders });
       assert.equal(running.status, 202);
       assert.equal((await running.json()).status, 'RUNNING');
+      state = 'FAILED';
+      const failed = await fetch(`${baseUrl}/api/admin/skytech-pre-compatibility-backup/status`, { headers: statusHeaders });
+      assert.equal(failed.status, 409);
+      assert.deepEqual(await failed.json(), { ok: false, error: 'Preliminary backup failed.' });
       state = 'COMPLETE';
       const complete = await fetch(`${baseUrl}/api/admin/skytech-pre-compatibility-backup/status`, { headers: statusHeaders });
       assert.equal(complete.status, 200);

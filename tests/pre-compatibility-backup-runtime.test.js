@@ -5,6 +5,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import {
+  RAILWAY_EMPTY_STAGED_PATCH_SHA256,
+  validateRailwayEmptyStagedChangeProof,
+} from '../scripts/railway-empty-staged-change-proof.mjs';
 
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
@@ -1112,6 +1116,75 @@ test('backup-only production server exposes only async control routes backed by 
   assert.match(workerSource, /if \(!resultDeliveryComplete\) process\.exit\(1\)/);
 });
 
+test('Railway staged-change proof uses canonical patch authority and treats nullable count only as veto telemetry', () => {
+  const environmentId = '62833109-61cb-4600-9200-d624d6537a05';
+  const fixture = (overrides = {}) => ({
+    expectedEnvironmentId: environmentId,
+    environment: {
+      id: environmentId,
+      unmergedChangesCount: null,
+      ...(overrides.environment || {}),
+    },
+    stagedChanges: {
+      id: 'staged-proof-id',
+      environmentId,
+      status: 'STAGED',
+      patch: {},
+      ...(overrides.stagedChanges || {}),
+    },
+    ...Object.fromEntries(
+      Object.entries(overrides).filter(([key]) => !['environment', 'stagedChanges'].includes(key)),
+    ),
+  });
+
+  assert.equal(
+    RAILWAY_EMPTY_STAGED_PATCH_SHA256,
+    crypto.createHash('sha256').update('{}').digest('hex'),
+  );
+  for (const unmergedChangesCount of [null, 0]) {
+    const proof = validateRailwayEmptyStagedChangeProof(fixture({
+      environment: { unmergedChangesCount },
+    }));
+    assert.equal(proof.unmergedChangesCountObserved, unmergedChangesCount);
+    assert.equal(proof.unmergedChangesCountUsedAsEmptyProof, false);
+    assert.equal(proof.stagedChangesEmpty, true);
+    assert.equal(proof.stagedPatchId, 'staged-proof-id');
+    assert.equal(proof.stagedPatchEnvironmentId, environmentId);
+    assert.equal(proof.stagedPatchStatus, 'STAGED');
+    assert.equal(proof.stagedPatchCanonicalEmpty, true);
+    assert.equal(proof.stagedPatchStructuralChangeCount, 0);
+    assert.equal(proof.stagedPatchFingerprint, RAILWAY_EMPTY_STAGED_PATCH_SHA256);
+    assert.equal(proof.stagedPatchAuthority, 'environmentStagedChanges.patch(decryptVariables:false)');
+    assert.doesNotMatch(JSON.stringify(proof), /"patch"/);
+    for (const rawKey of ['data', 'environment', 'stagedChanges', 'stagedPatch', 'patch']) {
+      assert.equal(Object.hasOwn(proof, rawKey), false);
+    }
+  }
+
+  const rejected = [
+    fixture({ environment: { unmergedChangesCount: undefined } }),
+    fixture({ environment: { unmergedChangesCount: '0' } }),
+    fixture({ environment: { unmergedChangesCount: 1 } }),
+    fixture({ environment: { unmergedChangesCount: -1 } }),
+    fixture({ expectedEnvironmentId: '' }),
+    fixture({ expectedEnvironmentId: ` ${environmentId}` }),
+    fixture({ environment: { id: 'wrong-environment' } }),
+    fixture({ stagedChanges: { id: '' } }),
+    fixture({ stagedChanges: { id: ' staged-proof-id' } }),
+    fixture({ stagedChanges: { id: 42 } }),
+    fixture({ stagedChanges: { environmentId: 'wrong-environment' } }),
+    fixture({ stagedChanges: { status: 'APPLYING' } }),
+    fixture({ stagedChanges: { status: 'COMMITTED' } }),
+    fixture({ stagedChanges: { status: 'staged' } }),
+    fixture({ stagedChanges: { patch: null } }),
+    fixture({ stagedChanges: { patch: [] } }),
+    fixture({ stagedChanges: { patch: { services: {} } } }),
+  ];
+  for (const input of rejected) {
+    assert.throws(() => validateRailwayEmptyStagedChangeProof(input));
+  }
+});
+
 test('preliminary workflow is identity-pinned, secret-isolated, and revalidates the stored encrypted copy', () => {
   const workflow = fs.readFileSync(
     new URL('../.github/workflows/skytech-clean-production-reset.yml', import.meta.url),
@@ -1123,6 +1196,10 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
   );
   const remediationWorkflow = fs.readFileSync(
     new URL('../.github/workflows/production-scope-remediation.yml', import.meta.url),
+    'utf8',
+  );
+  const stagedProofSource = fs.readFileSync(
+    new URL('../scripts/railway-empty-staged-change-proof.mjs', import.meta.url),
     'utf8',
   );
   const namedSteps = workflow.split(/^      - name: /m).slice(1);
@@ -1175,9 +1252,17 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
   assert.equal((workflow.match(/environmentStagedChanges\(environmentId: \$environmentId\)/g) || []).length, 2);
   assert.equal((workflow.match(/config\(decryptVariables: false\)/g) || []).length, 2);
   assert.equal((workflow.match(/patch\(decryptVariables: false\)/g) || []).length, 2);
-  assert.doesNotMatch(workflow, /environment\.unmergedChangesCount === null/);
-  assert.doesNotMatch(workflow, /acceptedEmptyRepresentations|numeric-zero/);
-  assert.equal((workflow.match(/environment\.unmergedChangesCount === 0/g) || []).length, 2);
+  assert.doesNotMatch(workflow, /unmergedChangesCount:\s*0/);
+  assert.doesNotMatch(workflow, /railwayNullableUnmergedCountAccepted/);
+  assert.equal((workflow.match(/const stagedProof = validateRailwayEmptyStagedChangeProof\(/g) || []).length, 2);
+  assert.match(stagedProofSource, /unmergedChangesCountObserved !== null && unmergedChangesCountObserved !== 0/);
+  assert.match(stagedProofSource, /stagedChanges\.status !== 'STAGED'/);
+  assert.match(stagedProofSource, /stagedChanges\.id !== stagedChanges\.id\.trim\(\)/);
+  assert.doesNotMatch(stagedProofSource, /<empty>/);
+  assert.doesNotMatch(workflow, /<empty>/);
+  assert.doesNotMatch(stagedProofSource, /Number\(unmergedChangesCountObserved\)/);
+  assert.doesNotMatch(stagedProofSource, /unmergedChangesCountObserved\s*(?:\?\?|\|\|)\s*0/);
+  assert.equal((workflow.match(/44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a/g) || []).length, 3);
   assert.equal((workflow.match(/deploymentMetadataReplicaCount === 1/g) || []).length, 2);
   assert.equal((workflow.match(/effectiveConfigDesiredReplicaCount === 1/g) || []).length, 2);
   assert.equal((workflow.match(/latestDeployment\.instances \| length\) == 1/g) || []).length, 2);
@@ -1195,16 +1280,11 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
   const railwayBeforeStep = step('Prove one exact active Railway deployment and one running replica before backup');
   const railwayAfterStep = step('Re-prove the full Railway singleton predicate after stored-artifact verification');
   for (const railwayProofStep of [railwayBeforeStep, railwayAfterStep]) {
-    assert.match(railwayProofStep, /environment\(id: \$environmentId\)[\s\S]*unmergedChangesCount[\s\S]*config\(decryptVariables: false\)[\s\S]*environmentStagedChanges\(environmentId: \$environmentId\)[\s\S]*patch\(decryptVariables: false\)/);
+    assert.match(railwayProofStep, /environment\(id: \$environmentId\)[\s\S]*unmergedChangesCount[\s\S]*config\(decryptVariables: false\)[\s\S]*environmentStagedChanges\(environmentId: \$environmentId\)[\s\S]*id[\s\S]*environmentId[\s\S]*status[\s\S]*patch\(decryptVariables: false\)/);
     assert.match(railwayProofStep, /environment\.id === process\.env\.RAILWAY_ENVIRONMENT_ID/);
     assert.match(railwayProofStep, /environment\.name === process\.env\.RAILWAY_ENVIRONMENT_NAME/);
-    assert.match(railwayProofStep, /null is unknown, never evidence of an empty change set/);
-    assert.match(railwayProofStep, /const stagedPatch = stagedChanges\.patch/);
-    assert.match(railwayProofStep, /stagedPatchStructuralChangeCount = Object\.keys\(stagedPatch\)\.length/);
-    assert.match(railwayProofStep, /stagedPatchStructuralChangeCount !== 0/);
-    assert.match(railwayProofStep, /stagedPatchCanonical = JSON\.stringify\(stagedPatch\)/);
-    assert.match(railwayProofStep, /stagedPatchCanonical !== '\{\}'/);
-    assert.match(railwayProofStep, /stagedPatchFingerprint = crypto\.createHash\('sha256'\)[\s\S]*\.update\(stagedPatchCanonical\)/);
+    assert.match(railwayProofStep, /validateRailwayEmptyStagedChangeProof\(\{[\s\S]*environment,[\s\S]*stagedChanges,[\s\S]*expectedEnvironmentId: process\.env\.RAILWAY_ENVIRONMENT_ID/);
+    assert.match(railwayProofStep, /unmergedChangesCountObserved,[\s\S]*unmergedChangesCountUsedAsEmptyProof,[\s\S]*stagedChangesEmpty,[\s\S]*stagedPatchId,[\s\S]*stagedPatchEnvironmentId,[\s\S]*stagedPatchStatus,[\s\S]*stagedPatchCanonicalEmpty,[\s\S]*stagedPatchAuthority,[\s\S]*stagedPatchStructuralChangeCount,[\s\S]*stagedPatchFingerprint/);
     assert.match(railwayProofStep, /effectiveServices\[process\.env\.RAILWAY_SERVICE_ID\]/);
     assert.match(railwayProofStep, /effectiveDeploy\.multiRegionConfig/);
     assert.match(railwayProofStep, /effectiveDeploy\.preDeployCommand === undefined/);
@@ -1217,12 +1297,12 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
     assert.match(railwayProofStep, /effectiveVolumeMountIds\[0\] === process\.env\.RAILWAY_VOLUME_ID/);
     assert.match(railwayProofStep, /effectiveVolumeMount\.mountPath === process\.env\.RAILWAY_VOLUME_MOUNT_PATH/);
     assert.match(railwayProofStep, /effectiveConfigFingerprint = crypto\.createHash\('sha256'\)[\s\S]*JSON\.stringify\(effectiveConfigProjection\)/);
-    assert.match(railwayProofStep, /deploymentMetadataReplicaCount,[\s\S]*effectiveConfigDesiredReplicaCount,[\s\S]*effectiveConfigProjection,[\s\S]*effectiveConfigFingerprint,[\s\S]*stagedChangesEmpty: true,[\s\S]*stagedPatchStructuralChangeCount,[\s\S]*stagedPatchFingerprint/);
+    assert.match(railwayProofStep, /deploymentMetadataReplicaCount,[\s\S]*effectiveConfigDesiredReplicaCount,[\s\S]*effectiveConfigProjection,[\s\S]*effectiveConfigFingerprint,[\s\S]*unmergedChangesCountObserved,[\s\S]*unmergedChangesCountUsedAsEmptyProof,[\s\S]*stagedChangesEmpty,[\s\S]*stagedPatchId,[\s\S]*stagedPatchEnvironmentId,[\s\S]*stagedPatchStatus,[\s\S]*stagedPatchCanonicalEmpty,[\s\S]*stagedPatchAuthority,[\s\S]*stagedPatchStructuralChangeCount,[\s\S]*stagedPatchFingerprint/);
+    assert.doesNotMatch(railwayProofStep, /unmergedChangesCount:\s*0/);
     assert.doesNotMatch(railwayProofStep, /config\(decryptVariables: true\)/);
     assert.doesNotMatch(railwayProofStep, /patch\(decryptVariables: true\)/);
     assert.doesNotMatch(railwayProofStep, /console\.(?:log|dir|table)/);
     assert.doesNotMatch(railwayProofStep, /\bstagedPatch\s*[,}]/);
-    assert.doesNotMatch(railwayProofStep, /\bstagedChanges\s*[,}]/);
     assert.doesNotMatch(
       railwayProofStep,
       /JSON\.stringify\((?:data|environment|effectiveEnvironmentConfig|effectiveServices|effectiveServiceConfig|effectiveSource|effectiveDeploy|effectiveMultiRegionConfig|effectiveVolumeMounts)\b/,
@@ -1303,7 +1383,12 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
   assert.match(workflow, /runAttempt: \$runAttempt/);
   assert.match(workflow, /railwayMutationFreezeClaimed: false/);
   assert.match(workflow, /does not freeze[\s\S]*Railway's external control plane/);
-  assert.match(workflow, /railwayNullableUnmergedCountAccepted: false/);
+  assert.match(workflow, /railwayNullableUnmergedCountNormalizedToZero: false/);
+  assert.match(workflow, /railwayUnmergedChangesCountUsedAsEmptyProof: false/);
+  assert.match(workflow, /railwayUnmergedChangesCountExplicitNonzeroVeto: true/);
+  assert.match(workflow, /railwayCanonicalStagedPatchUsedAsEmptyProof: true/);
+  assert.match(workflow, /railwayStagedPatchIdentityAndStatusValidated: true/);
+  assert.match(workflow, /railwayStagedPatchOfficialEmptyPlaceholderSemantics: "Railway CLI v5\.45\.0"/);
   assert.match(workflow, /railwayStagedPatchQueriedWithDecryptVariablesFalse: true/);
   assert.match(workflow, /railwayStagedPatchCanonicalEmptyBeforeAndAfter: true/);
   assert.match(workflow, /railwayStagedPatchContentsPersisted: false/);

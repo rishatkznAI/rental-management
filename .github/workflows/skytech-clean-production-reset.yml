@@ -139,6 +139,9 @@ jobs:
             validateRailwayEffectiveConfig,
             validateRailwayTargetIdentity,
           } from './scripts/railway-backend-release.mjs';
+          import {
+            validateRailwayEmptyStagedChangeProof,
+          } from './scripts/railway-empty-staged-change-proof.mjs';
 
           const configAwareReleaseTargetQuery = RELEASE_TARGET_QUERY.replace(
             '    service(id: $serviceId) {',
@@ -149,6 +152,9 @@ jobs:
               config(decryptVariables: false)
             }
             environmentStagedChanges(environmentId: $environmentId) {
+              id
+              environmentId
+              status
               patch(decryptVariables: false)
             }
             service(id: $serviceId) {`,
@@ -197,24 +203,23 @@ jobs:
             throw new Error('target Railway environment was not returned');
           }
           const stagedChanges = data?.environmentStagedChanges;
-          if (!stagedChanges || typeof stagedChanges !== 'object' || Array.isArray(stagedChanges)) {
-            throw new Error('Railway staged-changes proof was not returned');
-          }
-          const stagedPatch = stagedChanges.patch;
-          if (!stagedPatch || typeof stagedPatch !== 'object' || Array.isArray(stagedPatch)) {
-            throw new Error('Railway staged patch is not a JSON object');
-          }
-          const stagedPatchStructuralChangeCount = Object.keys(stagedPatch).length;
-          if (stagedPatchStructuralChangeCount !== 0) {
-            throw new Error('Railway staged patch contains structural changes');
-          }
-          const stagedPatchCanonical = JSON.stringify(stagedPatch);
-          if (stagedPatchCanonical !== '{}') {
-            throw new Error('Railway staged patch is not canonical-empty');
-          }
-          const stagedPatchFingerprint = crypto.createHash('sha256')
-            .update(stagedPatchCanonical)
-            .digest('hex');
+          const stagedProof = validateRailwayEmptyStagedChangeProof({
+            environment,
+            stagedChanges,
+            expectedEnvironmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+          });
+          const {
+            unmergedChangesCountObserved,
+            unmergedChangesCountUsedAsEmptyProof,
+            stagedChangesEmpty,
+            stagedPatchId,
+            stagedPatchEnvironmentId,
+            stagedPatchStatus,
+            stagedPatchCanonicalEmpty,
+            stagedPatchAuthority,
+            stagedPatchStructuralChangeCount,
+            stagedPatchFingerprint,
+          } = stagedProof;
           const metadata = objectValue(deployment.meta);
           const deployConfig = objectValue(objectValue(metadata.serviceManifest).deploy);
           let deploymentMetadataReplicaCount;
@@ -268,14 +273,9 @@ jobs:
           const effectiveVolumeMounts = objectValue(effectiveServiceConfig.volumeMounts);
           const effectiveVolumeMountIds = Object.keys(effectiveVolumeMounts).sort();
           const effectiveVolumeMount = objectValue(effectiveVolumeMounts[process.env.RAILWAY_VOLUME_ID]);
-          // This schema field is nullable: null is unknown, never evidence of an empty change set.
-          // Require numeric zero and independently require the secret-safe staged patch to be {}.
           const checks = [
             [environment.id === process.env.RAILWAY_ENVIRONMENT_ID, 'effective config environment ID mismatch'],
             [environment.name === process.env.RAILWAY_ENVIRONMENT_NAME, 'effective config environment name mismatch'],
-            [environment.unmergedChangesCount === 0, 'Railway unmerged-change count is not numeric zero'],
-            [stagedPatchStructuralChangeCount === 0, 'Railway staged patch change count is not zero'],
-            [stagedPatchCanonical === '{}', 'Railway staged patch is not canonical-empty'],
             [deployment.projectId === identity.projectId, 'active deployment project mismatch'],
             [deployment.environmentId === identity.environmentId, 'active deployment environment mismatch'],
             [deployment.serviceId === identity.serviceId, 'active deployment service mismatch'],
@@ -303,7 +303,6 @@ jobs:
             environment: {
               id: environment.id,
               name: environment.name,
-              unmergedChangesCount: 0,
             },
             service: {
               id: process.env.RAILWAY_SERVICE_ID,
@@ -352,7 +351,14 @@ jobs:
             effectiveConfigDesiredReplicaCount,
             effectiveConfigProjection,
             effectiveConfigFingerprint,
-            stagedChangesEmpty: true,
+            unmergedChangesCountObserved,
+            unmergedChangesCountUsedAsEmptyProof,
+            stagedChangesEmpty,
+            stagedPatchId,
+            stagedPatchEnvironmentId,
+            stagedPatchStatus,
+            stagedPatchCanonicalEmpty,
+            stagedPatchAuthority,
             stagedPatchStructuralChangeCount,
             stagedPatchFingerprint,
           }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
@@ -393,9 +399,17 @@ jobs:
                     and $controlPlane.activeDeploymentCount == 1
                     and $controlPlane.deploymentMetadataReplicaCount == 1
                     and $controlPlane.effectiveConfigDesiredReplicaCount == 1
+                    and ($controlPlane.unmergedChangesCountObserved == null or $controlPlane.unmergedChangesCountObserved == 0)
+                    and $controlPlane.unmergedChangesCountUsedAsEmptyProof == false
                     and $controlPlane.stagedChangesEmpty == true
+                    and ($controlPlane.stagedPatchId | type) == "string"
+                    and ($controlPlane.stagedPatchId | length) > 0
+                    and $controlPlane.stagedPatchEnvironmentId == $environment
+                    and $controlPlane.stagedPatchStatus == "STAGED"
+                    and $controlPlane.stagedPatchCanonicalEmpty == true
+                    and $controlPlane.stagedPatchAuthority == "environmentStagedChanges.patch(decryptVariables:false)"
                     and $controlPlane.stagedPatchStructuralChangeCount == 0
-                    and ($controlPlane.stagedPatchFingerprint | test("^[a-f0-9]{64}$"))
+                    and $controlPlane.stagedPatchFingerprint == "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
                     and $services[0].latestDeployment.id == $controlPlane.activeDeploymentId
                     and $services[0].latestDeployment.status == "SUCCESS"
                     and $services[0].latestDeployment.meta.commitHash == $sha
@@ -443,7 +457,14 @@ jobs:
                   effectiveConfigDesiredReplicaCount: $controlPlane.effectiveConfigDesiredReplicaCount,
                   effectiveConfigProjection: $controlPlane.effectiveConfigProjection,
                   effectiveConfigFingerprint: $controlPlane.effectiveConfigFingerprint,
+                  unmergedChangesCountObserved: $controlPlane.unmergedChangesCountObserved,
+                  unmergedChangesCountUsedAsEmptyProof: $controlPlane.unmergedChangesCountUsedAsEmptyProof,
                   stagedChangesEmpty: $controlPlane.stagedChangesEmpty,
+                  stagedPatchId: $controlPlane.stagedPatchId,
+                  stagedPatchEnvironmentId: $controlPlane.stagedPatchEnvironmentId,
+                  stagedPatchStatus: $controlPlane.stagedPatchStatus,
+                  stagedPatchCanonicalEmpty: $controlPlane.stagedPatchCanonicalEmpty,
+                  stagedPatchAuthority: $controlPlane.stagedPatchAuthority,
                   stagedPatchStructuralChangeCount: $controlPlane.stagedPatchStructuralChangeCount,
                   stagedPatchFingerprint: $controlPlane.stagedPatchFingerprint,
                   deploymentId: $serviceNode.latestDeployment.id,
@@ -1116,6 +1137,9 @@ jobs:
             validateRailwayEffectiveConfig,
             validateRailwayTargetIdentity,
           } from './scripts/railway-backend-release.mjs';
+          import {
+            validateRailwayEmptyStagedChangeProof,
+          } from './scripts/railway-empty-staged-change-proof.mjs';
 
           const configAwareReleaseTargetQuery = RELEASE_TARGET_QUERY.replace(
             '    service(id: $serviceId) {',
@@ -1126,6 +1150,9 @@ jobs:
               config(decryptVariables: false)
             }
             environmentStagedChanges(environmentId: $environmentId) {
+              id
+              environmentId
+              status
               patch(decryptVariables: false)
             }
             service(id: $serviceId) {`,
@@ -1174,24 +1201,23 @@ jobs:
             throw new Error('target Railway environment was not returned');
           }
           const stagedChanges = data?.environmentStagedChanges;
-          if (!stagedChanges || typeof stagedChanges !== 'object' || Array.isArray(stagedChanges)) {
-            throw new Error('Railway staged-changes proof was not returned');
-          }
-          const stagedPatch = stagedChanges.patch;
-          if (!stagedPatch || typeof stagedPatch !== 'object' || Array.isArray(stagedPatch)) {
-            throw new Error('Railway staged patch is not a JSON object');
-          }
-          const stagedPatchStructuralChangeCount = Object.keys(stagedPatch).length;
-          if (stagedPatchStructuralChangeCount !== 0) {
-            throw new Error('Railway staged patch contains structural changes');
-          }
-          const stagedPatchCanonical = JSON.stringify(stagedPatch);
-          if (stagedPatchCanonical !== '{}') {
-            throw new Error('Railway staged patch is not canonical-empty');
-          }
-          const stagedPatchFingerprint = crypto.createHash('sha256')
-            .update(stagedPatchCanonical)
-            .digest('hex');
+          const stagedProof = validateRailwayEmptyStagedChangeProof({
+            environment,
+            stagedChanges,
+            expectedEnvironmentId: process.env.RAILWAY_ENVIRONMENT_ID,
+          });
+          const {
+            unmergedChangesCountObserved,
+            unmergedChangesCountUsedAsEmptyProof,
+            stagedChangesEmpty,
+            stagedPatchId,
+            stagedPatchEnvironmentId,
+            stagedPatchStatus,
+            stagedPatchCanonicalEmpty,
+            stagedPatchAuthority,
+            stagedPatchStructuralChangeCount,
+            stagedPatchFingerprint,
+          } = stagedProof;
           const metadata = objectValue(deployment.meta);
           const deployConfig = objectValue(objectValue(metadata.serviceManifest).deploy);
           let deploymentMetadataReplicaCount;
@@ -1245,14 +1271,9 @@ jobs:
           const effectiveVolumeMounts = objectValue(effectiveServiceConfig.volumeMounts);
           const effectiveVolumeMountIds = Object.keys(effectiveVolumeMounts).sort();
           const effectiveVolumeMount = objectValue(effectiveVolumeMounts[process.env.RAILWAY_VOLUME_ID]);
-          // This schema field is nullable: null is unknown, never evidence of an empty change set.
-          // Require numeric zero and independently require the secret-safe staged patch to be {}.
           const checks = [
             [environment.id === process.env.RAILWAY_ENVIRONMENT_ID, 'effective config environment ID mismatch'],
             [environment.name === process.env.RAILWAY_ENVIRONMENT_NAME, 'effective config environment name mismatch'],
-            [environment.unmergedChangesCount === 0, 'Railway unmerged-change count is not numeric zero'],
-            [stagedPatchStructuralChangeCount === 0, 'Railway staged patch change count is not zero'],
-            [stagedPatchCanonical === '{}', 'Railway staged patch is not canonical-empty'],
             [deployment.projectId === identity.projectId, 'active deployment project mismatch'],
             [deployment.environmentId === identity.environmentId, 'active deployment environment mismatch'],
             [deployment.serviceId === identity.serviceId, 'active deployment service mismatch'],
@@ -1280,7 +1301,6 @@ jobs:
             environment: {
               id: environment.id,
               name: environment.name,
-              unmergedChangesCount: 0,
             },
             service: {
               id: process.env.RAILWAY_SERVICE_ID,
@@ -1329,7 +1349,14 @@ jobs:
             effectiveConfigDesiredReplicaCount,
             effectiveConfigProjection,
             effectiveConfigFingerprint,
-            stagedChangesEmpty: true,
+            unmergedChangesCountObserved,
+            unmergedChangesCountUsedAsEmptyProof,
+            stagedChangesEmpty,
+            stagedPatchId,
+            stagedPatchEnvironmentId,
+            stagedPatchStatus,
+            stagedPatchCanonicalEmpty,
+            stagedPatchAuthority,
             stagedPatchStructuralChangeCount,
             stagedPatchFingerprint,
           }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
@@ -1370,9 +1397,17 @@ jobs:
                     and $controlPlane.activeDeploymentCount == 1
                     and $controlPlane.deploymentMetadataReplicaCount == 1
                     and $controlPlane.effectiveConfigDesiredReplicaCount == 1
+                    and ($controlPlane.unmergedChangesCountObserved == null or $controlPlane.unmergedChangesCountObserved == 0)
+                    and $controlPlane.unmergedChangesCountUsedAsEmptyProof == false
                     and $controlPlane.stagedChangesEmpty == true
+                    and ($controlPlane.stagedPatchId | type) == "string"
+                    and ($controlPlane.stagedPatchId | length) > 0
+                    and $controlPlane.stagedPatchEnvironmentId == $environment
+                    and $controlPlane.stagedPatchStatus == "STAGED"
+                    and $controlPlane.stagedPatchCanonicalEmpty == true
+                    and $controlPlane.stagedPatchAuthority == "environmentStagedChanges.patch(decryptVariables:false)"
                     and $controlPlane.stagedPatchStructuralChangeCount == 0
-                    and ($controlPlane.stagedPatchFingerprint | test("^[a-f0-9]{64}$"))
+                    and $controlPlane.stagedPatchFingerprint == "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
                     and $services[0].latestDeployment.id == $controlPlane.activeDeploymentId
                     and $services[0].latestDeployment.status == "SUCCESS"
                     and $services[0].latestDeployment.meta.commitHash == $sha
@@ -1420,7 +1455,14 @@ jobs:
                   effectiveConfigDesiredReplicaCount: $controlPlane.effectiveConfigDesiredReplicaCount,
                   effectiveConfigProjection: $controlPlane.effectiveConfigProjection,
                   effectiveConfigFingerprint: $controlPlane.effectiveConfigFingerprint,
+                  unmergedChangesCountObserved: $controlPlane.unmergedChangesCountObserved,
+                  unmergedChangesCountUsedAsEmptyProof: $controlPlane.unmergedChangesCountUsedAsEmptyProof,
                   stagedChangesEmpty: $controlPlane.stagedChangesEmpty,
+                  stagedPatchId: $controlPlane.stagedPatchId,
+                  stagedPatchEnvironmentId: $controlPlane.stagedPatchEnvironmentId,
+                  stagedPatchStatus: $controlPlane.stagedPatchStatus,
+                  stagedPatchCanonicalEmpty: $controlPlane.stagedPatchCanonicalEmpty,
+                  stagedPatchAuthority: $controlPlane.stagedPatchAuthority,
                   stagedPatchStructuralChangeCount: $controlPlane.stagedPatchStructuralChangeCount,
                   stagedPatchFingerprint: $controlPlane.stagedPatchFingerprint,
                   deploymentId: $serviceNode.latestDeployment.id,
@@ -1563,7 +1605,12 @@ jobs:
                   githubConcurrencyScope: "cooperating GitHub workflow runs only",
                   railwayMutationFreezeClaimed: false,
                   railwayControlPlaneObservedBeforeAndAfter: true,
-                  railwayNullableUnmergedCountAccepted: false,
+                  railwayNullableUnmergedCountNormalizedToZero: false,
+                  railwayUnmergedChangesCountUsedAsEmptyProof: false,
+                  railwayUnmergedChangesCountExplicitNonzeroVeto: true,
+                  railwayCanonicalStagedPatchUsedAsEmptyProof: true,
+                  railwayStagedPatchIdentityAndStatusValidated: true,
+                  railwayStagedPatchOfficialEmptyPlaceholderSemantics: "Railway CLI v5.45.0",
                   railwayStagedPatchQueriedWithDecryptVariablesFalse: true,
                   railwayStagedPatchCanonicalEmptyBeforeAndAfter: true,
                   railwayStagedPatchContentsPersisted: false,
@@ -1609,9 +1656,17 @@ jobs:
             and .businessFileInventorySha256 == .receipt.archive.businessFileInventorySha256
             and .railwayIdentityBefore == .railwayIdentityAfter
             and .railwayIdentityBefore.volumeAttachmentCount == 1
+            and (.railwayIdentityBefore.unmergedChangesCountObserved == null or .railwayIdentityBefore.unmergedChangesCountObserved == 0)
+            and .railwayIdentityBefore.unmergedChangesCountUsedAsEmptyProof == false
             and .railwayIdentityBefore.stagedChangesEmpty == true
+            and (.railwayIdentityBefore.stagedPatchId | type) == "string"
+            and (.railwayIdentityBefore.stagedPatchId | length) > 0
+            and .railwayIdentityBefore.stagedPatchEnvironmentId == .environmentId
+            and .railwayIdentityBefore.stagedPatchStatus == "STAGED"
+            and .railwayIdentityBefore.stagedPatchCanonicalEmpty == true
+            and .railwayIdentityBefore.stagedPatchAuthority == "environmentStagedChanges.patch(decryptVariables:false)"
             and .railwayIdentityBefore.stagedPatchStructuralChangeCount == 0
-            and (.railwayIdentityBefore.stagedPatchFingerprint | test("^[a-f0-9]{64}$"))
+            and .railwayIdentityBefore.stagedPatchFingerprint == "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
             and .railwayIdentityBefore.stagedPatchFingerprint == .railwayIdentityAfter.stagedPatchFingerprint
             and .apiRuntimeIdentityBefore == .apiRuntimeIdentityAfter
             and .railwayIdentityBefore.replicaId == .apiRuntimeIdentityBefore.replicaId
@@ -1619,7 +1674,12 @@ jobs:
             and .apiRuntimeIdentityBefore.startedAt == .backupRuntimeIdentity.startedAt
             and .receipt.runtime.startedAt == .backupRuntimeIdentity.startedAt
             and .verificationSemantics.railwayMutationFreezeClaimed == false
-            and .verificationSemantics.railwayNullableUnmergedCountAccepted == false
+            and .verificationSemantics.railwayNullableUnmergedCountNormalizedToZero == false
+            and .verificationSemantics.railwayUnmergedChangesCountUsedAsEmptyProof == false
+            and .verificationSemantics.railwayUnmergedChangesCountExplicitNonzeroVeto == true
+            and .verificationSemantics.railwayCanonicalStagedPatchUsedAsEmptyProof == true
+            and .verificationSemantics.railwayStagedPatchIdentityAndStatusValidated == true
+            and .verificationSemantics.railwayStagedPatchOfficialEmptyPlaceholderSemantics == "Railway CLI v5.45.0"
             and .verificationSemantics.railwayStagedPatchQueriedWithDecryptVariablesFalse == true
             and .verificationSemantics.railwayStagedPatchCanonicalEmptyBeforeAndAfter == true
             and .verificationSemantics.railwayStagedPatchContentsPersisted == false

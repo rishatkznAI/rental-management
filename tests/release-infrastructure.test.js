@@ -15,11 +15,39 @@ import {
 } from '../scripts/railway-backend-release.mjs';
 import { classifyReleaseOutcome } from '../scripts/release-outcome.mjs';
 import { classifyReleaseChangedFiles } from '../scripts/release-classifier.mjs';
-import { resolveFrontendScriptUrls } from '../scripts/release-preflight.mjs';
+import {
+  extractFrontendBuildMarkerFromBundle,
+  readFrontendBundle,
+  readFrontendBundleWithPropagationRetry,
+  releaseVerificationContractResult,
+  resolveFrontendScriptUrls,
+} from '../scripts/release-preflight.mjs';
 
 const workflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
 const backendReleaseSource = readFileSync(new URL('../scripts/railway-backend-release.mjs', import.meta.url), 'utf8');
+const releaseOutcomeSource = readFileSync(new URL('../scripts/release-outcome.mjs', import.meta.url), 'utf8');
 const railwayConfigSource = readFileSync(new URL('../server/railway.toml', import.meta.url), 'utf8');
+
+function textFetchResult(url, text, { status = 200, headers = {} } = {}) {
+  const normalizedHeaders = Object.fromEntries(
+    Object.entries({
+      'content-type': 'text/html; charset=utf-8',
+      ...headers,
+    }).map(([name, value]) => [name.toLowerCase(), String(value)]),
+  );
+  return {
+    response: {
+      status,
+      url,
+      headers: {
+        get(name) {
+          return normalizedHeaders[String(name).toLowerCase()] ?? null;
+        },
+      },
+    },
+    text,
+  };
+}
 
 const expected = {
   commit: '5f071fc531c870fa2422320efe64bc83cafe509e',
@@ -558,6 +586,307 @@ test('frontend SHA collection follows the final document origin and ignores thir
   assert.deepEqual(resolveFrontendScriptUrls(html, 'https://skytech-rent.ru/'), [
     'https://skytech-rent.ru/assets/index-target.js',
   ]);
+});
+
+test('frontend propagation retry uses absolute offsets and never fetches third-party scripts', async () => {
+  const frontendUrl = 'https://app.skytech-rent.test/';
+  const apiUrl = 'https://api.skytech-rent.test';
+  const representations = [
+    '<html><body>temporarily empty</body></html>',
+    '<html><script src="https://static.example.test/beacon.js"></script></html>',
+    '<html><script type="module" src="/assets/index-exact.js"></script></html>',
+  ];
+  let clockMs = 0;
+  let rootCalls = 0;
+  const rootCallTimes = [];
+  const assetCalls = [];
+  const waits = [];
+  const retries = [];
+  const fetchTextImpl = async url => {
+    const parsed = new URL(url);
+    if (parsed.origin === 'https://app.skytech-rent.test' && parsed.pathname === '/') {
+      rootCallTimes.push(clockMs);
+      const html = representations[rootCalls++];
+      return textFetchResult(url, html, {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'x-cache': 'MISS' },
+      });
+    }
+    if (parsed.pathname === '/assets/index-exact.js') {
+      assetCalls.push(url);
+      return textFetchResult(url, [
+        'const build={service:"frontend",',
+        `commit:"${expected.commit}",`,
+        'releaseType:"full-stack",',
+        `apiBaseUrl:"${apiUrl}"};`,
+      ].join(''));
+    }
+    throw new Error(`unexpected frontend fetch ${parsed.origin}${parsed.pathname}`);
+  };
+  const bundle = await readFrontendBundleWithPropagationRetry(frontendUrl, {
+    retryOffsetsMs: [0, 30, 90],
+    readBundle: (url, options) => readFrontendBundle(url, { ...options, fetchTextImpl }),
+    now: () => clockMs,
+    sleep: async delayMs => {
+      waits.push(delayMs);
+      clockMs += delayMs;
+    },
+    onRetry: event => retries.push(event),
+  });
+
+  assert.equal(rootCalls, 3);
+  assert.deepEqual(rootCallTimes, [0, 30, 90]);
+  assert.deepEqual(waits, [30, 60]);
+  assert.equal(assetCalls.length, 1);
+  assert.equal(assetCalls[0], 'https://app.skytech-rent.test/assets/index-exact.js');
+  assert.equal(retries.length, 2);
+  assert.deepEqual(retries.map(retry => retry.error.evidence.totalScriptCount), [0, 1]);
+  assert.deepEqual(retries.map(retry => retry.error.evidence.sameOriginScriptCount), [0, 0]);
+  assert.equal(bundle.combinedText.includes(expected.commit), true);
+  assert.equal(bundle.combinedText.includes(apiUrl), true);
+});
+
+test('frontend propagation retry exhausts the exact bounded schedule with safe terminal evidence', async () => {
+  const frontendUrl = 'https://app.skytech-rent.test/';
+  const retryOffsetsMs = [0, 30_000, 90_000, 210_000, 390_000, 630_000];
+  let clockMs = 0;
+  let rootCalls = 0;
+  const rootCallTimes = [];
+  const rawSentinel = 'raw-body-secret-must-not-be-logged';
+  const fetchTextImpl = async url => {
+    rootCallTimes.push(clockMs);
+    rootCalls += 1;
+    return textFetchResult(url, `<html>${rawSentinel}-${rootCalls}</html>`, {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'max-age=600',
+        age: '421',
+        etag: 'public-etag',
+        'last-modified': 'Thu, 27 Aug 2026 12:14:34 GMT',
+        server: 'GitHub.com',
+        'x-cache': 'HIT',
+        'x-served-by': 'cache-iad-kcgs7200071-IAD',
+        'x-github-edge-region': 'eastus',
+        'x-github-request-id': 'SAFE:PUBLIC:REQUEST:ID',
+        'set-cookie': 'session=raw-cookie-secret-must-not-be-logged',
+        authorization: 'Bearer raw-authorization-secret-must-not-be-logged',
+      },
+    });
+  };
+
+  await assert.rejects(
+    () => readFrontendBundleWithPropagationRetry(frontendUrl, {
+      retryOffsetsMs,
+      readBundle: (url, options) => readFrontendBundle(url, { ...options, fetchTextImpl }),
+      now: () => clockMs,
+      sleep: async delayMs => {
+        assert.ok(delayMs <= 60_000);
+        clockMs += delayMs;
+      },
+      onRetry: () => {},
+    }),
+    error => {
+      assert.equal(error?.code, 'FRONTEND_REPRESENTATION_NOT_READY');
+      assert.equal(error?.evidence?.status, 200);
+      assert.equal(error?.evidence?.attempts, 6);
+      assert.equal(error?.evidence?.durationMs, 630_000);
+      assert.equal(error?.evidence?.deadlineMs, 690_000);
+      assert.deepEqual(error?.evidence?.retryOffsetsMs, retryOffsetsMs);
+      assert.equal(error?.evidence?.finalOrigin, 'https://app.skytech-rent.test');
+      assert.equal(error?.evidence?.cacheControl, 'max-age=600');
+      assert.equal(error?.evidence?.age, '421');
+      assert.equal(error?.evidence?.server, 'GitHub.com');
+      assert.equal(error?.evidence?.cache, 'HIT');
+      assert.equal(error?.evidence?.totalScriptCount, 0);
+      assert.equal(error?.evidence?.sameOriginScriptCount, 0);
+      assert.match(error?.evidence?.bodySha256 || '', /^[a-f0-9]{64}$/);
+      assert.ok(Number.isSafeInteger(error?.evidence?.bodyBytes));
+      assert.equal(error.message.includes(rawSentinel), false);
+      assert.equal(error.message.includes('raw-cookie-secret'), false);
+      assert.equal(error.message.includes('raw-authorization-secret'), false);
+      return true;
+    },
+  );
+
+  assert.equal(rootCalls, 6);
+  assert.deepEqual(rootCallTimes, retryOffsetsMs);
+});
+
+test('frontend propagation retry fails immediately for root and same-origin asset HTTP errors', async t => {
+  await t.test('root response is non-200', async () => {
+    let calls = 0;
+    let sleeps = 0;
+    await assert.rejects(
+      () => readFrontendBundleWithPropagationRetry('https://app.skytech-rent.test/', {
+        readBundle: (url, options) => readFrontendBundle(url, {
+          ...options,
+          fetchTextImpl: async requestUrl => {
+            calls += 1;
+            return textFetchResult(requestUrl, 'unavailable', { status: 503 });
+          },
+        }),
+        sleep: async () => { sleeps += 1; },
+      }),
+      /frontend URL must return 200\. HTTP 503/,
+    );
+    assert.equal(calls, 1);
+    assert.equal(sleeps, 0);
+  });
+
+  await t.test('same-origin asset response is non-200', async () => {
+    let rootCalls = 0;
+    let assetCalls = 0;
+    let sleeps = 0;
+    await assert.rejects(
+      () => readFrontendBundleWithPropagationRetry('https://app.skytech-rent.test/', {
+        readBundle: (url, options) => readFrontendBundle(url, {
+          ...options,
+          fetchTextImpl: async requestUrl => {
+            const parsed = new URL(requestUrl);
+            if (parsed.pathname === '/') {
+              rootCalls += 1;
+              return textFetchResult(requestUrl, '<script src="/assets/index.js"></script>');
+            }
+            assetCalls += 1;
+            return textFetchResult(requestUrl, 'unavailable', { status: 503 });
+          },
+        }),
+        sleep: async () => { sleeps += 1; },
+      }),
+      /frontend asset must return 200\. HTTP 503/,
+    );
+    assert.equal(rootCalls, 1);
+    assert.equal(assetCalls, 1);
+    assert.equal(sleeps, 0);
+  });
+});
+
+test('frontend propagation retry fails immediately for non-HTML or missing media types', async t => {
+  for (const [name, contentType, expectedType] of [
+    ['JSON', 'application/json; charset=utf-8', 'application/json'],
+    ['missing Content-Type', '', 'missing'],
+  ]) {
+    await t.test(name, async () => {
+      let calls = 0;
+      let sleeps = 0;
+      await assert.rejects(
+        () => readFrontendBundleWithPropagationRetry('https://app.skytech-rent.test/', {
+          readBundle: (url, options) => readFrontendBundle(url, {
+            ...options,
+            fetchTextImpl: async requestUrl => {
+              calls += 1;
+              return textFetchResult(requestUrl, '<html>no scripts</html>', {
+                headers: { 'content-type': contentType },
+              });
+            },
+          }),
+          sleep: async () => { sleeps += 1; },
+        }),
+        new RegExp(`frontend URL must return text/html\\. content-type=${expectedType}`),
+      );
+      assert.equal(calls, 1);
+      assert.equal(sleeps, 0);
+    });
+  }
+});
+
+test('frontend propagation retry fails immediately for a root network error', async () => {
+  let calls = 0;
+  let sleeps = 0;
+  await assert.rejects(
+    () => readFrontendBundleWithPropagationRetry('https://app.skytech-rent.test/', {
+      readBundle: (url, options) => readFrontendBundle(url, {
+        ...options,
+        fetchTextImpl: async () => {
+          calls += 1;
+          throw new Error('simulated network failure');
+        },
+      }),
+      sleep: async () => { sleeps += 1; },
+    }),
+    /simulated network failure/,
+  );
+  assert.equal(calls, 1);
+  assert.equal(sleeps, 0);
+});
+
+test('frontend propagation retry never retries a collected stale marker or wrong API target', async t => {
+  const apiUrl = 'https://api.skytech-rent.test';
+  const backendBuild = { commitFull: expected.commit, releaseType: 'full-stack' };
+  const okProbe = { ok: true, status: 200, timeoutMs: 15_000, timedOut: false, error: '' };
+
+  async function collectBundle(assetText) {
+    let rootCalls = 0;
+    let assetCalls = 0;
+    let sleeps = 0;
+    const bundle = await readFrontendBundleWithPropagationRetry('https://app.skytech-rent.test/', {
+      readBundle: (url, options) => readFrontendBundle(url, {
+        ...options,
+        fetchTextImpl: async requestUrl => {
+          const parsed = new URL(requestUrl);
+          if (parsed.pathname === '/') {
+            rootCalls += 1;
+            return textFetchResult(requestUrl, '<script src="/assets/index.js"></script>');
+          }
+          assetCalls += 1;
+          return textFetchResult(requestUrl, assetText);
+        },
+      }),
+      sleep: async () => { sleeps += 1; },
+    });
+    assert.equal(rootCalls, 1);
+    assert.equal(assetCalls, 1);
+    assert.equal(sleeps, 0);
+    return bundle;
+  }
+
+  await t.test('stale marker remains a strict contract failure', async () => {
+    const staleCommit = 'a'.repeat(40);
+    const bundle = await collectBundle(
+      `const b={service:"frontend",commit:"${staleCommit}",releaseType:"full-stack",apiBaseUrl:"${apiUrl}"};`,
+    );
+    const result = releaseVerificationContractResult({
+      env: 'production',
+      releaseType: 'full-stack',
+      frontendBuild: extractFrontendBuildMarkerFromBundle(bundle.combinedText) || {},
+      backendBuild,
+      expectedCommit: expected.commit,
+      frontendEvidence: { ...okProbe, ok: bundle.combinedText.includes(apiUrl) },
+      backendVersion: okProbe,
+      health: okProbe,
+      readiness: okProbe,
+    });
+    assert.equal(result.pass, false);
+    assert.ok(result.failureReasons.some(reason => reason.includes('frontend commit mismatch')));
+  });
+
+  await t.test('wrong API target remains a strict contract failure', async () => {
+    const bundle = await collectBundle(
+      `const b={service:"frontend",commit:"${expected.commit}",releaseType:"full-stack",apiBaseUrl:"https://wrong-api.test"};`,
+    );
+    const hasExpectedApi = bundle.combinedText.includes(apiUrl);
+    const result = releaseVerificationContractResult({
+      env: 'production',
+      releaseType: 'full-stack',
+      frontendBuild: extractFrontendBuildMarkerFromBundle(bundle.combinedText) || {},
+      backendBuild,
+      expectedCommit: expected.commit,
+      frontendEvidence: {
+        ...okProbe,
+        ok: hasExpectedApi,
+        error: hasExpectedApi ? '' : `frontend bundle does not contain expected API URL ${apiUrl}`,
+      },
+      backendVersion: okProbe,
+      health: okProbe,
+      readiness: okProbe,
+    });
+    assert.equal(result.pass, false);
+    assert.ok(result.failureReasons.some(reason => reason.includes('frontend marker required')));
+  });
+});
+
+test('release outcome remains a single-shot observer instead of extending the propagation retry window', () => {
+  assert.match(releaseOutcomeSource, /\breadFrontendBundle\b/);
+  assert.doesNotMatch(releaseOutcomeSource, /\breadFrontendBundleWithPropagationRetry\b/);
 });
 
 test('production workflow orders backend before frontend and keeps failures fail closed', () => {

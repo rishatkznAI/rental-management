@@ -243,13 +243,14 @@ jobs:
               --header "@$request_headers" \
               --dump-header "$headers" \
               --output "$output" \
-              --write-out '%{http_code}\n%{url_effective}\n%{num_redirects}' \
+              --write-out '%{http_code}\n%{url_effective}\n%{num_redirects}\n%{size_download}' \
               "$endpoint")"
             mapfile -t fields <<< "$result"
-            test "${#fields[@]}" = "3"
+            test "${#fields[@]}" = "4"
             test "${fields[0]}" = "200"
             test "${fields[1]}" = "$endpoint"
             test "${fields[2]}" = "0"
+            test "${fields[3]}" = "$max_bytes"
             chmod 600 "$output" "$headers"
           }
           read_exact_header() {
@@ -268,6 +269,34 @@ jobs:
               }
               END { if (count != 1 || values[1] == "") exit 1; print values[1] }
             ' "$header_file"
+          }
+          validate_optional_exact_content_length() {
+            local expected="$1"
+            local header_file="$2"
+            local observed
+            if ! observed="$(awk '
+              BEGIN { IGNORECASE = 1; count = 0 }
+              {
+                sub(/\r$/, "")
+                if (tolower(substr($0, 1, 15)) == "content-length:") {
+                  value = substr($0, 16)
+                  sub(/^[[:space:]]+/, "", value)
+                  values[++count] = value
+                }
+              }
+              END {
+                if (count == 0) exit 0
+                if (count != 1 || values[1] == "") exit 1
+                print values[1]
+              }
+            ' "$header_file")"; then
+              return 1
+            fi
+            # Railway's public edge may replace the origin Content-Length with
+            # transfer framing. Exact local byte counts, upper bounds, and
+            # cryptographic digests remain authoritative; a preserved header
+            # must still be singular and exact.
+            test -z "$observed" || test "$observed" = "$expected"
           }
           reject_header() {
             local wanted="$1"
@@ -325,7 +354,7 @@ jobs:
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$receipt_headers")" = "$receipt_sha"
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$receipt_headers")" = "$receipt_sha"
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$receipt_headers")" = "$HISTORICAL_SOURCE_COMMIT"
-          test "$(read_exact_header 'Content-Length' "$receipt_headers")" = "$HISTORICAL_RECEIPT_SIZE"
+          validate_optional_exact_content_length "$HISTORICAL_RECEIPT_SIZE" "$receipt_headers"
           test "$(read_exact_header 'Content-Type' "$receipt_headers")" = "application/json; charset=utf-8"
           test "$(read_exact_header 'Content-Disposition' "$receipt_headers")" = "attachment; filename=\"$HISTORICAL_RECEIPT_FILENAME\""
           validate_security_headers "$receipt_headers"
@@ -336,7 +365,7 @@ jobs:
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$archive_headers")" = "$archive_sha"
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$archive_headers")" = "$receipt_sha"
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$archive_headers")" = "$HISTORICAL_SOURCE_COMMIT"
-          test "$(read_exact_header 'Content-Length' "$archive_headers")" = "$HISTORICAL_ARCHIVE_SIZE"
+          validate_optional_exact_content_length "$HISTORICAL_ARCHIVE_SIZE" "$archive_headers"
           test "$(read_exact_header 'Content-Type' "$archive_headers")" = "application/zip"
           test "$(read_exact_header 'Content-Disposition' "$archive_headers")" = "attachment; filename=\"$HISTORICAL_ARCHIVE_FILENAME\""
           validate_security_headers "$archive_headers"
@@ -348,7 +377,7 @@ jobs:
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$second_receipt_headers")" = "$receipt_sha"
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$second_receipt_headers")" = "$receipt_sha"
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$second_receipt_headers")" = "$HISTORICAL_SOURCE_COMMIT"
-          test "$(read_exact_header 'Content-Length' "$second_receipt_headers")" = "$HISTORICAL_RECEIPT_SIZE"
+          validate_optional_exact_content_length "$HISTORICAL_RECEIPT_SIZE" "$second_receipt_headers"
           test "$(read_exact_header 'Content-Type' "$second_receipt_headers")" = "application/json; charset=utf-8"
           test "$(read_exact_header 'Content-Disposition' "$second_receipt_headers")" = "attachment; filename=\"$HISTORICAL_RECEIPT_FILENAME\""
           validate_security_headers "$second_receipt_headers"
@@ -664,12 +693,13 @@ jobs:
             --header 'Origin: https://historical-backup-recovery.invalid' \
             --header "@$request_headers" --dump-header "$response_headers" \
             --output "$terminal_receipt" \
-            --write-out '%{http_code}\n%{url_effective}\n%{num_redirects}' "$endpoint")"
+            --write-out '%{http_code}\n%{url_effective}\n%{num_redirects}\n%{size_download}' "$endpoint")"
           mapfile -t fields <<< "$result"
-          test "${#fields[@]}" = "3"
+          test "${#fields[@]}" = "4"
           test "${fields[0]}" = "200"
           test "${fields[1]}" = "$endpoint"
           test "${fields[2]}" = "0"
+          test "${fields[3]}" = "$HISTORICAL_RECEIPT_SIZE"
           chmod 600 "$response_headers" "$terminal_receipt"
           test "$(stat -c '%s' "$terminal_receipt")" = "$HISTORICAL_RECEIPT_SIZE"
           test "$(sha256sum "$terminal_receipt" | awk '{print $1}')" = "$(jq -er '.receiptSha256' historical-backup-download-identity.json)"
@@ -680,10 +710,34 @@ jobs:
               END { if (count != 1 || values[1] == "") exit 1; print values[1] }
             ' "$2"
           }
+          validate_optional_exact_content_length() {
+            local expected="$1"
+            local header_file="$2"
+            local observed
+            if ! observed="$(awk '
+              BEGIN { IGNORECASE = 1; count = 0 }
+              {
+                sub(/\r$/, "")
+                if (tolower(substr($0, 1, 15)) == "content-length:") {
+                  value = substr($0, 16)
+                  sub(/^[[:space:]]+/, "", value)
+                  values[++count] = value
+                }
+              }
+              END {
+                if (count == 0) exit 0
+                if (count != 1 || values[1] == "") exit 1
+                print values[1]
+              }
+            ' "$header_file")"; then
+              return 1
+            fi
+            test -z "$observed" || test "$observed" = "$expected"
+          }
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Content-SHA256' "$response_headers")" = "$(jq -er '.receiptSha256' historical-backup-download-identity.json)"
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256' "$response_headers")" = "$(jq -er '.receiptSha256' historical-backup-download-identity.json)"
           test "$(read_exact_header 'X-Skytech-Pre-Compatibility-Backup-Source-Commit' "$response_headers")" = "$HISTORICAL_SOURCE_COMMIT"
-          test "$(read_exact_header 'Content-Length' "$response_headers")" = "$HISTORICAL_RECEIPT_SIZE"
+          validate_optional_exact_content_length "$HISTORICAL_RECEIPT_SIZE" "$response_headers"
           test "$(read_exact_header 'Content-Type' "$response_headers")" = "application/json; charset=utf-8"
           test "$(read_exact_header 'Content-Disposition' "$response_headers")" = "attachment; filename=\"$HISTORICAL_RECEIPT_FILENAME\""
           test "$(read_exact_header 'Cache-Control' "$response_headers")" = "no-store"

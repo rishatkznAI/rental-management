@@ -442,13 +442,93 @@ test('artifact transport is strict HTTPS receipt-archive-receipt with exact boun
   assert.match(workflow, /--proto '=https' --tlsv1\.2/);
   assert.match(workflow, /--max-redirs 0 --max-filesize "\$max_bytes"/);
   assert.match(workflow, /test "\$\{fields\[2\]\}" = "0"/);
+  assert.equal((workflow.match(/%\{size_download\}/g) || []).length, 2);
+  assert.equal((workflow.match(/test "\$\{#fields\[@\]\}" = "4"/g) || []).length, 2);
+  assert.match(workflow, /test "\$\{fields\[3\]\}" = "\$max_bytes"/);
+  assert.match(workflow, /test "\$\{fields\[3\]\}" = "\$HISTORICAL_RECEIPT_SIZE"/);
   assert.match(workflow, /Origin: https:\/\/historical-backup-recovery\.invalid/);
   assert.match(workflow, /reject_header_prefix 'Access-Control-'/);
   assert.match(workflow, /Cache-Control.*no-store/s);
   assert.match(workflow, /Content-Security-Policy.*default-src 'none'; frame-ancestors 'none'/s);
   assert.match(workflow, /Strict-Transport-Security.*max-age=31536000; includeSubDomains/s);
+  assert.equal(
+    (workflow.match(/validate_optional_exact_content_length\(\) \{/g) || []).length,
+    2,
+  );
+  assert.equal(
+    (workflow.match(/validate_optional_exact_content_length "\$HISTORICAL_RECEIPT_SIZE"/g) || []).length,
+    3,
+  );
+  assert.equal(
+    (workflow.match(/validate_optional_exact_content_length "\$HISTORICAL_ARCHIVE_SIZE"/g) || []).length,
+    1,
+  );
+  assert.doesNotMatch(workflow, /read_exact_header 'Content-Length'/);
+  assert.match(workflow, /if \(count == 0\) exit 0/);
+  assert.match(workflow, /if \(count != 1 \|\| values\[1\] == ""\) exit 1/);
+  assert.match(workflow, /test -z "\$observed" \|\| test "\$observed" = "\$expected"/);
+  assert.match(workflow, /stat -c '%s'.*HISTORICAL_RECEIPT_SIZE/s);
+  assert.match(workflow, /stat -c '%s'.*HISTORICAL_ARCHIVE_SIZE/s);
+  assert.match(workflow, /sha256sum "\$archive".*"\$archive_sha"/s);
   assert.match(workflow, /terminally re-prove the exact durable receipt/i);
   assert.doesNotMatch(workflow, /\b(?:ssh|sftp|scp)\b/i);
+});
+
+test('recovery transport accepts a stripped Content-Length but rejects conflicting framing metadata', () => {
+  const marker = '          validate_optional_exact_content_length() {';
+  const functionSources = [];
+  let cursor = 0;
+  while (true) {
+    const start = workflow.indexOf(marker, cursor);
+    if (start < 0) break;
+    const end = workflow.indexOf('\n          }\n', start);
+    assert.ok(end > start);
+    functionSources.push(workflow
+      .slice(start, end + '\n          }'.length)
+      .split('\n')
+      .map(line => line.startsWith('          ') ? line.slice(10) : line)
+      .join('\n'));
+    cursor = end + '\n          }'.length;
+  }
+  assert.equal(functionSources.length, 2);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'historical-content-length-'));
+  const run = (functionSource, headers, expected = '3835') => {
+    const headerPath = path.join(root, `headers-${crypto.randomUUID()}`);
+    fs.writeFileSync(headerPath, headers, { mode: 0o600 });
+    return execFileSync('bash', [
+      '-c',
+      `${functionSource}\nvalidate_optional_exact_content_length "$1" "$2"`,
+      'content-length-test',
+      expected,
+      headerPath,
+    ], { stdio: 'pipe' });
+  };
+  try {
+    for (const functionSource of functionSources) {
+      assert.doesNotThrow(() => run(
+        functionSource,
+        'HTTP/2 200\r\nCache-Control: no-store\r\n\r\n',
+      ));
+      assert.doesNotThrow(() => run(
+        functionSource,
+        'HTTP/2 200\r\nContent-Length: 3835\r\n\r\n',
+      ));
+      assert.throws(() => run(
+        functionSource,
+        'HTTP/2 200\r\nContent-Length: 3834\r\n\r\n',
+      ));
+      assert.throws(() => run(
+        functionSource,
+        'HTTP/2 200\r\nContent-Length:\r\n\r\n',
+      ));
+      assert.throws(() => run(
+        functionSource,
+        'HTTP/2 200\r\nContent-Length: 3835\r\nContent-Length: 3835\r\n\r\n',
+      ));
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('encryption secret is purpose-specific, consumed only, and plaintext is removed before retrieval', () => {

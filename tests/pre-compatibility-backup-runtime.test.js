@@ -1781,6 +1781,12 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
     new URL('../scripts/railway-empty-staged-change-proof.mjs', import.meta.url),
     'utf8',
   );
+  const firstStepsOffset = workflow.indexOf('    steps:');
+  assert.ok(firstStepsOffset > workflow.indexOf('jobs:'));
+  assert.doesNotMatch(
+    workflow.slice(workflow.indexOf('jobs:'), firstStepsOffset),
+    /\$\{\{\s*runner\./,
+  );
   const namedSteps = workflow.split(/^      - name: /m).slice(1);
   const step = name => {
     const found = namedSteps.find(candidate => candidate.startsWith(name));
@@ -1800,7 +1806,7 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
     assert.doesNotMatch(protectedWorkflow, /\brailway link\b/);
   }
   assert.equal((workflow.match(/railway status\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--json >/g) || []).length, 2);
-  assert.equal((workflow.match(/railway volume\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--service "\$RAILWAY_SERVICE_ID"\s+\\\s+files --volume "\$RAILWAY_VOLUME_ID" download/g) || []).length, 2);
+  assert.equal((workflow.match(/railway volume\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--service "\$RAILWAY_SERVICE_ID"\s+\\\s+files --volume "\$RAILWAY_VOLUME_ID" download/g) || []).length, 0);
   assert.match(workflow, /EXPECTED_REPOSITORY: rishatkznAI\/rental-management/);
   assert.match(workflow, /EXPECTED_REF: refs\/heads\/main/);
   assert.match(workflow, /test "\$GITHUB_REPOSITORY" = "\$EXPECTED_REPOSITORY"/);
@@ -1912,15 +1918,54 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
   assert.equal((workflow.match(/\$controlPlane\.stagedPatchStructuralChangeCount == 0/g) || []).length, 2);
 
   const invokeStep = step('Invoke the guarded idempotent preliminary backup');
+  const prerequisiteStep = step('Validate off-volume backup prerequisites before invocation');
   const railwayDownloadStep = step('Download and verify the plaintext backup and durable receipt from Railway');
   const encryptionStep = step('Encrypt the verified Railway download without Railway credentials');
   const digestStep = step('Enforce the uploaded artifact archive digest independently');
   const storedValidationStep = step('Decrypt and revalidate the freshly downloaded stored artifact');
   const terminalRecheckStep = step('Terminally recheck same-nonce idempotency after every stored-copy predicate');
+  assert.match(prerequisiteStep, /PRELIMINARY_BACKUP_TOKEN/);
+  assert.match(prerequisiteStep, /BACKUP_ENCRYPTION_PASSPHRASE/);
+  assert.match(prerequisiteStep, /command -v curl/);
+  assert.match(prerequisiteStep, /command -v gpg/);
+  assert.match(prerequisiteStep, /command -v unzip/);
+  assert.match(prerequisiteStep, /command -v sqlite3/);
+  assert.doesNotMatch(prerequisiteStep, /RAILWAY_TOKEN|\brailway volume\b|curl\s+--|\bgpg\s+--/);
   assert.match(invokeStep, /PRELIMINARY_BACKUP_TOKEN/);
   assert.doesNotMatch(invokeStep, /RAILWAY_TOKEN|BACKUP_ENCRYPTION_PASSPHRASE/);
-  assert.match(railwayDownloadStep, /RAILWAY_TOKEN/);
-  assert.doesNotMatch(railwayDownloadStep, /PRELIMINARY_BACKUP_TOKEN|BACKUP_ENCRYPTION_PASSPHRASE|\bgpg\b/);
+  assert.match(railwayDownloadStep, /PRELIMINARY_BACKUP_TOKEN/);
+  assert.match(railwayDownloadStep, /BACKUP_DOWNLOAD_DIRECTORY: \$\{\{ runner\.temp \}\}/);
+  assert.match(railwayDownloadStep, /X-Skytech-Pre-Compatibility-Backup-Source-Commit/);
+  assert.match(railwayDownloadStep, /skytech-pre-compatibility-backup\/artifacts/);
+  assert.match(railwayDownloadStep, /\$base_url\/receipt/);
+  assert.match(railwayDownloadStep, /\$base_url\/archive/);
+  assert.match(railwayDownloadStep, /--proto '=https' --tlsv1\.2/);
+  assert.match(railwayDownloadStep, /--max-redirs 0/);
+  assert.match(railwayDownloadStep, /%\{url_effective\}/);
+  assert.match(railwayDownloadStep, /%\{num_redirects\}/);
+  assert.match(railwayDownloadStep, /--header "@\$protected_headers"/);
+  assert.match(railwayDownloadStep, /Accept-Encoding: identity/);
+  assert.match(railwayDownloadStep, /install -d -m 700 "\$BACKUP_DOWNLOAD_DIRECTORY"/);
+  assert.match(railwayDownloadStep, /chmod 600 "\$BACKUP_PLAINTEXT_ARCHIVE" "\$BACKUP_DOWNLOADED_RECEIPT"/);
+  assert.match(railwayDownloadStep, /X-Skytech-Pre-Compatibility-Backup-Content-SHA256/);
+  assert.match(railwayDownloadStep, /X-Skytech-Pre-Compatibility-Backup-Receipt-SHA256/);
+  assert.match(railwayDownloadStep, /reject_response_header 'Location'/);
+  assert.match(railwayDownloadStep, /reject_response_header 'Content-Encoding'/);
+  assert.match(railwayDownloadStep, /reject_response_header 'Access-Control-Allow-Origin'/);
+  assert.match(railwayDownloadStep, /reject_response_header 'Access-Control-Allow-Credentials'/);
+  assert.match(railwayDownloadStep, /X-Content-Type-Options/);
+  assert.match(railwayDownloadStep, /Content-Security-Policy/);
+  assert.match(railwayDownloadStep, /Strict-Transport-Security/);
+  assert.match(railwayDownloadStep, /terminal_receipt_http_status/);
+  assert.match(railwayDownloadStep, /cmp --silent "\$BACKUP_DOWNLOADED_RECEIPT" "\$terminal_receipt"/);
+  assert.match(railwayDownloadStep, /receiptReprobedAfterArchive: true/);
+  assert.match(railwayDownloadStep, /terminalReceiptByteEquivalent: true/);
+  assert.match(railwayDownloadStep, /download_step_complete=false/);
+  assert.match(railwayDownloadStep, /rm -rf "\$BACKUP_DOWNLOAD_DIRECTORY"/);
+  assert.match(railwayDownloadStep, /serverAndLocalDigestsMatched: true/);
+  assert.match(railwayDownloadStep, /sshOrSftpUsed: false/);
+  assert.match(railwayDownloadStep, /redirectsFollowed: false/);
+  assert.doesNotMatch(railwayDownloadStep, /RAILWAY_TOKEN|BACKUP_ENCRYPTION_PASSPHRASE|\bgpg\b|\brailway volume\b|--location\b|ssh-keyscan|StrictHostKeyChecking/);
   assert.match(encryptionStep, /BACKUP_ENCRYPTION_PASSPHRASE/);
   assert.doesNotMatch(encryptionStep, /RAILWAY_TOKEN|PRELIMINARY_BACKUP_TOKEN/);
   assert.match(digestStep, /GITHUB_TOKEN/);
@@ -1944,7 +1989,7 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
   assert.match(terminalRecheckStep, /cmp --silent original-backup-object\.canonical\.json terminal-backup-object\.canonical\.json/);
   assert.match(terminalRecheckStep, /backupObjectByteEquivalent: true/);
   assert.doesNotMatch(terminalRecheckStep, /--header\s+["']X-Skytech-Pre-Compatibility-Backup-Token:/);
-  assert.equal((workflow.match(/\/api\/admin\/skytech-pre-compatibility-backup/g) || []).length, 4);
+  assert.equal((workflow.match(/\/api\/admin\/skytech-pre-compatibility-backup/g) || []).length, 5);
   assert.equal((workflow.match(/\/api\/admin\/skytech-pre-compatibility-backup\/status/g) || []).length, 2);
   assert.doesNotMatch(workflow, /--max-time 3300/);
   assert.match(invokeStep, /test "\$start_http_status" = "202"/);
@@ -1989,6 +2034,8 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
   assert.match(workflow, /\.terminalConservationRecheck\.distinctWorkerInvocations == true/);
   assert.match(workflow, /terminal-idempotency-response\.json/);
   assert.match(workflow, /terminal-conservation-validation\.json/);
+  assert.match(workflow, /preliminary-backup-download-transport\.json/);
+  assert.match(workflow, /rm -rf \\\s+"\$BACKUP_DOWNLOAD_DIRECTORY"/);
   assert.match(workflow, /STORED_ARTIFACT_DOWNLOADED_DECRYPTED_AND_REVALIDATED/);
   assert.match(workflow, /path: skytech-clean-reset-backup\.zip\.gpg/);
   assert.doesNotMatch(workflow, /^\s*path:\s*skytech-clean-reset-backup\.zip\s*$/m);

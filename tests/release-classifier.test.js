@@ -96,6 +96,14 @@ test('release classifier preserves explicit deploy-tooling treatment for product
   assert.equal(result.entries[0].kind, 'deploy-tooling');
 });
 
+test('release classifier treats the guarded clean-production backup workflow as deploy tooling', () => {
+  const result = classifyReleaseChangedFiles([
+    '.github/workflows/skytech-clean-production-reset.yml',
+  ]);
+  assert.equal(result.releaseType, 'deploy-tooling');
+  assert.equal(result.failClosed, false);
+});
+
 test('deploy workflow delegates push classification to the tested classifier', () => {
   assert.match(deployWorkflowSource, /node scripts\/release-classifier\.mjs/);
   assert.match(deployWorkflowSource, /--changed-files-file "\$changed_files_file"/);

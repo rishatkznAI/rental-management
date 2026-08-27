@@ -26,6 +26,7 @@ const FRONTEND_TEST_PATTERNS = [
 // CI assertions for that tooling. Keep them distinct from ordinary E2E specs.
 const DEPLOY_TOOLING_PATTERNS = [
   /^\.github\/workflows\/(?:deploy|.*smoke)\.yml$/,
+  /^\.github\/workflows\/skytech-clean-production-reset\.yml$/,
   /^scripts\/release-classifier\.mjs$/,
   /^scripts\/release-conservation-contract\.mjs$/,
   /^scripts\/release-preflight\.mjs$/,

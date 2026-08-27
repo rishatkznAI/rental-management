@@ -335,6 +335,7 @@ function createApp() {
   registerPreCompatibilityBackupControlRoutes(router, {
     coordinator: backupCoordinator,
     dbPath: DB_PATH,
+    openSourceDatabase: () => sourceProvider.acquire(),
     startupSourceIdentity,
     expectedEnvironment: EXPECTED_ENVIRONMENT,
     isBackupOnlyRuntime: () => true,

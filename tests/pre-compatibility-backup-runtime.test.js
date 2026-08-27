@@ -1106,6 +1106,12 @@ test('backup-only production server exposes only async control routes backed by 
   const workerSource = fs.readFileSync(new URL('../server/pre-compatibility-backup-worker.js', import.meta.url), 'utf8');
   assert.match(serverSource, /registerPreCompatibilityBackupControlRoutes\(router/);
   assert.doesNotMatch(serverSource, /registerPreCompatibilityBackupRoute\(router/);
+  assert.doesNotMatch(serverSource, /['"]\/api\/auth\/login['"]/);
+  assert.match(serverSource, /app\.use\(\(_req, res\) => res\.status\(404\)\.json\(\{ ok: false, error: 'Not found' \}\)\)/);
+  assert.match(serverSource, /res\.setHeader\('Cache-Control', 'no-store'\)/);
+  assert.match(serverSource, /res\.setHeader\('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'"\)/);
+  assert.match(serverSource, /res\.setHeader\('Strict-Transport-Security', 'max-age=31536000; includeSubDomains'\)/);
+  assert.match(serverSource, /res\.setHeader\('X-Content-Type-Options', 'nosniff'\)/);
   assert.match(coordinatorSource, /fork\(filename, \[\], options\)/);
   assert.match(coordinatorSource, /stdio: \['ignore', 'ignore', 'inherit', 'ipc'\]/);
   assert.doesNotMatch(coordinatorSource, /\bshell\s*:/);

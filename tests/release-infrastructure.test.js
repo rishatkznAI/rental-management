@@ -578,6 +578,8 @@ test('production workflow orders backend before frontend and keeps failures fail
 test('new release infrastructure paths remain deployment tooling, not backend runtime', () => {
   const result = classifyReleaseChangedFiles([
     '.github/workflows/deploy.yml',
+    'scripts/release-conservation-contract.mjs',
+    'scripts/release-targeted-smoke.mjs',
     'scripts/railway-backend-release.mjs',
     'scripts/release-outcome.mjs',
     'tests/release-infrastructure.test.js',
@@ -586,4 +588,6 @@ test('new release infrastructure paths remain deployment tooling, not backend ru
   assert.equal(result.releaseType, 'deploy-tooling');
   assert.equal(result.requiresBackendDeploy, false);
   assert.equal(result.failClosed, false);
+  assert.match(workflowSource, /- 'scripts\/release-conservation-contract\.mjs'/);
+  assert.match(workflowSource, /- 'scripts\/release-targeted-smoke\.mjs'/);
 });

@@ -18,6 +18,7 @@ import {
 } from '../scripts/finance-smoke-equipment-discovery.mjs';
 
 const releaseSmokeSource = readFileSync(new URL('../e2e/helpers/releaseSmoke.ts', import.meta.url), 'utf8');
+const conservationContractSource = readFileSync(new URL('../scripts/release-conservation-contract.mjs', import.meta.url), 'utf8');
 const deployWorkflowSource = readFileSync(new URL('../.github/workflows/deploy.yml', import.meta.url), 'utf8');
 const productionUiSelectorSmokeSource = readFileSync(new URL('../e2e/production-ui-selector-smoke.spec.ts', import.meta.url), 'utf8');
 const financeProductionSmokeSource = readFileSync(new URL('../e2e/finance-production-smoke.spec.ts', import.meta.url), 'utf8');
@@ -34,12 +35,16 @@ const financeEquipmentDiscoverySource = readFileSync(new URL('../scripts/finance
 test('workflow classifier and preflight conserve deploy-tooling scope for root Node tests', () => {
   const changedFiles = [
     'e2e/staging-smoke.spec.ts',
+    'scripts/release-conservation-contract.mjs',
+    'scripts/release-targeted-smoke.mjs',
     'tests/dashboard-attention.test.js',
   ];
   assert.match(deployWorkflowSource, /node scripts\/release-classifier\.mjs/);
   const classified = classifyReleaseChangedFiles(changedFiles);
   assert.equal(classified.releaseType, 'deploy-tooling');
   assert.equal(classified.hasFrontendRuntime, false);
+  assert.match(deployWorkflowSource, /- 'scripts\/release-conservation-contract\.mjs'/);
+  assert.match(deployWorkflowSource, /- 'scripts\/release-targeted-smoke\.mjs'/);
   assert.doesNotThrow(() => assertDeployToolingReleaseScope({ releaseType: classified.releaseType, changedFiles }));
 });
 
@@ -58,14 +63,47 @@ test('workflow classifier keeps ordinary dashboard E2E coverage frontend-only', 
 
 test('production release smoke checks app.disabled before authenticated smoke', () => {
   assert.match(releaseSmokeSource, /type VersionInfo = \{/);
-  assert.match(releaseSmokeSource, /normalizedConfig\.environmentName === 'production' && versionJson\?\.app\?\.disabled === true/);
+  assert.match(releaseSmokeSource, /conservationEvidenceRequiresValidation\(conservationEvidence\)/);
   assert.match(releaseSmokeSource, /directConservedLoginSmoke/);
   assert.match(releaseSmokeSource, /directLoginSmoke\(normalizedConfig\)/);
+  const conservationGuard = releaseSmokeSource.indexOf('if (conservationEvidenceRequiresValidation(conservationEvidence))');
+  const ordinaryLogin = releaseSmokeSource.indexOf('const directLogin = await directLoginSmoke(normalizedConfig);');
+  assert.ok(conservationGuard >= 0 && ordinaryLogin > conservationGuard, 'conservation evidence must be classified before ordinary credentials can be sent');
 });
 
-test('conserved release smoke requires login 503 and maintenance UI', () => {
-  assert.match(releaseSmokeSource, /conserved login should be blocked with HTTP 503/);
-  assert.match(releaseSmokeSource, /toBe\(503\)/);
+test('conserved release smoke requires 503 normally and exact route absence only for proven backup-only identity', () => {
+  assert.match(releaseSmokeSource, /from '\.\.\/\.\.\/scripts\/release-conservation-contract\.mjs'/);
+  assert.match(releaseSmokeSource, /classifyConservedProductionProbes\(evidence\)/);
+  assert.match(releaseSmokeSource, /conservationEvidenceRequiresValidation\(conservationEvidence\)/);
+  assert.match(releaseSmokeSource, /conservedLoginCredentials\(classification/);
+  assert.match(releaseSmokeSource, /login: \{ status, json, headers: login\.headers\(\) \}/);
+  assert.match(releaseSmokeSource, /Pragma: 'no-cache'/);
+  assert.match(releaseSmokeSource, /terminalVersion/);
+  assert.match(releaseSmokeSource, /validateConservedProductionLogin\(\{/);
+  assert.match(conservationContractSource, /\/api\/auth\/login must return 503 when app\.disabled=true/);
+  assert.match(conservationContractSource, /login\?\.status === 503/);
+  assert.match(conservationContractSource, /PRE_COMPATIBILITY_BACKUP_ONLY_MODE = 'pre-compatibility-backup-only'/);
+  assert.match(conservationContractSource, /backup-only mode must agree across health, ready, and version/);
+  assert.match(conservationContractSource, /health and ready backup-only identities must agree/);
+  assert.match(conservationContractSource, /health and version backup-only identities must agree/);
+  assert.match(conservationContractSource, /isolated backup-only runtime/);
+  assert.match(conservationContractSource, /login\?\.status === 404/);
+  assert.match(conservationContractSource, /backup-only login 404 must be the exact generic not-found response/);
+  assert.match(conservationContractSource, /login\.json\.error === 'Not found'/);
+  assert.match(conservationContractSource, /terminal version backup-only identity must match the initial probes/);
+  assert.match(conservationContractSource, /content-type': 'application\/json; charset=utf-8'/);
+  assert.match(conservationContractSource, /cache-control': 'no-store'/);
+  assert.match(conservationContractSource, /x-content-type-options': 'nosniff'/);
+  assert.match(conservationContractSource, /content-security-policy': "default-src 'none'; frame-ancestors 'none'"/);
+  assert.match(conservationContractSource, /strict-transport-security': 'max-age=31536000; includeSubDomains'/);
+  assert.match(conservationContractSource, /backup-only-smoke@example\.invalid/);
+  assert.match(conservationContractSource, /backup-only-route-must-not-exist/);
+  assert.match(releaseSmokeSource, /api\.get\('\/health', \{ maxRedirects: 0 \}\)/);
+  assert.match(releaseSmokeSource, /api\.get\('\/health\/ready', \{ maxRedirects: 0 \}\)/);
+  assert.match(releaseSmokeSource, /api\.get\('\/api\/version', \{ maxRedirects: 0 \}\)/);
+  assert.ok((releaseSmokeSource.match(/maxRedirects: 0/g) || []).length >= 6, 'strict Playwright probes must not follow redirects');
+  assert.doesNotMatch(releaseSmokeSource, /\[\s*404\s*,\s*503\s*\]|\[\s*503\s*,\s*404\s*\]/);
+  assert.doesNotMatch(conservationContractSource, /\[\s*404\s*,\s*503\s*\]|\[\s*503\s*,\s*404\s*\]/);
   assert.match(releaseSmokeSource, /expectMaintenanceUiVisible/);
   assert.match(releaseSmokeSource, /hasMaintenanceUiText\(bodyText: string, appDisabledMessage\?: string\)/);
   assert.match(releaseSmokeSource, /bodyText\.includes\(expectedMessage\)/);
@@ -74,6 +112,7 @@ test('conserved release smoke requires login 503 and maintenance UI', () => {
   assert.match(releaseSmokeSource, /временно\\s\+\(\?:закрыто\|отключена\|недоступн\)/);
   assert.match(releaseSmokeSource, /conserved\|maintenance/);
   assert.match(releaseSmokeSource, /Production is conserved: login HTTP 503 is expected, authenticated smoke skipped\./);
+  assert.match(releaseSmokeSource, /exact isolated backup-only runtime has no login route \(HTTP 404\), authenticated smoke skipped\./);
 });
 
 test('conserved release smoke opens root with commit cache bust and waits for UI render', () => {

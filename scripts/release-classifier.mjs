@@ -27,7 +27,9 @@ const FRONTEND_TEST_PATTERNS = [
 const DEPLOY_TOOLING_PATTERNS = [
   /^\.github\/workflows\/(?:deploy|.*smoke)\.yml$/,
   /^scripts\/release-classifier\.mjs$/,
+  /^scripts\/release-conservation-contract\.mjs$/,
   /^scripts\/release-preflight\.mjs$/,
+  /^scripts\/release-targeted-smoke\.mjs$/,
   /^scripts\/frontend-build-marker\.mjs$/,
   /^scripts\/backend-release-marker\.mjs$/,
   /^scripts\/railway-backend-release\.mjs$/,

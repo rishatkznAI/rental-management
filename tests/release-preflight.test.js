@@ -100,7 +100,10 @@ test('release preflight allows frontend-only safe file scope and reports backend
 test('release preflight allows deploy-tooling safe file scope and reports backend drift as warning', () => {
   const changedFiles = [
     '.github/workflows/deploy.yml',
+    'scripts/release-classifier.mjs',
+    'scripts/release-conservation-contract.mjs',
     'scripts/release-preflight.mjs',
+    'scripts/release-targeted-smoke.mjs',
     'scripts/finance-smoke-equipment-discovery.mjs',
     'e2e/helpers/auth.ts',
     'e2e/helpers/releaseSmoke.ts',

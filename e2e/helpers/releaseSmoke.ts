@@ -1,4 +1,10 @@
 import { expect, request as playwrightRequest, type APIResponse, type Locator, type Page, type TestInfo } from '@playwright/test';
+import {
+  classifyConservedProductionProbes,
+  conservationEvidenceRequiresValidation,
+  conservedLoginCredentials,
+  validateConservedProductionLogin,
+} from '../../scripts/release-conservation-contract.mjs';
 
 type BuildInfo = {
   commit?: string;
@@ -6,15 +12,32 @@ type BuildInfo = {
   buildTime?: string;
   apiBaseUrl?: string;
   releaseType?: string;
+  release?: { type?: string };
+  startedAt?: string;
+  deployment?: {
+    railwayDeploymentId?: string;
+    railwayEnvironment?: string;
+    railwayService?: string;
+    railwayReplicaId?: string;
+  };
 };
 
 type VersionInfo = {
   ok?: boolean;
+  ready?: boolean;
+  mode?: string;
   build?: BuildInfo;
   app?: {
     disabled?: boolean;
     message?: string;
   };
+};
+
+type ConservationEvidence = {
+  environment: 'staging' | 'production';
+  health: { status: number; json: VersionInfo };
+  ready: { status: number; json: VersionInfo };
+  version: { status: number; json: VersionInfo };
 };
 
 type UiIssue = {
@@ -525,6 +548,7 @@ async function directLoginSmoke(config: ReleaseSmokeConfig) {
   try {
     const login = await api.post('/api/auth/login', {
       data: { email: config.adminEmail, password: config.adminPassword },
+      maxRedirects: 0,
     });
     const status = login.status();
     if (!login.ok()) {
@@ -548,15 +572,40 @@ ${await responseText(login)}`);
   }
 }
 
-async function directConservedLoginSmoke(config: ReleaseSmokeConfig) {
+async function directConservedLoginSmoke(config: ReleaseSmokeConfig, evidence: ConservationEvidence) {
+  const classification = classifyConservedProductionProbes(evidence);
+  const credentials = conservedLoginCredentials(classification, {
+    email: config.adminEmail,
+    password: config.adminPassword,
+  });
   const api = await playwrightRequest.newContext({ baseURL: config.apiUrl });
   try {
     const login = await api.post('/api/auth/login', {
-      data: { email: config.adminEmail, password: config.adminPassword },
+      data: credentials,
+      maxRedirects: 0,
     });
     const status = login.status();
-    expect(status, `${config.environmentName} conserved login should be blocked with HTTP 503`).toBe(503);
-    return { status };
+    const json = await login.json().catch(() => null) as unknown;
+    let terminalVersion: { status: number; json: VersionInfo } | null = null;
+    if (classification.backupOnly) {
+      const response = await api.get('/api/version', {
+        maxRedirects: 0,
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      });
+      terminalVersion = {
+        status: response.status(),
+        json: await response.json().catch(() => null) as VersionInfo,
+      };
+    }
+    const conserved = validateConservedProductionLogin({
+      ...evidence,
+      login: { status, json, headers: login.headers() },
+      terminalVersion,
+    });
+    return { status, backupOnly: conserved.backupOnly };
   } finally {
     await api.dispose();
   }
@@ -575,24 +624,32 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig, te
   let action = 'backend preflight';
   let backendBuild: BuildInfo | null = null;
   let frontendBuild: BuildInfo | null = null;
+  let healthJson: VersionInfo | null = null;
+  let readyJson: VersionInfo | null = null;
   let versionJson: VersionInfo | null = null;
+  let healthStatus: number | null = null;
+  let readyStatus: number | null = null;
+  let versionStatus: number | null = null;
   let loginStatus: number | null = null;
 
   installReadOnlyGuards(page, normalizedConfig, issues, () => action);
 
   const api = await playwrightRequest.newContext({ baseURL: normalizedConfig.apiUrl });
   try {
-    const health = await api.get('/health');
+    const health = await api.get('/health', { maxRedirects: 0 });
+    healthStatus = health.status();
     expect(health.ok(), await health.text()).toBeTruthy();
-    const healthJson = await health.json();
+    healthJson = await health.json() as VersionInfo;
     expect(healthJson.ok).toBe(true);
 
-    const ready = await api.get('/health/ready');
+    const ready = await api.get('/health/ready', { maxRedirects: 0 });
+    readyStatus = ready.status();
     expect(ready.ok(), await ready.text()).toBeTruthy();
-    const readyJson = await ready.json();
+    readyJson = await ready.json() as VersionInfo;
     expect(readyJson.ok).toBe(true);
 
-    const version = await api.get('/api/version');
+    const version = await api.get('/api/version', { maxRedirects: 0 });
+    versionStatus = version.status();
     expect(version.ok(), await version.text()).toBeTruthy();
     versionJson = await version.json() as VersionInfo;
     expect(versionJson.ok).toBe(true);
@@ -620,8 +677,20 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig, te
     }
   }
 
-  if (normalizedConfig.environmentName === 'production' && versionJson?.app?.disabled === true) {
-    const directLogin = await directConservedLoginSmoke(normalizedConfig);
+  const conservationEvidence: ConservationEvidence = {
+    environment: normalizedConfig.environmentName,
+    health: { status: healthStatus || 0, json: healthJson || {} },
+    ready: { status: readyStatus || 0, json: readyJson || {} },
+    version: { status: versionStatus || 0, json: versionJson || {} },
+  };
+  if (conservationEvidenceRequiresValidation(conservationEvidence)) {
+    expect(healthJson, 'health probe evidence must be retained for conserved login validation').toBeTruthy();
+    expect(readyJson, 'ready probe evidence must be retained for conserved login validation').toBeTruthy();
+    expect(healthStatus, 'health probe status must be retained for conserved login validation').toBe(200);
+    expect(readyStatus, 'ready probe status must be retained for conserved login validation').toBe(200);
+    expect(versionStatus, 'version probe status must be retained for conserved login validation').toBe(200);
+    const directLogin = await directConservedLoginSmoke(normalizedConfig, conservationEvidence);
+    const backupOnly = directLogin.backupOnly;
     loginStatus = directLogin.status;
 
     action = 'frontend conservation';
@@ -657,7 +726,9 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig, te
     }
 
     await expectMaintenanceUiVisible(page, normalizedConfig, versionJson.app.message, frontendBuild, backendBuild, loginStatus);
-    console.log('Production is conserved: login HTTP 503 is expected, authenticated smoke skipped.');
+    console.log(backupOnly
+      ? 'Production is conserved: the exact isolated backup-only runtime has no login route (HTTP 404), authenticated smoke skipped.'
+      : 'Production is conserved: login HTTP 503 is expected, authenticated smoke skipped.');
     expect(issues, JSON.stringify(issues, null, 2)).toEqual([]);
     return;
   }

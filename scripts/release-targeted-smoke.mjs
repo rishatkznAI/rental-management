@@ -1,6 +1,17 @@
 #!/usr/bin/env node
 
 import { fileURLToPath } from 'node:url';
+import {
+  classifyConservedProductionProbes,
+  conservationEvidenceRequiresValidation,
+  conservedLoginCredentials,
+  validateConservedProductionLogin,
+} from './release-conservation-contract.mjs';
+
+export {
+  PRE_COMPATIBILITY_BACKUP_ONLY_MODE,
+  validateConservedProductionLogin,
+} from './release-conservation-contract.mjs';
 
 const ENVIRONMENTS = new Set(['staging', 'production']);
 
@@ -179,8 +190,8 @@ function repeatBreakdownsShapeValid(payload) {
 async function timedJson(baseUrl, path, options = {}) {
   const started = performance.now();
   const response = await fetch(`${baseUrl}${path}`, {
-    redirect: 'follow',
     ...options,
+    redirect: 'manual',
     headers: {
       Accept: 'application/json',
       'Cache-Control': 'no-cache',
@@ -216,8 +227,6 @@ async function main() {
 
   const prefix = args.env === 'staging' ? 'STAGING' : 'PRODUCTION';
   const apiUrl = normalizeUrl(requiredEnv(`${prefix}_API_URL`));
-  const email = requiredEnv(`${prefix}_ADMIN_EMAIL`);
-  const password = requiredEnv(`${prefix}_ADMIN_PASSWORD`);
 
   console.log(`[targeted-smoke] environment=${args.env}`);
 
@@ -238,15 +247,54 @@ async function main() {
     appDisabled: version.json?.app?.disabled === true,
   });
 
+  const publicProbeEvidence = {
+    environment: args.env,
+    health: { status: health.response.status, json: health.json },
+    ready: { status: ready.response.status, json: ready.json },
+    version: { status: version.response.status, json: version.json },
+  };
+  const conservedProbe = conservationEvidenceRequiresValidation(publicProbeEvidence)
+    ? classifyConservedProductionProbes(publicProbeEvidence)
+    : null;
+  const loginCredentials = conservedLoginCredentials(conservedProbe, {
+    email: conservedProbe?.backupOnly ? undefined : requiredEnv(`${prefix}_ADMIN_EMAIL`),
+    password: conservedProbe?.backupOnly ? undefined : requiredEnv(`${prefix}_ADMIN_PASSWORD`),
+  });
+
   const login = await timedJson(apiUrl, '/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify(loginCredentials),
   });
-  if (args.env === 'production' && version.json?.app?.disabled === true) {
-    assertOk(login.response.status === 503, `/api/auth/login must return 503 when app.disabled=true. HTTP ${login.response.status}`);
-    console.log(`[targeted-smoke] login ${JSON.stringify({ status: login.response.status, durationMs: login.durationMs, appDisabled: true })}`);
-    console.log('[targeted-smoke] Production is conserved: login HTTP 503 is expected.');
+  if (conservedProbe) {
+    const terminalVersion = conservedProbe.backupOnly
+      ? await timedJson(apiUrl, '/api/version')
+      : null;
+    const conserved = validateConservedProductionLogin({
+      environment: args.env,
+      health: { status: health.response.status, json: health.json },
+      ready: { status: ready.response.status, json: ready.json },
+      version: { status: version.response.status, json: version.json },
+      login: {
+        status: login.response.status,
+        json: login.json,
+        headers: login.response.headers,
+      },
+      terminalVersion: terminalVersion
+        ? { status: terminalVersion.response.status, json: terminalVersion.json }
+        : null,
+    });
+    if (terminalVersion) logProbe('terminalVersion', terminalVersion, { identityStable: true });
+    console.log(`[targeted-smoke] login ${JSON.stringify({
+      status: login.response.status,
+      durationMs: login.durationMs,
+      appDisabled: true,
+      backupOnly: conserved.backupOnly,
+      mode: conserved.mode,
+    })}`);
+    console.log(conserved.backupOnly
+      ? '[targeted-smoke] Production is conserved: the exact isolated backup-only runtime has no login route (HTTP 404).'
+      : '[targeted-smoke] Production is conserved: login HTTP 503 is expected.');
     console.log('[targeted-smoke] PASS');
     return;
   }

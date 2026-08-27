@@ -481,6 +481,7 @@ test('frontend conservation is always checked after any possible backend deploym
 
 test('private variable delta validation permits only the one exact pin and emits no secret values', () => {
   const baseline = parsePrivateVariableSnapshot(JSON.stringify({
+    '': 'legacy-empty-key-private-value',
     DATABASE_URL: 'private-database-url',
     internalSecret: 'private-secret-before\nprivate-secret-continuation',
     [HISTORICAL_BACKUP_EXPECTED_SHA_KEY]: OLD_SHA,
@@ -500,6 +501,40 @@ test('private variable delta validation permits only the one exact pin and emits
     otherVariablesUnchanged: true,
   });
   assert.equal(validateExactVariableInventory(staged, structuredClone(staged)), true);
+  assert.equal(Object.hasOwn(baseline, ''), true);
+  for (const invalidName of [' ', '\t', '\n', '-', '.', '=', 'INVALID-NAME', 'КЛЮЧ']) {
+    assert.throws(
+      () => parsePrivateVariableSnapshot(JSON.stringify({ [invalidName]: 'private-value' })),
+      /invalid shape/,
+    );
+  }
+  assert.throws(
+    () => parsePrivateVariableSnapshot(JSON.stringify({ VALID_NAME: 4 })),
+    /invalid shape/,
+  );
+  assert.throws(
+    () => parsePrivateVariableSnapshot(JSON.stringify({ '': 4 })),
+    /invalid shape/,
+  );
+  const missingLegacy = { ...staged };
+  delete missingLegacy[''];
+  assert.throws(
+    () => validateOnlyExpectedPinChanged(baseline, missingLegacy, {
+      oldPin: OLD_SHA,
+      newPin: NEW_SHA,
+    }),
+    /inventory changed outside the reviewed pin update/,
+  );
+  assert.throws(
+    () => validateOnlyExpectedPinChanged(baseline, {
+      ...staged,
+      '': 'changed-legacy-empty-key-private-value',
+    }, {
+      oldPin: OLD_SHA,
+      newPin: NEW_SHA,
+    }),
+    /delta is not the one reviewed backup-runtime pin/,
+  );
   let caught;
   try {
     validateOnlyExpectedPinChanged(baseline, { ...staged, internalSecret: 'private-secret-after' }, {
@@ -519,6 +554,7 @@ test('private variable delta validation permits only the one exact pin and emits
 
 test('terminal variable conservation permits only the documented Railway-derived commit SHA drift', () => {
   const expected = {
+    '': 'legacy-empty-key-private-value',
     DATABASE_URL: 'private-database-url',
     INTERNAL_SECRET: 'private-secret-before',
     [HISTORICAL_BACKUP_EXPECTED_SHA_KEY]: NEW_SHA,
@@ -544,6 +580,13 @@ test('terminal variable conservation permits only the documented Railway-derived
     () => validateTerminalVariableInventory(expected, {
       ...terminal,
       INTERNAL_SECRET: 'private-secret-after',
+    }, { expectedPin: NEW_SHA }),
+    /changed outside the documented derived exemption/,
+  );
+  assert.throws(
+    () => validateTerminalVariableInventory(expected, {
+      ...terminal,
+      '': 'changed-legacy-empty-key-private-value',
     }, { expectedPin: NEW_SHA }),
     /changed outside the documented derived exemption/,
   );
@@ -633,6 +676,7 @@ test('stable control-plane comparison excludes only the intentional source commi
 
 test('deploy helper performs exactly one exact-SHA mutation and never retries a lost response', async () => {
   const baselineVariables = {
+    '': 'legacy-empty-key-private-value',
     OTHER_PRIVATE_VALUE: 'unchanged-private-value',
     [HISTORICAL_BACKUP_EXPECTED_SHA_KEY]: OLD_SHA,
   };
@@ -701,6 +745,50 @@ test('deploy helper performs exactly one exact-SHA mutation and never retries a 
     /simulated lost mutation response/,
   );
   assert.equal(mutationCalls, 1);
+});
+
+test('live legacy empty-key drift after staged proof causes zero deployment mutations', async () => {
+  const baselineVariables = {
+    '': 'legacy-empty-key-private-value',
+    OTHER_PRIVATE_VALUE: 'unchanged-private-value',
+    [HISTORICAL_BACKUP_EXPECTED_SHA_KEY]: OLD_SHA,
+  };
+  const currentVariables = {
+    ...baselineVariables,
+    [HISTORICAL_BACKUP_EXPECTED_SHA_KEY]: NEW_SHA,
+  };
+  const liveDrifts = [
+    variables => ({ ...variables, '': 'changed-legacy-empty-key-private-value' }),
+    variables => {
+      const withoutLegacy = { ...variables };
+      delete withoutLegacy[''];
+      return withoutLegacy;
+    },
+  ];
+  for (const drift of liveDrifts) {
+    let mutationCalls = 0;
+    const target = targetFixture(drift(currentVariables));
+    await assert.rejects(
+      deployHistoricalBackupRouteFix({
+        token: 'private-test-token',
+        workflowCommit: NEW_SHA,
+        previousCommit: OLD_SHA,
+        previousDeploymentId: OLD_DEPLOYMENT_ID,
+        currentVariables,
+        baselineVariables,
+        stageProof: stagedProof(),
+        marker: irreversibleMarker(),
+        railwayConfigSource,
+        graphql: async ({ query }) => {
+          if (query === ROUTE_RELEASE_TARGET_QUERY) return target;
+          if (query.includes('serviceInstanceDeployV2')) mutationCalls += 1;
+          throw new Error('unexpected call after legacy empty-key drift');
+        },
+      }),
+      /Railway variables changed after the reviewed skip-deploy proof/,
+    );
+    assert.equal(mutationCalls, 0);
+  }
 });
 
 test('pre-trigger drift or an invalid irreversible marker causes zero deployment mutations', async () => {

@@ -300,6 +300,7 @@ test('recovery conservation fingerprints the full decrypted target config and re
     services: { [HISTORICAL_RECOVERY_RAILWAY_IDENTITY.serviceId]: service },
   };
   const resolvedVariables = {
+    '': 'legacy-empty-key-private-value',
     PRIVATE_VALUE: 'private-resolved-secret',
     RAILWAY_GIT_COMMIT_SHA: SOURCE_COMMIT,
   };
@@ -310,9 +311,15 @@ test('recovery conservation fingerprints the full decrypted target config and re
   assert.match(baseline.targetServiceConfigFingerprint, /^[a-f0-9]{64}$/);
   assert.match(baseline.resolvedVariableInventoryFingerprint, /^[a-f0-9]{64}$/);
   assert.match(baseline.resolvedVariableKeyInventoryFingerprint, /^[a-f0-9]{64}$/);
-  assert.equal(baseline.resolvedVariableCount, 2);
+  assert.equal(baseline.resolvedVariableCount, 3);
+  assert.equal(baseline.legacyEmptyVariableKeyPresent, true);
+  assert.equal(baseline.legacyNonstandardVariableCount, 1);
+  assert.equal(baseline.legacyEmptyVariableKeyValueEmitted, false);
   assert.equal(baseline.rawValuesEmitted, false);
-  assert.doesNotMatch(JSON.stringify(baseline), /private-(?:raw|resolved)-secret/);
+  assert.doesNotMatch(
+    JSON.stringify(baseline),
+    /(?:private-(?:raw|resolved)-secret|legacy-empty-key-private-value)/,
+  );
 
   for (const mutate of [
     current => { current.build.builder = 'RAILPACK'; },
@@ -338,6 +345,45 @@ test('recovery conservation fingerprints the full decrypted target config and re
   assert.notEqual(
     resolvedDrift.resolvedVariableInventoryFingerprint,
     baseline.resolvedVariableInventoryFingerprint,
+  );
+  const legacyValueDrift = createRecoveryConfigurationConservationProof({
+    environmentConfig,
+    resolvedVariables: {
+      ...resolvedVariables,
+      '': 'changed-legacy-empty-key-private-value',
+    },
+  });
+  assert.notEqual(
+    legacyValueDrift.resolvedVariableInventoryFingerprint,
+    baseline.resolvedVariableInventoryFingerprint,
+  );
+  const withoutLegacy = { ...resolvedVariables };
+  delete withoutLegacy[''];
+  const legacyRemovalDrift = createRecoveryConfigurationConservationProof({
+    environmentConfig,
+    resolvedVariables: withoutLegacy,
+  });
+  assert.equal(legacyRemovalDrift.legacyEmptyVariableKeyPresent, false);
+  assert.equal(legacyRemovalDrift.resolvedVariableCount, 2);
+  assert.notEqual(
+    legacyRemovalDrift.resolvedVariableKeyInventoryFingerprint,
+    baseline.resolvedVariableKeyInventoryFingerprint,
+  );
+  for (const invalidName of [' ', '\t', '\n', '-', '.', '=', 'INVALID-NAME', 'КЛЮЧ']) {
+    assert.throws(
+      () => createRecoveryConfigurationConservationProof({
+        environmentConfig,
+        resolvedVariables: { ...resolvedVariables, [invalidName]: 'private-value' },
+      }),
+      /variable inventory is invalid/,
+    );
+  }
+  assert.throws(
+    () => createRecoveryConfigurationConservationProof({
+      environmentConfig,
+      resolvedVariables: { ...resolvedVariables, '': 4 },
+    }),
+    /variable inventory is invalid/,
   );
 });
 

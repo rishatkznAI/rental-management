@@ -1141,7 +1141,10 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
     assert.match(protectedWorkflow, /npm install --global @railway\/cli@5\.45\.0/);
     assert.match(protectedWorkflow, /test "\$\(railway --version\)" = "railway 5\.45\.0"/);
     assert.doesNotMatch(protectedWorkflow, /@railway\/cli@4\.60\.0/);
+    assert.doesNotMatch(protectedWorkflow, /\brailway link\b/);
   }
+  assert.equal((workflow.match(/railway status\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--json >/g) || []).length, 2);
+  assert.equal((workflow.match(/railway volume\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--service "\$RAILWAY_SERVICE_ID"\s+\\\s+files --volume "\$RAILWAY_VOLUME_ID" download/g) || []).length, 2);
   assert.match(workflow, /EXPECTED_REPOSITORY: rishatkznAI\/rental-management/);
   assert.match(workflow, /EXPECTED_REF: refs\/heads\/main/);
   assert.match(workflow, /test "\$GITHUB_REPOSITORY" = "\$EXPECTED_REPOSITORY"/);

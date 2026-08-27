@@ -123,11 +123,10 @@ jobs:
           mkdir -p "$target_dir"
           chmod 700 "$target_dir"
           cd "$target_dir"
-          railway link \
+          railway status \
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --service "$RAILWAY_SERVICE_ID"
-          railway status --json > railway-status-before.json
+            --json > railway-status-before.json
           cd "$GITHUB_WORKSPACE"
           RAILWAY_CONTROL_PLANE_OUTPUT="$GITHUB_WORKSPACE/railway-control-plane-before.json" \
             node --input-type=module <<'NODE'
@@ -628,9 +627,17 @@ jobs:
           test "$receipt_filename" = "skytech-pre-compatibility-backup-receipt.json"
           [[ "$receipt_sha" =~ ^[a-f0-9]{64}$ ]]
           cd "$RUNNER_TEMP/skytech-clean-reset-target"
-          railway volume files --volume "$RAILWAY_VOLUME_ID" download \
+          railway volume \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            files --volume "$RAILWAY_VOLUME_ID" download \
             "/backups/$filename" "$GITHUB_WORKSPACE/skytech-clean-reset-backup.zip" --overwrite
-          railway volume files --volume "$RAILWAY_VOLUME_ID" download \
+          railway volume \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --service "$RAILWAY_SERVICE_ID" \
+            files --volume "$RAILWAY_VOLUME_ID" download \
             "/backups/$receipt_filename" "$GITHUB_WORKSPACE/skytech-clean-reset-backup-receipt.json" --overwrite
           cd "$GITHUB_WORKSPACE"
           chmod 600 skytech-clean-reset-backup.zip skytech-clean-reset-backup-receipt.json
@@ -1093,7 +1100,10 @@ jobs:
           test -n "$RAILWAY_TOKEN"
           echo "::add-mask::$RAILWAY_TOKEN"
           cd "$RUNNER_TEMP/skytech-clean-reset-target"
-          railway status --json > railway-status-after.json
+          railway status \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --json > railway-status-after.json
           cd "$GITHUB_WORKSPACE"
           RAILWAY_CONTROL_PLANE_OUTPUT="$GITHUB_WORKSPACE/railway-control-plane-after.json" \
             node --input-type=module <<'NODE'

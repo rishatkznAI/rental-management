@@ -957,6 +957,11 @@ test('manual workflow is production-protected, target-pinned, and has no deploy 
   assert.match(source, /npm install --global @railway\/cli@5\.45\.0/);
   assert.match(source, /test "\$\(railway --version\)" = "railway 5\.45\.0"/);
   assert.doesNotMatch(source, /@railway\/cli@4\.60\.0/);
+  assert.doesNotMatch(source, /\brailway link\b/);
+  assert.doesNotMatch(source, /secrets\.RAILWAY_TOKEN\b/);
+  assert.equal((source.match(/secrets\.RAILWAY_PROJECT_TOKEN/g) || []).length, 3);
+  assert.equal((source.match(/railway status\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--json >/g) || []).length, 1);
+  assert.equal((source.match(/railway volume\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--service "\$RAILWAY_SERVICE_ID"\s+\\\s+files --volume "\$RAILWAY_VOLUME_ID" download/g) || []).length, 1);
   assert.match(source, /1558b38d-bf16-4b50-9ee6-0871b7152116/);
   assert.match(source, /62833109-61cb-4600-9200-d624d6537a05/);
   assert.match(source, /b2016e92-3c50-4b00-800d-625a139b219c/);
@@ -973,7 +978,6 @@ test('manual workflow is production-protected, target-pinned, and has no deploy 
   assert.match(source, /select\(\.volume\.name == \$volumeName\)/);
   assert.match(source, /X-Production-Scope-Remediation-Request-Id/);
   assert.match(source, /createHmac\("sha256"/);
-  assert.match(source, /railway volume files --volume/);
   assert.match(source, /gpg \\/);
   assert.match(source, /HUMAN_VERIFICATION_REQUIRED/);
   assert.match(source, /PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET/);

@@ -201,6 +201,7 @@ const { registerLeasingRoutes } = require('./routes/leasing');
 const { registerManagerMyPlanRoutes } = require('./routes/manager-my-plan');
 const { registerPayrollRoutes } = require('./routes/payroll');
 const { registerPlannerRoutes } = require('./routes/planner');
+const { registerPublicSiteRoutes } = require('./routes/public-site');
 const { registerReportRoutes } = require('./routes/reports');
 const { registerRentalChangeRequestRoutes } = require('./routes/rental-change-requests');
 const { registerRentalRoutes } = require('./routes/rentals');
@@ -1775,6 +1776,16 @@ const {
 apiRouter.use(registerStaffRoutes({
   readData,
   requireAuth,
+}));
+
+apiRouter.use(registerPublicSiteRoutes({
+  readData,
+  writeData,
+  requireAuth,
+  requireAdmin,
+  auditLog,
+  uploadRoot: path.join(path.dirname(DB_PATH), 'uploads'),
+  nowIso,
 }));
 
 registerDocumentRoutes(apiRouter, {

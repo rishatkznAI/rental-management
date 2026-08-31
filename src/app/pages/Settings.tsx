@@ -53,6 +53,7 @@ import {
   WalletCards,
   Wrench,
   LayoutDashboard,
+  Globe2,
 } from 'lucide-react';
 import {
   Dialog,
@@ -219,7 +220,7 @@ const ADMIN_MENU_PREVIEW_GROUPS: Array<{ id: SidebarNavGroupId; title: string; s
   { id: 'main', title: 'Главное', sections: ['dashboard', 'equipment', 'gsm', 'knowledge_base', 'sales', 'deliveries', 'rentals'] },
   { id: 'operations', title: 'Операции', sections: ['planner', 'service', 'service_vehicles'] },
   { id: 'data', title: 'Данные', sections: ['clients', 'documents', 'payments', 'finance'] },
-  { id: 'other', title: 'Прочее', sections: ['bots', 'reports', 'admin_panel'] },
+  { id: 'other', title: 'Прочее', sections: ['bots', 'reports', 'admin_panel', 'site_admin'] },
   { id: 'profile', title: 'Профиль', sections: ['profile_settings'] },
 ];
 
@@ -241,6 +242,7 @@ const ADMIN_MENU_SECTION_ICONS: Partial<Record<SidebarSection, React.ElementType
   bots: Bot,
   reports: BarChart3,
   admin_panel: Shield,
+  site_admin: Globe2,
   profile_settings: UserRound,
 };
 

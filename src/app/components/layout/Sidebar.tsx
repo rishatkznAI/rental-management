@@ -26,6 +26,7 @@ import {
   ListChecks,
   Banknote,
   BriefcaseBusiness,
+  Globe2,
   Moon,
   Sun,
 } from 'lucide-react';
@@ -81,6 +82,7 @@ const navigation: { name: string; href: string; icon: React.ElementType; section
   { name: 'Бот',          href: '/bots',      icon: Bot,             section: 'bots'       },
   { name: 'Отчёты',       href: '/reports',   icon: BarChart3,       section: 'reports'    },
   { name: 'Панель администратора', href: '/admin', icon: Shield,     section: 'admin_panel' },
+  { name: 'Управление сайтом', href: '/site-admin', icon: Globe2,   section: 'site_admin' },
 ];
 
 interface SidebarProps {

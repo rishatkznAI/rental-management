@@ -118,6 +118,7 @@ const JSON_COLLECTIONS = [
   'audit_log',
   'audit_logs',
   'snapshot',
+  'public_site_cms',
 ];
 
 let dbInstance = null;

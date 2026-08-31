@@ -5,6 +5,7 @@ import {
   DEPLOY_EXACT_COMMIT_MUTATION,
   deploymentCommit,
   parseRailwayDeployConfig,
+  pollDeployment,
   railwayGraphql,
   validateAndTriggerRailwayDeployment,
   validateDeploymentProvenance,
@@ -535,6 +536,51 @@ test('Railway GraphQL uses only the project-token header and preserves mutation 
   assert.equal(request.options.headers['Project-Access-Token'], 'redacted-test-token');
   assert.equal(request.options.headers.Authorization, undefined);
   assert.equal(JSON.parse(request.options.body).variables.commitSha, expected.commit);
+});
+
+test('Railway deployment polling retries transient control-plane timeouts', async () => {
+  let queries = 0;
+  const result = await pollDeployment({
+    token: 'redacted-test-token',
+    deploymentId: expected.deploymentId,
+    expected: {
+      ...expected,
+      rootDirectory: 'server',
+      configFile: '/server/railway.toml',
+      healthcheckPath: '/health',
+      startCommand: 'node scripts/start-with-release-type.cjs',
+    },
+    timeoutMs: 1_000,
+    intervalMs: 1,
+    graphql: async () => {
+      queries += 1;
+      if (queries === 1) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      return { deployment: deploymentFixture() };
+    },
+  });
+
+  assert.equal(queries, 2);
+  assert.equal(result.id, expected.deploymentId);
+  assert.equal(result.status, 'SUCCESS');
+});
+
+test('Railway deployment polling fails immediately on control-plane contract errors', async () => {
+  let queries = 0;
+  await assert.rejects(
+    pollDeployment({
+      token: 'redacted-test-token',
+      deploymentId: expected.deploymentId,
+      expected,
+      timeoutMs: 1_000,
+      intervalMs: 1,
+      graphql: async () => {
+        queries += 1;
+        throw new Error('Railway GraphQL error: invalid deployment contract');
+      },
+    }),
+    /invalid deployment contract/,
+  );
+  assert.equal(queries, 1);
 });
 
 test('release outcome reports both directions of a full-stack partial rollout', () => {

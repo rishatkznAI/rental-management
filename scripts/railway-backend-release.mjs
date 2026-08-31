@@ -588,15 +588,41 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function pollDeployment({ token, deploymentId, expected, timeoutMs, intervalMs }) {
+function isTransientDeploymentQueryError(error) {
+  const name = String(error?.name || '');
+  if (name === 'AbortError' || name === 'TimeoutError') return true;
+  return error instanceof TypeError && /fetch|network|socket/i.test(String(error.message || ''));
+}
+
+export async function pollDeployment({
+  token,
+  deploymentId,
+  expected,
+  timeoutMs,
+  intervalMs,
+  graphql = railwayGraphql,
+}) {
   const deadline = Date.now() + timeoutMs;
   let previousStatus = '';
+  let transientQueryFailures = 0;
   while (Date.now() < deadline) {
-    const data = await railwayGraphql({
-      token,
-      query: DEPLOYMENT_QUERY,
-      variables: { id: deploymentId },
-    });
+    let data;
+    try {
+      data = await graphql({
+        token,
+        query: DEPLOYMENT_QUERY,
+        variables: { id: deploymentId },
+      });
+    } catch (error) {
+      if (!isTransientDeploymentQueryError(error)) throw error;
+      transientQueryFailures += 1;
+      console.log(
+        `[railway-backend-release] transient deployment query failure; retrying count=${transientQueryFailures}`,
+      );
+      if (Date.now() + intervalMs >= deadline) break;
+      await sleep(intervalMs);
+      continue;
+    }
     const deployment = data?.deployment;
     if (!deployment?.id) throw new Error('Railway deployment query returned no deployment');
     const status = String(deployment.status || '').trim().toUpperCase();
@@ -613,7 +639,9 @@ async function pollDeployment({ token, deploymentId, expected, timeoutMs, interv
     }
     await sleep(intervalMs);
   }
-  throw new Error('timed out waiting for the exact-SHA Railway deployment');
+  throw new Error(
+    `timed out waiting for the exact-SHA Railway deployment after ${transientQueryFailures} transient query failure(s)`,
+  );
 }
 
 async function jsonProbe(baseUrl, path) {

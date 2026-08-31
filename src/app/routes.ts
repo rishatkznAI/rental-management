@@ -77,6 +77,7 @@ export const router = createHashRouter([
       { path: 'reports', lazy: lazyPage('./pages/Reports') },
       { path: 'settings', lazy: lazyPage('./pages/ProfileSettings') },
       { path: 'admin', lazy: lazyPage('./pages/AdminPanel') },
+      { path: 'site-admin', lazy: lazyPage('./pages/PublicSiteAdmin') },
       { path: 'service-vehicles', lazy: lazyPage('./pages/ServiceVehicles') },
       { path: 'service-vehicles/:id', lazy: lazyPage('./pages/ServiceVehicleDetail') },
       { path: 'manager-report', lazy: lazyPage('./pages/ManagerReport') },

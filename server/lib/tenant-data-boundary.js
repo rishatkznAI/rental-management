@@ -7,9 +7,9 @@ const {
 } = require('./trusted-actor-scope');
 const { COMPANY_MEMBERSHIPS_TABLE } = require('./platform-identity-schema');
 
-// Every business collection in app_data is tenant-owned. The only exception is
-// the credential directory: users are platform identities and become visible to
-// a company only through an authoritative active Membership.
+// Every business collection in app_data is tenant-owned. System-wide collections
+// are limited to platform identities, login sessions, and the single public-site
+// snapshot shared by every visitor.
 const TENANT_OWNED_ARRAY_COLLECTIONS = Object.freeze([
   'equipment',
   'equipment_finance',
@@ -87,7 +87,7 @@ const TENANT_OWNED_MAP_COLLECTIONS = Object.freeze([
 const TENANT_OWNED_MAP_SET = new Set(TENANT_OWNED_MAP_COLLECTIONS);
 const TENANT_OWNED_SINGLETON_COLLECTIONS = Object.freeze(['snapshot']);
 const TENANT_OWNED_SINGLETON_SET = new Set(TENANT_OWNED_SINGLETON_COLLECTIONS);
-const SYSTEM_GLOBAL_COLLECTIONS = Object.freeze(['users', 'bot_sessions']);
+const SYSTEM_GLOBAL_COLLECTIONS = Object.freeze(['users', 'bot_sessions', 'public_site_cms']);
 const SYSTEM_GLOBAL_SET = new Set(SYSTEM_GLOBAL_COLLECTIONS);
 const TENANT_SINGLETON_ENVELOPE = '__tenantScopedValues';
 const tenantContext = new AsyncLocalStorage();
@@ -308,7 +308,7 @@ function createTenantDataBoundary({
     if (TENANT_OWNED_ARRAY_SET.has(name)) return filterRecordsByActorScope(raw, scope);
     if (TENANT_OWNED_MAP_SET.has(name)) return filterTenantMap(raw, scope);
     if (TENANT_OWNED_SINGLETON_SET.has(name)) return readTenantSingleton(raw, scope);
-    if (name === 'bot_sessions') return raw;
+    if (SYSTEM_GLOBAL_SET.has(name)) return raw;
     return null;
   }
 

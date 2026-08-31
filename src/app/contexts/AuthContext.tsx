@@ -14,6 +14,8 @@ export interface AuthUser {
   ownerId?: string;
   ownerName?: string;
   carrierId?: string;
+  companyId?: string;
+  tenantId?: string;
 }
 
 interface AuthState {
@@ -54,6 +56,8 @@ function readStoredUser(): AuthUser | null {
       ownerId: user.ownerId,
       ownerName: user.ownerName,
       carrierId: user.carrierId,
+      companyId: user.companyId,
+      tenantId: user.tenantId,
     };
   } catch {
     return null;
@@ -98,6 +102,8 @@ function sessionUserToAuthUser(session: {
   ownerId?: string;
   ownerName?: string;
   carrierId?: string;
+  companyId?: string;
+  tenantId?: string;
 }): AuthUser {
   return {
     id: session.userId,
@@ -111,6 +117,8 @@ function sessionUserToAuthUser(session: {
     ownerId: session.ownerId,
     ownerName: session.ownerName,
     carrierId: session.carrierId,
+    companyId: session.companyId,
+    tenantId: session.tenantId,
   };
 }
 
@@ -146,7 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token: tokenMarker(getToken()),
       hasAuthorization: Boolean(getToken()),
     });
-    const result = await api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; rawRole?: string; normalizedRole?: string; permissions?: unknown; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string; carrierId?: string } }>('/api/auth/me');
+    const result = await api.get<{ ok: boolean; user: { userId: string; userName: string; userRole: string; rawRole?: string; normalizedRole?: string; permissions?: unknown; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string; carrierId?: string; companyId?: string; tenantId?: string } }>('/api/auth/me');
     const user = sessionUserToAuthUser(result.user);
     traceAuth('restore success', {
       role: user.role,
@@ -313,7 +321,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loginProvided: Boolean(loginValue),
       tokenBefore: tokenMarker(getToken()),
     });
-    const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; rawRole?: string; normalizedRole?: string; permissions?: unknown; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string; carrierId?: string } }>(
+    const result = await api.post<{ ok: boolean; token: string; user: { id: string; name: string; role: string; rawRole?: string; normalizedRole?: string; permissions?: unknown; email: string; profilePhoto?: string; ownerId?: string; ownerName?: string; carrierId?: string; companyId?: string; tenantId?: string } }>(
       '/api/auth/login',
       { login: loginValue, password }
     );
@@ -340,6 +348,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ownerId: result.user.ownerId,
       ownerName: result.user.ownerName,
       carrierId: result.user.carrierId,
+      companyId: result.user.companyId,
+      tenantId: result.user.tenantId,
     };
     writeStoredUser(user);
     setState({ user, isAuthenticated: true, isLoading: false });

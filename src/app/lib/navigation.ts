@@ -15,7 +15,7 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   { id: 'main', title: 'Главное', items: ['dashboard', 'tasks_center', 'equipment', 'gsm', 'knowledge_base', 'crm', 'sales', 'deliveries', 'rentals'] },
   { id: 'operations', title: 'Операции', items: ['planner', 'service', 'service_vehicles'] },
   { id: 'data', title: 'Данные', items: ['clients', 'documents', 'payments', 'finance', 'payroll', 'approvals'] },
-  { id: 'other', title: 'Прочее', items: ['bots', 'reports', 'admin_panel'] },
+  { id: 'other', title: 'Прочее', items: ['bots', 'reports', 'admin_panel', 'site_admin'] },
   { id: 'profile', title: 'Профиль', items: ['profile_settings'] },
 ];
 
@@ -112,4 +112,5 @@ export const SIDEBAR_SECTION_LABELS: Record<Section, string> = {
   reports: 'Отчёты',
   profile_settings: 'Личные настройки',
   admin_panel: 'Панель администратора',
+  site_admin: 'Управление сайтом',
 };

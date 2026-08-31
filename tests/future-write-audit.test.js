@@ -113,11 +113,16 @@ test('committed future-write inventory is exact, complete, and contains no UNKNO
   assert.equal(report.status, 'PASS', JSON.stringify(report.findings, null, 2));
   assert.equal(report.inventorySha256, policy.expectedInventorySha256);
   assert.equal(report.sourceCorpusSha256, policy.expectedSourceCorpusSha256);
-  assert.equal(report.summary.registryCollectionCount, 75);
+  assert.equal(report.summary.registryCollectionCount, 76);
   assert.equal(report.summary.writeSiteCount, policy.expectedSiteCount);
   assert.equal(report.summary.unknownSiteCount, 0);
   assert.equal(report.summary.failedCollectionCount, 0);
   assert.equal(report.collectionMatrix.length, ALL_APP_DATA_COLLECTIONS.length);
+  const publicSiteCms = report.collectionMatrix.find(entry => entry.collection === 'public_site_cms');
+  assert.deepEqual(
+    publicSiteCms.createUpsertPaths.map(entry => entry.file),
+    ['server/routes/public-site.js'],
+  );
   assert.ok(report.collectionMatrix.every(entry => entry.status === 'PASS'));
   assert.ok(report.sqlObjectMatrix.every(entry => entry.status === 'PASS'));
   assert.ok(report.sourceAuthorityMatrix.every(entry => entry.status === 'PASS' && entry.writeSiteCount > 0));

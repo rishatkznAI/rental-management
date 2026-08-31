@@ -47,6 +47,7 @@ const TENANT_OWNED_MAP_COLLECTIONS = Object.freeze([
   ...collectionsForCategory(COLLECTION_SCOPE_CATEGORY.TENANT_TECHNICAL),
 ].filter(name => getCollectionScopePolicy(name)?.shape === COLLECTION_SHAPE.MAP));
 const TENANT_OWNED_SINGLETON_COLLECTIONS = Object.freeze([
+  ...collectionsForCategory(COLLECTION_SCOPE_CATEGORY.TENANT),
   ...collectionsForCategory(COLLECTION_SCOPE_CATEGORY.TENANT_TECHNICAL),
 ].filter(name => getCollectionScopePolicy(name)?.shape === COLLECTION_SHAPE.SINGLETON));
 const GLOBAL_REFERENCE_COLLECTIONS = Object.freeze([
@@ -707,6 +708,28 @@ function createTenantDataBoundary({
         );
       }
       return raw;
+    }
+    if (context.kind === 'tenant_public_read') {
+      if (!context.allowedReads?.has(name)) {
+        throw new TenantDataBoundaryError(
+          'PUBLIC_TENANT_COLLECTION_READ_NOT_ALLOWLISTED',
+          'The public tenant reader is not authorized for this collection.',
+          403,
+          { collection: name },
+        );
+      }
+      if (
+        !isTenantOwnedCollection(name)
+        || policy.shape !== COLLECTION_SHAPE.SINGLETON
+      ) {
+        throw new TenantDataBoundaryError(
+          'PUBLIC_TENANT_SINGLETON_POLICY_REQUIRED',
+          'Only an explicitly classified tenant singleton may use public projection access.',
+          403,
+          { collection: name },
+        );
+      }
+      return readTenantSingleton(raw, context.tenantScope);
     }
     const scope = context.actorScope;
     if (name === 'users') return readUsers(scope, raw);
@@ -1649,7 +1672,7 @@ function createTenantDataBoundary({
 
   function writeData(collection, value) {
     const context = activeTenantContext();
-    if (!context || context.kind === 'tenant_denied') {
+    if (!context || !['tenant_actor', 'platform_system'].includes(context.kind)) {
       throw new ActorScopeError('ACTOR_SCOPE_INCOMPLETE', 'Trusted company/tenant or platform scope is required.', 403);
     }
     const entries = [{ name: collection, value }];
@@ -1658,7 +1681,7 @@ function createTenantDataBoundary({
 
   function preflightDataBatch(entries) {
     const context = activeTenantContext();
-    if (!context || context.kind === 'tenant_denied') {
+    if (!context || !['tenant_actor', 'platform_system'].includes(context.kind)) {
       throw new ActorScopeError('ACTOR_SCOPE_INCOMPLETE', 'Trusted company/tenant or platform scope is required.', 403);
     }
     const prepared = prepareDataBatch(entries, context);
@@ -1670,15 +1693,68 @@ function createTenantDataBoundary({
 
   function writeDataBatch(entries) {
     const context = activeTenantContext();
-    if (!context || context.kind === 'tenant_denied') {
+    if (!context || !['tenant_actor', 'platform_system'].includes(context.kind)) {
       throw new ActorScopeError('ACTOR_SCOPE_INCOMPLETE', 'Trusted company/tenant or platform scope is required.', 403);
     }
     return executeAtomicBoundaryWrite.immediate(entries, context);
   }
 
+  function createBoundPublicTenantSingletonReader({
+    collection,
+    resolveTenantScope,
+    project,
+  } = {}) {
+    if (activeTenantContext()) {
+      throw new TenantDataBoundaryError(
+        'PUBLIC_TENANT_CAPABILITY_CREATION_DENIED',
+        'A public tenant read capability cannot be created inside an active data-access context.',
+        403,
+      );
+    }
+    const name = text(collection);
+    const policy = collectionPolicy(name);
+    if (!isTenantOwnedCollection(name) || policy.shape !== COLLECTION_SHAPE.SINGLETON) {
+      throw new TenantDataBoundaryError(
+        'PUBLIC_TENANT_SINGLETON_POLICY_REQUIRED',
+        'A public tenant reader must be bound to one tenant-owned singleton collection.',
+        403,
+        { collection: name },
+      );
+    }
+    if (typeof resolveTenantScope !== 'function' || typeof project !== 'function') {
+      throw new TypeError('A public tenant reader requires fixed tenant resolution and projection functions.');
+    }
+    const allowedReads = new Set([name]);
+    return Object.freeze(function readBoundPublicTenantSingleton(siteIdentity) {
+      if (activeTenantContext()) {
+        throw new TenantDataBoundaryError(
+          'PUBLIC_TENANT_SCOPE_ELEVATION_DENIED',
+          'An active data-access context cannot be replaced by public tenant scope.',
+          403,
+        );
+      }
+      const resolved = resolveTenantScope(siteIdentity);
+      const companyId = text(resolved?.companyId);
+      const tenantId = text(resolved?.tenantId);
+      if (!companyId || companyId !== tenantId) {
+        throw new TenantDataBoundaryError(
+          'PUBLIC_SITE_IDENTITY_UNRESOLVED',
+          'The public site identity does not resolve to one exact tenant.',
+          404,
+        );
+      }
+      const tenantScope = Object.freeze({ companyId, tenantId });
+      return tenantContext.run(createContext('tenant_public_read', {
+        tenantScope,
+        allowedReads,
+      }), () => project(readData(name)));
+    });
+  }
+
   return Object.freeze({
     archiveEffectiveTenantCatalogRecord,
     companyPrincipalIds,
+    createBoundPublicTenantSingletonReader,
     createTenantCatalogEntry,
     deleteEffectiveTenantCatalogRecord,
     preflightDataBatch,

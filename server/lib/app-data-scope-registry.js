@@ -55,6 +55,9 @@ const GROUPS = Object.freeze({
     'planner_items',
     'service_vehicles',
     'manager_activity',
+    // One independently owned CMS document per company/tenant. Public delivery
+    // is a separate projection path; the stored singleton is never global.
+    'public_site_cms',
     // Mechanics are a tenant business roster. A system user link is optional;
     // standalone mechanic contacts remain valid long-lived records.
     'mechanics',
@@ -133,7 +136,7 @@ const GROUPS = Object.freeze({
 });
 
 const MAP_COLLECTIONS = new Set(['bot_users', 'bot_sessions']);
-const SINGLETON_COLLECTIONS = new Set(['snapshot']);
+const SINGLETON_COLLECTIONS = new Set(['snapshot', 'public_site_cms']);
 const LEGACY_IDEMPOTENCY_COLLECTIONS = new Set([
   'inline_relation_idempotency',
   'rental_create_idempotency',

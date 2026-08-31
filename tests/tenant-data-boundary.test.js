@@ -156,7 +156,7 @@ function createBoundaryContext() {
 
 test('every app_data collection has one explicit tenant classification', () => {
   const classified = Object.keys(COLLECTION_SCOPE_REGISTRY);
-  assert.equal(classified.length, 75);
+  assert.equal(classified.length, 76);
   assert.equal(new Set(classified).size, classified.length, 'classifications must not overlap');
   assert.deepEqual([...new Set(JSON_COLLECTIONS)].sort(), classified.sort());
   for (const [name, policy] of Object.entries(COLLECTION_SCOPE_REGISTRY)) {

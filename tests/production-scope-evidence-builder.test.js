@@ -17,6 +17,7 @@ const {
 } = require('../server/lib/production-scope-evidence-builder.js');
 const {
   ALL_APP_DATA_COLLECTIONS,
+  COLLECTION_SCOPE_CATEGORY,
   COLLECTION_SCOPE_REGISTRY,
   COLLECTION_SHAPE,
 } = require('../server/lib/app-data-scope-registry.js');
@@ -62,6 +63,7 @@ const {
 } = require('../server/lib/number-sequences.js');
 
 const MISSING_COLLECTIONS = new Set([
+  'public_site_cms',
   'service_work_names',
   'spare_part_names',
   'client_history',
@@ -344,6 +346,7 @@ function createFixture({
   extraEquipment = false,
   baselineScopeDrift = false,
   mutateCatalogRows,
+  publicSiteCms,
 } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-evidence-builder-test-'));
   const baselineContract = symbolicBaselineContract();
@@ -406,6 +409,9 @@ function createFixture({
     { id: FIXTURE_RECORDS[7].recordId, fixtureTag: 'FIXTURE-' },
   ]));
   upsert.run('app_settings', JSON.stringify(baselineByCollection.get('app_settings')));
+  if (publicSiteCms !== undefined) {
+    upsert.run('public_site_cms', JSON.stringify(publicSiteCms));
+  }
   upsert.run('inline_relation_idempotency', JSON.stringify([{ key: 'legacy-inline' }]));
   upsert.run('rental_create_idempotency', JSON.stringify([{ key: 'legacy-rental' }]));
   upsert.run('users', JSON.stringify(productionUsers()));
@@ -760,6 +766,37 @@ test('publishes simulator-compatible private evidence without touching raw captu
     assert.equal(result.summary.capture.rawCaptureOpenedBySQLite, false);
     assert.equal(result.summary.registry.scopeRelevantRecordCount, 688);
     assert.equal(result.summary.ownershipCandidates.count, 97);
+    const collectionInventory = JSON.parse(fs.readFileSync(
+      path.join(fixture.outputDir, 'analysis/collection-inventory.json'),
+      'utf8',
+    ));
+    const recordInventory = JSON.parse(fs.readFileSync(
+      path.join(fixture.outputDir, 'analysis/record-inventory.json'),
+      'utf8',
+    ));
+    const ownershipCandidates = JSON.parse(fs.readFileSync(
+      path.join(fixture.outputDir, 'analysis/ownership-candidates.json'),
+      'utf8',
+    ));
+    assert.equal(COLLECTION_SCOPE_REGISTRY.public_site_cms.category, COLLECTION_SCOPE_CATEGORY.TENANT);
+    assert.equal(COLLECTION_SCOPE_REGISTRY.public_site_cms.shape, COLLECTION_SHAPE.SINGLETON);
+    assert.equal(result.summary.registry.missingRegistryCollections.includes('public_site_cms'), true);
+    const cmsCollection = collectionInventory.find(row => row.collection === 'public_site_cms');
+    assert.deepEqual(cmsCollection, {
+      collection: 'public_site_cms',
+      category: COLLECTION_SCOPE_CATEGORY.TENANT,
+      shape: COLLECTION_SHAPE.SINGLETON,
+      readPolicy: 'EXACT_TENANT_SCOPE',
+      writeAuthority: 'TRUSTED_TENANT_ACTOR',
+      existsInSnapshot: false,
+      recordCount: 0,
+      scopeCounts: { FULLY_SCOPED: 0, PARTIAL_SCOPE: 0, SCOPE_MISMATCH: 0, UNSCOPED: 0 },
+      rawJsonHash: null,
+      canonicalCollectionHash: null,
+      updatedAt: null,
+    });
+    assert.equal(recordInventory.some(row => row.collection === 'public_site_cms'), false);
+    assert.equal(ownershipCandidates.some(row => row.collection === 'public_site_cms'), false);
     assert.equal(
       result.summary.sourceBindingsFingerprint,
       sourceBindingsFingerprint(sourceBindings()),
@@ -772,10 +809,6 @@ test('publishes simulator-compatible private evidence without touching raw captu
       classificationAuthoritySnapshot().expectedFrozenSnapshot.platformDefaultRecordCount,
       399,
     );
-    const recordInventory = JSON.parse(fs.readFileSync(
-      path.join(fixture.outputDir, 'analysis/record-inventory.json'),
-      'utf8',
-    ));
     const platformDefaults = recordInventory.filter(row => (
       row.disposition === 'PLATFORM_DEFAULT_REFERENCE'
     ));
@@ -816,6 +849,37 @@ test('publishes simulator-compatible private evidence without touching raw captu
       }])
     )));
     assert.deepEqual(rawAfter, rawBefore);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('physical tenant-envelope public_site_cms without reviewed ownership evidence fails closed', () => {
+  const fixture = createFixture({
+    publicSiteCms: {
+      __tenantScopedValues: {
+        [SYNTHETIC_COMPANY_ID]: {
+          companyId: SYNTHETIC_COMPANY_ID,
+          tenantId: SYNTHETIC_COMPANY_ID,
+          value: {
+            content: { company: { name: 'Synthetic fixture site' } },
+            equipment: [],
+          },
+        },
+      },
+    },
+  });
+  try {
+    assert.throws(() => fixture.build(), error => {
+      assert.equal(error.code, 'CLASSIFICATION_INCOMPLETE');
+      assert.deepEqual(error.details?.candidateDrift, []);
+      assert.deepEqual(error.details?.unresolved, [{
+        collection: 'public_site_cms',
+        recordId: `public_site_cms:${SYNTHETIC_COMPANY_ID}`,
+      }]);
+      return true;
+    });
+    assert.equal(fs.existsSync(fixture.outputDir), false);
   } finally {
     fixture.cleanup();
   }

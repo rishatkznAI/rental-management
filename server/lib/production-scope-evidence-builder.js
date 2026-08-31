@@ -847,8 +847,21 @@ function analyzeDisposableDatabase({
         fail('COLLECTION_JSON_INVALID', `Collection JSON is invalid: ${row.name}.`);
       }
     }
-    if (ALL_APP_DATA_COLLECTIONS.length !== 75 || Object.keys(COLLECTION_SCOPE_REGISTRY).length !== 75) {
-      fail('REGISTRY_ENTRY_COUNT_MISMATCH', 'The exact reviewed 75-entry registry is not loaded.');
+    if (ALL_APP_DATA_COLLECTIONS.length !== 76 || Object.keys(COLLECTION_SCOPE_REGISTRY).length !== 76) {
+      fail('REGISTRY_ENTRY_COUNT_MISMATCH', 'The exact reviewed 76-entry registry is not loaded.');
+    }
+    const cmsPolicy = COLLECTION_SCOPE_REGISTRY.public_site_cms;
+    if (
+      cmsPolicy?.category !== COLLECTION_SCOPE_CATEGORY.TENANT
+      || cmsPolicy?.shape !== COLLECTION_SHAPE.SINGLETON
+      || cmsPolicy?.readPolicy !== 'EXACT_TENANT_SCOPE'
+      || cmsPolicy?.writeAuthority !== 'TRUSTED_TENANT_ACTOR'
+      || cmsPolicy?.mutationPolicy !== 'MUTABLE'
+    ) {
+      fail(
+        'PUBLIC_SITE_CMS_CLASSIFICATION_MISMATCH',
+        'public_site_cms must remain an exact tenant-owned mutable singleton.',
+      );
     }
     const missingRegistryCollections = ALL_APP_DATA_COLLECTIONS.filter(name => !appData.has(name));
     const canonicalCompanyId = text(plan?.authority?.companyId);

@@ -39,6 +39,7 @@ const RETAINED_COLLECTIONS = Object.freeze({
   users: 'Production user identities, authentication hashes, roles and account state.',
   app_settings: 'Application settings are retained byte-for-byte.',
   bot_users: 'MAX identities and their current role mappings are authentication identity data.',
+  public_site_cms: 'Tenant-owned public-site configuration is retained byte-for-byte; no ownership inference or automatic remediation is permitted.',
   ...Object.fromEntries(PLATFORM_DEFAULT_TENANT_OVERLAY_COLLECTIONS.map(name => [
     name,
     MIXED_CATALOG_RETENTION_REASONS[name]
@@ -353,7 +354,8 @@ function findRetainedLocalFileReferences(value, location = '$', found = []) {
   if (typeof value !== 'string') return found;
   const text = value.trim();
   if (/^(?:\/)?(?:uploads|photos|documents|files|attachments)\//i.test(text)
-    || /\/(?:uploads|photos|documents|files|attachments)\//i.test(text)) {
+    || /\/(?:uploads|photos|documents|files|attachments)\//i.test(text)
+    || /\/api\/public-site\/media\/[a-f0-9]{64}\//i.test(text)) {
     found.push(location);
   }
   return found;

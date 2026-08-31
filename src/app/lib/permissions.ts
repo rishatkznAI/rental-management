@@ -47,7 +47,8 @@ export type Section =
   | 'bots'
   | 'reports'
   | 'profile_settings'
-  | 'admin_panel';
+  | 'admin_panel'
+  | 'site_admin';
 
 export type Action = 'view' | 'create' | 'edit' | 'delete';
 export type AppPermission = 'service_day_plan_view' | 'service_day_plan_manage';
@@ -91,6 +92,7 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     reports:          ALL,
     profile_settings: ['view', 'edit'],
     admin_panel:      ALL,
+    site_admin:       ALL,
   },
   [TECHNICAL_AUDITOR_ROLE]: {
     dashboard:        VIEW,
@@ -280,6 +282,7 @@ export function pathToSection(pathname: string): Section | null {
   if (pathname.startsWith('/manager-report')) return 'reports';
   if (pathname.startsWith('/reports'))        return 'reports';
   if (pathname.startsWith('/settings'))       return 'profile_settings';
+  if (pathname.startsWith('/site-admin'))     return 'site_admin';
   if (pathname.startsWith('/admin'))          return 'admin_panel';
   return null;
 }
@@ -309,6 +312,7 @@ export const SECTION_PATHS: Array<[Section, string]> = [
   ['reports',    '/reports'],
   ['profile_settings', '/settings'],
   ['admin_panel', '/admin'],
+  ['site_admin', '/site-admin'],
 ];
 
 // ── Хук ──────────────────────────────────────────────────────────────────────

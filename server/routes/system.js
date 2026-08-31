@@ -1762,7 +1762,10 @@ function registerSystemRoutes(app, deps) {
     return policy?.category === COLLECTION_SCOPE_CATEGORY.TENANT
       || policy?.category === COLLECTION_SCOPE_CATEGORY.TENANT_TECHNICAL
       || policy?.category === COLLECTION_SCOPE_CATEGORY.DERIVED_SCOPE;
-  }).filter(collection => getCollectionScopePolicy(collection)?.writeAuthority !== 'PLATFORM_REMEDIATION_ONLY');
+  }).filter(collection => (
+    getCollectionScopePolicy(collection)?.shape === 'ARRAY'
+    && getCollectionScopePolicy(collection)?.writeAuthority !== 'PLATFORM_REMEDIATION_ONLY'
+  ));
 
   async function downloadAllowlistedPhoto(sourceUrl, { maxBytes = DEFAULT_MAX_BYTES, allowDomains = DEFAULT_ALLOWED_DOMAINS } = {}) {
     const parsedUrl = await assertPublicHttpUrlImpl(sourceUrl);

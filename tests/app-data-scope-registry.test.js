@@ -20,7 +20,7 @@ const EXPECTED_BY_CATEGORY = Object.freeze({
     'counterparties', 'documents', 'finance_accounts', 'company_expenses',
     'leasing_contracts', 'payroll_periods', 'crm_deals', 'crm_activities',
     'deliveries', 'owners', 'planner_items', 'service_vehicles',
-    'manager_activity', 'mechanics',
+    'manager_activity', 'mechanics', 'public_site_cms',
   ]),
   PLATFORM_DEFAULT_TENANT_OVERLAY: Object.freeze([
     'knowledge_base_modules', 'service_works', 'spare_parts',
@@ -62,9 +62,9 @@ test('mixed catalogue policy is explicit and partition-aware', () => {
   }
 });
 
-test('reviewed app_data inventory independently covers all 75 collection semantics', () => {
+test('reviewed app_data inventory independently covers all 76 collection semantics', () => {
   const reviewed = Object.values(EXPECTED_BY_CATEGORY).flat();
-  assert.equal(reviewed.length, 75);
+  assert.equal(reviewed.length, 76);
   assert.equal(new Set(reviewed).size, reviewed.length);
   assert.deepEqual([...ALL_APP_DATA_COLLECTIONS].sort(), [...reviewed].sort());
   assert.deepEqual(Object.keys(COLLECTION_SCOPE_REGISTRY).sort(), [...reviewed].sort());
@@ -83,7 +83,7 @@ test('reviewed app_data inventory independently covers all 75 collection semanti
 
 test('reviewed root shapes match the storage contract', () => {
   const mapCollections = new Set(['bot_sessions', 'bot_users']);
-  const singletonCollections = new Set(['snapshot']);
+  const singletonCollections = new Set(['snapshot', 'public_site_cms']);
   const shapeCounts = { ARRAY: 0, MAP: 0, SINGLETON: 0 };
 
   for (const name of ALL_APP_DATA_COLLECTIONS) {
@@ -95,5 +95,17 @@ test('reviewed root shapes match the storage contract', () => {
     assert.equal(COLLECTION_SCOPE_REGISTRY[name].shape, expectedShape, name);
     shapeCounts[expectedShape] += 1;
   }
-  assert.deepEqual(shapeCounts, { ARRAY: 72, MAP: 2, SINGLETON: 1 });
+  assert.deepEqual(shapeCounts, { ARRAY: 72, MAP: 2, SINGLETON: 2 });
+});
+
+test('public_site_cms is an exact tenant-owned mutable singleton', () => {
+  assert.deepEqual(COLLECTION_SCOPE_REGISTRY.public_site_cms, {
+    name: 'public_site_cms',
+    category: COLLECTION_SCOPE_CATEGORY.TENANT,
+    shape: COLLECTION_SHAPE.SINGLETON,
+    readPolicy: 'EXACT_TENANT_SCOPE',
+    writeAuthority: 'TRUSTED_TENANT_ACTOR',
+    mutationPolicy: 'MUTABLE',
+    parentResolver: null,
+  });
 });

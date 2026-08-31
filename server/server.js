@@ -220,6 +220,11 @@ const { registerLeasingRoutes } = require('./routes/leasing');
 const { registerManagerMyPlanRoutes } = require('./routes/manager-my-plan');
 const { registerPayrollRoutes } = require('./routes/payroll');
 const { registerPlannerRoutes } = require('./routes/planner');
+const { registerPublicSiteRoutes } = require('./routes/public-site');
+const {
+  createPublicSiteTenantResolver,
+  projectPublishedPublicSiteCms,
+} = require('./lib/public-site-cms');
 const { registerReportRoutes } = require('./routes/reports');
 const { registerRentalChangeRequestRoutes } = require('./routes/rental-change-requests');
 const { registerRentalRoutes } = require('./routes/rentals');
@@ -263,6 +268,7 @@ const {
 } = require('./lib/request-idempotency');
 const {
   DB_PATH,
+  assertProductionWriteAllowed,
   countActiveSessions,
   createSqliteBackup,
   cleanupExpiredSessions,
@@ -520,6 +526,15 @@ const tenantDataBoundary = createTenantDataBoundary({
   generateCatalogRecordId: (_kindPrefix, { collection }) => generateId(
     ID_PREFIXES[collection] || collection.slice(0, 3).toUpperCase(),
   ),
+});
+
+const resolvePublicSiteTenant = createPublicSiteTenantResolver(
+  process.env.PUBLIC_SITE_TENANT_MAP_JSON || '',
+);
+const readPublishedPublicSiteCms = tenantDataBoundary.createBoundPublicTenantSingletonReader({
+  collection: 'public_site_cms',
+  resolveTenantScope: resolvePublicSiteTenant,
+  project: projectPublishedPublicSiteCms,
 });
 
 function readData(name) {
@@ -1995,6 +2010,18 @@ const {
 apiRouter.use(registerStaffRoutes({
   readData,
   requireAuth,
+}));
+
+apiRouter.use(registerPublicSiteRoutes({
+  readData,
+  writeData,
+  readPublishedCms: readPublishedPublicSiteCms,
+  requireAuth,
+  requireAdmin,
+  auditLog,
+  assertStorageWriteAllowed: assertProductionWriteAllowed,
+  uploadRoot: path.join(path.dirname(DB_PATH), 'uploads'),
+  nowIso,
 }));
 
 registerDocumentRoutes(apiRouter, {

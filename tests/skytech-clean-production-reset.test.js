@@ -27,6 +27,9 @@ const {
 } = require('../server/lib/skytech-clean-production-reset.js');
 const {
   ALL_APP_DATA_COLLECTIONS,
+  COLLECTION_SCOPE_CATEGORY,
+  COLLECTION_SCOPE_REGISTRY,
+  COLLECTION_SHAPE,
   PLATFORM_DEFAULT_TENANT_OVERLAY_COLLECTIONS,
 } = require('../server/lib/app-data-scope-registry.js');
 const {
@@ -188,6 +191,13 @@ test('clean reset assigns one explicit disposition to every registry collection'
   for (const catalogue of PLATFORM_DEFAULT_TENANT_OVERLAY_COLLECTIONS) {
     assert.ok(RETAINED_COLLECTIONS[catalogue], catalogue);
   }
+  assert.equal(COLLECTION_SCOPE_REGISTRY.public_site_cms.category, COLLECTION_SCOPE_CATEGORY.TENANT);
+  assert.equal(COLLECTION_SCOPE_REGISTRY.public_site_cms.shape, COLLECTION_SHAPE.SINGLETON);
+  assert.equal(
+    RETAINED_COLLECTIONS.public_site_cms,
+    'Tenant-owned public-site configuration is retained byte-for-byte; no ownership inference or automatic remediation is permitted.',
+  );
+  assert.equal(DELETED_COLLECTIONS.includes('public_site_cms'), false);
 });
 
 test('dry-run is read-only and reports exact deletion, retention and file impact', () => {
@@ -202,6 +212,17 @@ test('dry-run is read-only and reports exact deletion, retention and file impact
     assert.equal(plan.deleteCollections.find(row => row.name === 'clients').count, 1);
     assert.equal(plan.deleteCollections.find(row => row.name === 'bot_sessions').type, 'object');
     assert.equal(plan.keepCollections.find(row => row.name === 'users').count, 1);
+    assert.deepEqual(plan.keepCollections.find(row => row.name === 'public_site_cms'), {
+      name: 'public_site_cms',
+      count: 0,
+      type: 'missing',
+      reason: RETAINED_COLLECTIONS.public_site_cms,
+    });
+    assert.deepEqual(retainedBefore.collections.public_site_cms, {
+      count: 0,
+      jsonSha256: null,
+      updatedAt: null,
+    });
     assert.equal(plan.deleteTables.find(row => row.name === 'documents_sql').count, 1);
     assert.equal(plan.fileCleanup.find(row => row.root === fixture.uploads).files, 1);
     assert.deepEqual(after, before);
@@ -236,6 +257,7 @@ test('isolated apply removes business data and files while sealing identity, set
     assert.deepEqual(fixture.db.prepare("SELECT json, updated_at FROM app_data WHERE name = 'app_settings'").get(), settingsRaw);
     assert.deepEqual(result.retentionBefore, retainedBefore);
     assert.deepEqual(result.retentionAfter, retainedBefore);
+    assert.equal(fixture.db.prepare("SELECT 1 FROM app_data WHERE name = 'public_site_cms'").get(), undefined);
     assert.equal(JSON.parse(fixture.db.prepare("SELECT json FROM app_data WHERE name = 'bot_sessions'").get().json) instanceof Array, false);
     assert.deepEqual(JSON.parse(fixture.db.prepare("SELECT json FROM app_data WHERE name = 'bot_sessions'").get().json), {});
     assert.equal(fs.readdirSync(fixture.uploads).length, 0);
@@ -260,6 +282,46 @@ test('isolated apply removes business data and files while sealing identity, set
     });
     assert.equal(purged.purged, true);
     assert.equal(fs.existsSync(result.fileCleanup.quarantinePath), false);
+  } finally {
+    cleanupFixture(fixture);
+  }
+});
+
+test('isolated apply preserves present tenant-envelope public_site_cms without local media byte-for-byte', () => {
+  const fixture = createFixture();
+  try {
+    const cmsJson = '{"__tenantScopedValues":{"tenant-a":{"tenantId":"tenant-a","companyId":"tenant-a","value":{"equipment":[],"content":{"company":{"name":"Tenant A"}},"updatedAt":"2026-08-31T12:00:00.000Z"}}}}';
+    const cmsUpdatedAt = '2026-08-31T12:01:02.003Z';
+    fixture.db.prepare('INSERT INTO app_data(name, json, updated_at) VALUES (?, ?, ?)').run(
+      'public_site_cms',
+      cmsJson,
+      cmsUpdatedAt,
+    );
+    const cmsBefore = fixture.db.prepare(
+      "SELECT json, updated_at FROM app_data WHERE name = 'public_site_cms'",
+    ).get();
+    const plan = buildResetPlan(fixture.db, { dbPath: fixture.dbPath });
+    assert.deepEqual(plan.retainedFileReferences, []);
+
+    const result = applyReset(fixture.db, {
+      dbPath: fixture.dbPath,
+      environment: 'isolated',
+      confirm: ISOLATED_CONFIRMATION,
+      backupPath: fixture.backupPath,
+      backupSha256: fixture.backupSha256,
+    });
+    const cmsAfter = fixture.db.prepare(
+      "SELECT json, updated_at FROM app_data WHERE name = 'public_site_cms'",
+    ).get();
+
+    assert.deepEqual(cmsAfter, cmsBefore);
+    assert.equal(Buffer.compare(Buffer.from(cmsAfter.json), Buffer.from(cmsJson)), 0);
+    assert.equal(cmsAfter.updated_at, cmsUpdatedAt);
+    assert.deepEqual(
+      result.retentionAfter.collections.public_site_cms,
+      result.retentionBefore.collections.public_site_cms,
+    );
+    assert.equal(result.after.deleteCollections.every(row => row.count === 0), true);
   } finally {
     cleanupFixture(fixture);
   }
@@ -501,6 +563,40 @@ test('unknown schema and retained local files block reset before mutation', () =
       backupSha256: fixture.backupSha256,
     }), /Reset preconditions failed/);
     assert.equal(JSON.parse(fixture.db.prepare("SELECT json FROM app_data WHERE name = 'clients'").get().json).length, 1);
+  } finally {
+    cleanupFixture(fixture);
+  }
+});
+
+test('retained public_site_cms media references block clean reset', () => {
+  const fixture = createFixture();
+  try {
+    const mediaUrl = `/api/public-site/media/${'a'.repeat(64)}/hero.jpg`;
+    fixture.db.prepare('INSERT INTO app_data(name, json) VALUES (?, ?)').run(
+      'public_site_cms',
+      JSON.stringify({
+        companyId: 'tenant-a',
+        tenantId: 'tenant-a',
+        published: { hero: { imageUrl: mediaUrl } },
+      }),
+    );
+    const plan = buildResetPlan(fixture.db, { dbPath: fixture.dbPath });
+
+    assert.deepEqual(plan.retainedFileReferences, ['public_site_cms:$.published.hero.imageUrl']);
+    assert.match(plan.blockers.join(';'), /Retained collections reference local files: public_site_cms:/);
+    assert.throws(() => applyReset(fixture.db, {
+      dbPath: fixture.dbPath,
+      environment: 'isolated',
+      confirm: ISOLATED_CONFIRMATION,
+      backupPath: fixture.backupPath,
+      backupSha256: fixture.backupSha256,
+    }), /Reset preconditions failed/);
+    assert.equal(JSON.parse(
+      fixture.db.prepare("SELECT json FROM app_data WHERE name = 'public_site_cms'").get().json,
+    ).published.hero.imageUrl, mediaUrl);
+    assert.equal(JSON.parse(
+      fixture.db.prepare("SELECT json FROM app_data WHERE name = 'clients'").get().json,
+    ).length, 1);
   } finally {
     cleanupFixture(fixture);
   }

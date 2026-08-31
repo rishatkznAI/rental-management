@@ -300,6 +300,7 @@ function buildSourceAuthorities(sites) {
       'server/routes/crud.js', 'server/routes/deliveries.js', 'server/routes/documents.js',
       'server/routes/equipment-readiness.js', 'server/routes/finance.js', 'server/routes/gsm.js', 'server/routes/leasing.js',
       'server/routes/manager-my-plan.js', 'server/routes/payroll.js', 'server/routes/planner.js',
+      'server/routes/public-site.js',
       'server/routes/rental-change-requests.js', 'server/routes/rentals.js', 'server/routes/service.js',
       'server/routes/system.js',
     ], {
@@ -505,6 +506,7 @@ function buildSourceAuthorities(sites) {
 function tenantMediaCollections() {
   return ALL_APP_DATA_COLLECTIONS.filter(name => (
     ['TENANT', 'TENANT_TECHNICAL', 'DERIVED_SCOPE'].includes(COLLECTION_SCOPE_REGISTRY[name].category)
+    && COLLECTION_SCOPE_REGISTRY[name].shape === 'ARRAY'
     && !['inline_relation_idempotency', 'rental_create_idempotency'].includes(name)
   ));
 }
@@ -562,6 +564,7 @@ function dynamicCollectionsForSite(site) {
   if (site.file === 'server/routes/deliveries.js') return ['deliveries', 'rentals', 'gantt_rentals', 'equipment'];
   if (site.file === 'server/routes/leasing.js') return ['leasing_contracts', 'leasing_payment_schedule'];
   if (site.file === 'server/routes/payroll.js') return ['payroll_profiles', 'payroll_periods', 'payroll_records', 'payroll_adjustments', 'payroll_audit_events'];
+  if (site.file === 'server/routes/public-site.js') return ['public_site_cms'];
   if (site.file === 'server/routes/rental-change-requests.js') return ['rental_change_requests', 'rentals', 'gantt_rentals', 'equipment', 'payments', 'documents'];
   if (site.file === 'server/routes/rentals.js') {
     if (site.function === 'registerRentalRoutes') return all;

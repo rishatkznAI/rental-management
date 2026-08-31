@@ -165,6 +165,11 @@ export interface Equipment {
   photo?: PhotoReference;
   photos?: PhotoReference[];
   gsmTrackerId?: string;
+  gsmDeviceRecordId?: string | null;
+  gsmBindingVerified?: boolean;
+  gsmTelemetryVerified?: boolean;
+  gsmIngressCredentialConfigured?: boolean;
+  gsmIngressMode?: 'http_token' | 'tcp_device_credential' | null;
   gsmImei?: string | null;
   gsmDeviceId?: string | null;
   gsmProtocol?: string | null;
@@ -444,6 +449,21 @@ export type GsmPacketDirection = 'inbound' | 'outbound';
 export type GsmPacketParseStatus = 'pending' | 'parsed' | 'failed';
 export type GsmCommandStatus = 'queued' | 'sent' | 'acknowledged' | 'failed';
 
+export interface GsmGatewayRuntimeStatus {
+  key: string;
+  gatewayEnabled?: boolean;
+  enabled?: boolean;
+  disabled?: boolean;
+  host?: string;
+  port?: number;
+  tcpPort?: number;
+  startedAt?: string | null;
+  startError?: string;
+  uptimeSeconds?: number;
+  onlineConnections?: number;
+  onlineDevices?: number;
+}
+
 export interface GsmGatewayStatus {
   gatewayEnabled: boolean;
   tcpPort: number;
@@ -456,6 +476,10 @@ export interface GsmGatewayStatus {
   disabled?: boolean;
   startedAt?: string | null;
   startError?: string;
+  partialDegradation?: boolean;
+  runtimeErrors?: Array<{ runtime: string; error: string }>;
+  runtimes?: GsmGatewayRuntimeStatus[];
+  activeRuntimes?: GsmGatewayRuntimeStatus[];
   onlineConnections: number;
   onlineDevices: number;
   packetsStored: number;
@@ -510,6 +534,8 @@ export interface GsmGatewayAnalytics {
 
 export interface GsmGatewayConnection {
   id: string;
+  gsmDeviceRecordId?: string | null;
+  gsmBindingRevision?: number | null;
   deviceId?: string | null;
   trackerId?: string | null;
   imei?: string | null;
@@ -532,6 +558,10 @@ export interface GsmGatewayConnection {
 
 export interface GsmGatewayPacket {
   id: string;
+  gsmDeviceRecordId?: string | null;
+  gsmBindingRevision?: number | null;
+  bindingVerified?: boolean;
+  quarantineReason?: string | null;
   sourceIp?: string | null;
   remotePort?: number | null;
   receivedAt?: string;
@@ -584,6 +614,8 @@ export interface GsmGatewayPacket {
 
 export interface GsmGatewayCommand {
   id: string;
+  gsmDeviceRecordId?: string | null;
+  gsmBindingRevision?: number | null;
   equipmentId?: string | null;
   equipmentLabel?: string | null;
   deviceId?: string | null;
@@ -594,6 +626,8 @@ export interface GsmGatewayCommand {
   encoding: 'text' | 'hex';
   appendNewline: boolean;
   status: GsmCommandStatus;
+  bindingCurrent?: boolean;
+  effectiveStatus?: GsmCommandStatus | 'superseded';
   createdAt: string;
   createdBy?: string | null;
   sentAt?: string | null;
@@ -615,6 +649,10 @@ export interface GsmGatewayDevice {
   inventoryNumber?: string | null;
   imei?: string | null;
   deviceId?: string | null;
+  trackerId?: string | null;
+  bindingRevision?: number;
+  ingressMode?: 'http_token' | 'tcp_device_credential' | null;
+  ingressCredentialConfigured?: boolean;
   deviceType?: string | null;
   simNumber?: string | null;
   sim1?: string | null;
@@ -1661,7 +1699,10 @@ export interface FinanceOperation {
   category: string;
   description?: string;
   counterparty?: string;
+  accountId?: string;
   account?: string;
+  accountFromId?: string;
+  accountToId?: string;
   accountFrom?: string;
   accountTo?: string;
   relatedEntityType?: 'rental' | 'client' | 'document' | 'equipment' | 'leasing' | 'other' | '';

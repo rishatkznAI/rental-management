@@ -7,20 +7,23 @@ const { createRequire } = require('module');
 const rootDir = path.resolve(__dirname, '..');
 const serverRequire = createRequire(path.join(rootDir, 'server', 'package.json'));
 const Database = serverRequire('better-sqlite3');
+const {
+  databaseContentFingerprint,
+} = require('../server/lib/production-scope-remediation-runner.js');
 
 function parseArgs(argv) {
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   const args = {
-    db: process.env.DB_PATH || 'server/data/app.sqlite',
-    out: `server/data/backups/app-${timestamp}.sqlite`,
+    db: '',
+    out: '',
     json: false,
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--db') args.db = argv[++index] || args.db;
-    else if (arg === '--out') args.out = argv[++index] || args.out;
+    if (arg === '--db') args.db = argv[++index] || '';
+    else if (arg === '--out') args.out = argv[++index] || '';
     else if (arg === '--json') args.json = true;
     else if (arg === '--help' || arg === '-h') args.help = true;
+    else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
 }
@@ -40,21 +43,30 @@ if (args.help) {
   process.exit(0);
 }
 
-const dbPath = path.resolve(rootDir, args.db);
-const outPath = path.resolve(rootDir, args.out);
-
 (async () => {
+  if (!args.db || !args.out) throw new Error('Both explicit --db and --out paths are required.');
+  const dbPath = path.resolve(rootDir, args.db);
+  const outPath = path.resolve(rootDir, args.out);
+  if (dbPath === outPath) throw new Error('Backup output must differ from the source database.');
   if (!fs.existsSync(dbPath)) throw new Error(`SQLite database not found: ${dbPath}`);
+  if (fs.existsSync(outPath)) throw new Error(`Refusing to overwrite an existing backup: ${outPath}`);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  const db = new Database(dbPath, { fileMustExist: true });
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  let sourceFingerprint;
   try {
+    sourceFingerprint = databaseContentFingerprint(db);
     await db.backup(outPath);
   } finally {
     db.close();
   }
   const verify = new Database(outPath, { readonly: true, fileMustExist: true });
   let appDataCollections = 0;
+  let backupFingerprint;
   try {
+    const quickCheck = verify.pragma('quick_check', { simple: true });
+    if (quickCheck !== 'ok') throw new Error(`Backup quick_check failed: ${quickCheck}`);
+    backupFingerprint = databaseContentFingerprint(verify);
+    if (backupFingerprint !== sourceFingerprint) throw new Error('Backup content fingerprint does not match the source database.');
     appDataCollections = verify.prepare('SELECT COUNT(*) AS count FROM app_data').get()?.count || 0;
   } finally {
     verify.close();
@@ -65,6 +77,8 @@ const outPath = path.resolve(rootDir, args.out);
     backup: outPath,
     sizeBytes: fs.statSync(outPath).size,
     appDataCollections,
+    sourceFingerprint,
+    backupFingerprint,
   };
   if (args.json) console.log(JSON.stringify(payload, null, 2));
   else {

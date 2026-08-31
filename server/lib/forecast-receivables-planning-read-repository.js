@@ -6,6 +6,9 @@ const {
   FORECAST_RECEIVABLE_RUN_SUPERSESSIONS_TABLE,
   assertForecastReceivablesPlanningStructure,
 } = require('./forecast-receivables-planning-schema');
+const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
 
 const FORECAST_READ_SCOPES = new WeakSet();
 const DEFAULT_LIMIT = 50;
@@ -213,7 +216,7 @@ function createForecastReceivablesPlanningReadRepository(db) {
       params.push(position.createdAt, position.createdAt, position.id);
     }
     const limit = normalizeLimit(rawLimit);
-    const rows = db.prepare(`
+    const rows = prepareSqliteReadonlyStatement(db, `
       SELECT run.*
       FROM ${FORECAST_RECEIVABLE_RUNS_TABLE} run
       WHERE run.companyId = ? AND run.branchId IN (${scoped.placeholders})
@@ -233,23 +236,23 @@ function createForecastReceivablesPlanningReadRepository(db) {
 
   function getRun(scope, runId) {
     const scoped = scopeSql(scope);
-    const row = db.prepare(`
+    const row = prepareSqliteReadonlyStatement(db, `
       SELECT run.*
       FROM ${FORECAST_RECEIVABLE_RUNS_TABLE} run
       WHERE run.companyId = ? AND run.branchId IN (${scoped.placeholders}) AND run.id = ?
     `).get(...scoped.params, runId);
     if (!row) return null;
-    const predecessorRows = db.prepare(`
+    const predecessorRows = prepareSqliteReadonlyStatement(db, `
       SELECT predecessorRunId FROM ${FORECAST_RECEIVABLE_RUN_SUPERSESSIONS_TABLE}
       WHERE companyId = ? AND branchId = ? AND successorRunId = ?
       ORDER BY predecessorRunId LIMIT 200
     `).all(scope.companyId, row.branchId, row.id);
-    const successor = db.prepare(`
+    const successor = prepareSqliteReadonlyStatement(db, `
       SELECT successorRunId FROM ${FORECAST_RECEIVABLE_RUN_SUPERSESSIONS_TABLE}
       WHERE companyId = ? AND branchId = ? AND predecessorRunId = ?
       LIMIT 1
     `).get(scope.companyId, row.branchId, row.id);
-    const inputs = db.prepare(`
+    const inputs = prepareSqliteReadonlyStatement(db, `
       SELECT id AS inputSnapshotId, rentalLineId, activationBoundaryId, effectiveTermsVersionId,
              clientId, contractId, rentalId, equipmentId, rentalStatus, componentKind,
              serviceStartDate, serviceEndDateExclusive, candidateStartDate,
@@ -289,7 +292,7 @@ function createForecastReceivablesPlanningReadRepository(db) {
       params.push(position.createdAt, position.createdAt, position.id);
     }
     const limit = normalizeLimit(rawLimit);
-    const rows = db.prepare(`
+    const rows = prepareSqliteReadonlyStatement(db, `
       SELECT item.* FROM ${FORECAST_RECEIVABLE_ITEMS_TABLE} item
       WHERE item.companyId = ? AND item.branchId IN (${scoped.placeholders})
         ${where.length > 0 ? `AND ${where.join(' AND ')}` : ''}
@@ -323,7 +326,7 @@ function createForecastReceivablesPlanningReadRepository(db) {
       params.push(position.createdAt, position.createdAt, position.id);
     }
     const limit = normalizeLimit(rawLimit);
-    const rows = db.prepare(`
+    const rows = prepareSqliteReadonlyStatement(db, `
       SELECT diagnostic.* FROM ${FORECAST_RECEIVABLE_DIAGNOSTICS_TABLE} diagnostic
       WHERE diagnostic.companyId = ? AND diagnostic.branchId IN (${scoped.placeholders})
         ${where.length > 0 ? `AND ${where.join(' AND ')}` : ''}
@@ -342,7 +345,7 @@ function createForecastReceivablesPlanningReadRepository(db) {
 
   function currentSummary(scope, branchId) {
     const scoped = scopeSql(scope, branchId);
-    const runs = db.prepare(`
+    const runs = prepareSqliteReadonlyStatement(db, `
       SELECT run.* FROM ${FORECAST_RECEIVABLE_RUNS_TABLE} run
       WHERE run.companyId = ? AND run.branchId IN (${scoped.placeholders})
         AND NOT EXISTS (
@@ -352,7 +355,7 @@ function createForecastReceivablesPlanningReadRepository(db) {
       ORDER BY run.branchId, run.calculatedAt DESC, run.id DESC
     `).all(...scoped.params);
     const runIds = runs.map(run => run.id);
-    const confidenceRows = runIds.length === 0 ? [] : db.prepare(`
+    const confidenceRows = runIds.length === 0 ? [] : prepareSqliteReadonlyStatement(db, `
       SELECT forecastRunId, confidence, COUNT(*) AS count
       FROM ${FORECAST_RECEIVABLE_ITEMS_TABLE}
       WHERE companyId = ? AND branchId IN (${scoped.placeholders})

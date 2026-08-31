@@ -524,7 +524,7 @@ test('Payment migration dry-run, apply, and re-run are deterministic and idempot
   assert.equal(second.changed.length, 0);
 });
 
-test('migration CLI keeps dry-run read-only, creates backup on apply, and is idempotent', () => {
+test('migration CLI keeps dry-run read-only and blocks raw apply without mutation', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'payment-counterparty-'));
   const dbPath = path.join(directory, 'app.sqlite');
   const scriptPath = new URL('../server/scripts/payment-counterparty-relations.js', import.meta.url).pathname;
@@ -550,19 +550,12 @@ test('migration CLI keeps dry-run read-only, creates backup on apply, and is ide
     verify.close();
 
     const apply = spawnSync(process.execPath, [scriptPath, '--apply', '--db', dbPath], { encoding: 'utf8' });
-    assert.equal(apply.status, 0, apply.stderr);
-    const applyOutput = JSON.parse(apply.stdout);
-    assert.equal(applyOutput.wrote, true);
-    assert.equal(existsSync(applyOutput.backupPath), true);
+    assert.notEqual(apply.status, 0);
+    assert.match(apply.stderr, /AUDITED_MAINTENANCE_RUNNER_REQUIRED/);
     verify = new Database(dbPath, { readonly: true });
-    assert.equal(JSON.parse(verify.prepare("SELECT json FROM app_data WHERE name = 'payments'").get().json)[0].counterpartyId, 'CP-C');
+    assert.equal(JSON.parse(verify.prepare("SELECT json FROM app_data WHERE name = 'payments'").get().json)[0].counterpartyId, undefined);
     verify.close();
-
-    const rerun = spawnSync(process.execPath, [scriptPath, '--apply', '--db', dbPath], { encoding: 'utf8' });
-    assert.equal(rerun.status, 0, rerun.stderr);
-    const rerunOutput = JSON.parse(rerun.stdout);
-    assert.equal(rerunOutput.wrote, false);
-    assert.equal(rerunOutput.result.changed.length, 0);
+    assert.equal(existsSync(path.join(directory, 'backups')), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

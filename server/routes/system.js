@@ -7,6 +7,10 @@ const { redactAuditValue } = require('../lib/security-audit');
 const { cleanupBackupArchive, createFullBackupArchive } = require('../lib/full-backup');
 const { DEFAULT_ALLOWED_DOMAINS, DEFAULT_MAX_BYTES, archiveExternalPhotos } = require('../lib/external-photo-archive');
 const {
+  COLLECTION_SCOPE_CATEGORY,
+  getCollectionScopePolicy,
+} = require('../lib/app-data-scope-registry');
+const {
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
   normalizeClientInnFields,
@@ -42,6 +46,11 @@ const {
   isHistoricalDocumentRelation,
 } = require('../lib/document-counterparty-relations');
 const { rentalServerOwnedAuditFields } = require('../lib/rental-data-integrity');
+const {
+  assertEquipmentGsmProjectionMutation,
+  preserveEquipmentGsmProjection,
+  stripEquipmentGsmProjectionFields,
+} = require('../lib/gsm/trusted-device-scope');
 const { validateTerminalRentalTransition } = require('../lib/rental-lifecycle');
 const { canonicalizeRentalCounterpartyRelation } = require('../lib/rental-counterparty-relations');
 const {
@@ -1167,10 +1176,17 @@ function analyzeSystemDataImport(payload, readData, { actorScope = null } = {}) 
     let sanitized = rawValue
       .map(item => sanitizeSystemRecord(collection, item, stats))
       .filter(item => item !== null);
+    if (collection === 'equipment') {
+      sanitized = preserveEquipmentGsmProjectionBulk(sanitized, readData('equipment') || []);
+    }
     const blocked = new Set();
     for (const item of sanitized) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
       for (const field of Object.keys(item)) {
+        // The dedicated GSM boundary above has already rejected every changed
+        // or newly injected projection field and restored the stored values.
+        // Do not report those unchanged server-owned values as generic input.
+        if (collection === 'equipment' && /^gsm/i.test(field)) continue;
         if (isAdminBulkReplaceBlockedField(collection, field)) blocked.add(field);
       }
       if (collection === 'rentals') {
@@ -1536,6 +1552,16 @@ function analyzeSystemDataImport(payload, readData, { actorScope = null } = {}) 
   };
 }
 
+function preserveEquipmentGsmProjectionBulk(nextList, existingList) {
+  const existingById = new Map((Array.isArray(existingList) ? existingList : [])
+    .map(item => [String(item?.id || '').trim(), item]));
+  return (Array.isArray(nextList) ? nextList : []).map((item) => {
+    const current = existingById.get(String(item?.id || '').trim()) || null;
+    assertEquipmentGsmProjectionMutation(item, { current });
+    return preserveEquipmentGsmProjection(item, current);
+  });
+}
+
 function mergeImportedUsers(incoming, existingUsers) {
   const existingById = new Map((existingUsers || []).map(user => [String(user?.id || ''), user]));
   return incoming.map(user => {
@@ -1546,6 +1572,62 @@ function mergeImportedUsers(incoming, existingUsers) {
       if (SENSITIVE_KEY_PATTERN.test(key)) preserved[key] = value;
     }
     return { ...user, ...preserved };
+  });
+}
+
+function buildSystemDataImportPlan(analysis, readData) {
+  const imported = {};
+  const writes = [];
+  const importOrder = new Map([
+    ['counterparties', 10],
+    [ROLE_ASSIGNMENTS_COLLECTION, 20],
+    ['clients', 30],
+    ['client_objects', 40],
+    ['client_contracts', 50],
+    ['rentals', 60],
+    ['gantt_rentals', 61],
+    ['service', 70],
+    ['warranty_claims', 80],
+  ]);
+  const importEntries = Object.entries(analysis.sanitizedCollections)
+    .sort(([left], [right]) => (importOrder.get(left) || 100) - (importOrder.get(right) || 100));
+  for (const [collection, list] of importEntries) {
+    const nextList = collection === 'users'
+      ? mergeImportedUsers(list, readData('users') || [])
+      : list;
+    if (collection === 'equipment') {
+      assertProductionSmokeFixtureMutationAllowed({
+        action: 'system_import',
+        existingList: readData('equipment') || [],
+        nextList,
+      });
+    }
+    writes.push({ name: collection, value: nextList });
+    imported[collection] = nextList.length;
+  }
+  return Object.freeze({ imported: Object.freeze(imported), writes });
+}
+
+function publicSystemDataImportAnalysis(analysis) {
+  const { sanitizedCollections, ...publicAnalysis } = analysis;
+  return publicAnalysis;
+}
+
+function sendSystemDataImportError(res, error, {
+  fallbackCode = 'SYSTEM_IMPORT_PREFLIGHT_FAILED',
+  fallbackMessage = 'System data import preflight failed.',
+  fallbackStatus = 500,
+} = {}) {
+  const hasDomainStatus = Number.isInteger(Number(error?.status))
+    && Number(error.status) >= 400
+    && Number(error.status) <= 599;
+  const code = hasDomainStatus && error?.code ? error.code : fallbackCode;
+  return res.status(hasDomainStatus ? Number(error.status) : fallbackStatus).json({
+    ok: false,
+    code,
+    errorCode: code,
+    error: error?.message || fallbackMessage,
+    ...(hasDomainStatus && error?.details !== undefined ? { details: error.details } : {}),
   });
 }
 
@@ -1570,9 +1652,19 @@ function safeAuditLogEntry(entry) {
 
 function readAuditLogs(readData) {
   const current = readData('audit_logs');
-  if (Array.isArray(current) && current.length > 0) return current;
   const legacy = readData('audit_log');
-  return Array.isArray(legacy) ? legacy : [];
+  const merged = [];
+  const seenIds = new Set();
+  for (const entry of [
+    ...(Array.isArray(current) ? current : []),
+    ...(Array.isArray(legacy) ? legacy : []),
+  ]) {
+    const id = String(entry?.id || '').trim();
+    if (id && seenIds.has(id)) continue;
+    if (id) seenIds.add(id);
+    merged.push(entry);
+  }
+  return merged;
 }
 
 function backupHistoryEntry(entry) {
@@ -1621,6 +1713,12 @@ function registerSystemRoutes(app, deps) {
     writeDataBatch: persistDataBatch = entries => {
       for (const entry of entries || []) writeData(entry.name, entry.value);
     },
+    preflightDataBatch: preflightImportDataBatch = () => {
+      const error = new Error('System import boundary preflight is unavailable.');
+      error.code = 'SYSTEM_IMPORT_PREFLIGHT_UNAVAILABLE';
+      error.status = 503;
+      throw error;
+    },
     getSnapshot,
     saveSnapshot,
     botToken,
@@ -1642,6 +1740,7 @@ function registerSystemRoutes(app, deps) {
     backfillGanttRentalLinks,
     getBuildInfo,
     getAppDisabledConfig,
+    getProductionValidationReadOnly,
     getRoleAccessSummary,
     accessControl,
     jsonCollections = [],
@@ -1658,6 +1757,12 @@ function registerSystemRoutes(app, deps) {
   }
 
   const uploadsRoot = path.resolve(uploadRoot || path.join(path.dirname(dbPath || path.join(__dirname, '..', 'data', 'app.sqlite')), 'uploads'));
+  const tenantMediaArchiveCollections = [...new Set(jsonCollections)].filter(collection => {
+    const policy = getCollectionScopePolicy(collection);
+    return policy?.category === COLLECTION_SCOPE_CATEGORY.TENANT
+      || policy?.category === COLLECTION_SCOPE_CATEGORY.TENANT_TECHNICAL
+      || policy?.category === COLLECTION_SCOPE_CATEGORY.DERIVED_SCOPE;
+  }).filter(collection => getCollectionScopePolicy(collection)?.writeAuthority !== 'PLATFORM_REMEDIATION_ONLY');
 
   async function downloadAllowlistedPhoto(sourceUrl, { maxBytes = DEFAULT_MAX_BYTES, allowDomains = DEFAULT_ALLOWED_DOMAINS } = {}) {
     const parsedUrl = await assertPublicHttpUrlImpl(sourceUrl);
@@ -1786,11 +1891,14 @@ function registerSystemRoutes(app, deps) {
         });
       }
       const prev = getSnapshot();
+      const normalizedEquipment = Array.isArray(equipment)
+        ? preserveEquipmentGsmProjectionBulk(equipment, readData('equipment') || [])
+        : equipment;
       if (Array.isArray(equipment)) {
         assertProductionSmokeFixtureMutationAllowed({
           action: 'legacy_sync',
           existingList: prev.equipment || [],
-          nextList: equipment,
+          nextList: normalizedEquipment,
         });
       }
       const externalSyncPayload = {
@@ -1808,7 +1916,10 @@ function registerSystemRoutes(app, deps) {
       };
       for (const [collection, value] of Object.entries(externalSyncPayload)) {
         if (Array.isArray(value)) {
-          assertSafeAdminBulkReplaceInput(collection, value, 'legacy sync');
+          const genericInput = collection === 'equipment'
+            ? value.map(stripEquipmentGsmProjectionFields)
+            : value;
+          assertSafeAdminBulkReplaceInput(collection, genericInput, 'legacy sync');
         }
       }
       const now = Date.now();
@@ -1923,7 +2034,7 @@ function registerSystemRoutes(app, deps) {
         else normalizedGanttRentals = normalized;
       }
       const syncWrites = [];
-      if (Array.isArray(equipment)) syncWrites.push({ name: 'equipment', value: equipment });
+      if (Array.isArray(normalizedEquipment)) syncWrites.push({ name: 'equipment', value: normalizedEquipment });
       if (Array.isArray(normalizedRentals)) syncWrites.push({ name: 'rentals', value: normalizedRentals });
       if (Array.isArray(normalizedGanttRentals)) syncWrites.push({ name: 'gantt_rentals', value: normalizedGanttRentals });
       if (Array.isArray(service)) syncWrites.push({ name: 'service', value: service });
@@ -1987,6 +2098,7 @@ function registerSystemRoutes(app, deps) {
 
       saveSnapshot({
         ...req.body,
+        ...(Array.isArray(normalizedEquipment) ? { equipment: normalizedEquipment } : {}),
         ...(normalizedCounterparties ? { counterparties: normalizedCounterparties } : {}),
         ...(normalizedClients ? { clients: normalizedClients } : {}),
         ...(normalizedClientContracts ? { client_contracts: normalizedClientContracts } : {}),
@@ -2046,10 +2158,14 @@ function registerSystemRoutes(app, deps) {
 
   app.get('/api/version', (_req, res) => {
     const appDisabled = typeof getAppDisabledConfig === 'function' ? getAppDisabledConfig() : { disabled: false };
+    const validationReadOnly = typeof getProductionValidationReadOnly === 'function'
+      && getProductionValidationReadOnly() === true;
     res.json({
       ok: true,
       build: buildInfo(),
-      app: appDisabled.disabled ? { disabled: true, message: appDisabled.message } : { disabled: false },
+      app: appDisabled.disabled
+        ? { disabled: true, validationReadOnly, message: appDisabled.message }
+        : { disabled: false, validationReadOnly },
     });
   });
 
@@ -2321,7 +2437,7 @@ function registerSystemRoutes(app, deps) {
     try {
       const result = await archiveExternalPhotos({
         readData,
-        collections: jsonCollections,
+        collections: tenantMediaArchiveCollections,
         uploadsRoot,
         allowDomains: DEFAULT_ALLOWED_DOMAINS,
         dryRun: true,
@@ -2346,8 +2462,8 @@ function registerSystemRoutes(app, deps) {
     try {
       const result = await archiveExternalPhotos({
         readData,
-        writeData: dryRun ? undefined : writeData,
-        collections: jsonCollections,
+        writeDataBatch: dryRun ? undefined : persistDataBatch,
+        collections: tenantMediaArchiveCollections,
         uploadsRoot,
         allowDomains,
         dryRun,
@@ -2444,7 +2560,7 @@ function registerSystemRoutes(app, deps) {
         if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
           return sendSystemFixtureProtectedError(req, res, auditLog, error);
         }
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return sendSystemDataImportError(res, error);
       }
     }
 
@@ -2463,9 +2579,26 @@ function registerSystemRoutes(app, deps) {
         });
       }
     }
-    const analysis = analyzeSystemDataImport(req.body, readData, { actorScope });
-    const { sanitizedCollections, ...publicAnalysis } = analysis;
-    return res.status(analysis.ok ? 200 : 400).json(publicAnalysis);
+    let analysis;
+    try {
+      analysis = analyzeSystemDataImport(req.body, readData, { actorScope });
+    } catch (error) {
+      return sendSystemDataImportError(res, error);
+    }
+    const publicAnalysis = publicSystemDataImportAnalysis(analysis);
+    if (!analysis.ok) return res.status(400).json(publicAnalysis);
+
+    let plan;
+    try {
+      plan = buildSystemDataImportPlan(analysis, readData);
+      preflightImportDataBatch(plan.writes);
+    } catch (error) {
+      if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+        return sendSystemFixtureProtectedError(req, res, auditLog, error);
+      }
+      return sendSystemDataImportError(res, error);
+    }
+    return res.json({ ...publicAnalysis, plannedImports: plan.imported });
   });
 
   app.post('/api/admin/system-data/import', requireAuth, requireAdmin, (req, res) => {
@@ -2485,7 +2618,7 @@ function registerSystemRoutes(app, deps) {
         if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
           return sendSystemFixtureProtectedError(req, res, auditLog, error);
         }
-        return res.status(error?.status || 400).json({ ok: false, error: error.message });
+        return sendSystemDataImportError(res, error);
       }
     }
 
@@ -2504,57 +2637,33 @@ function registerSystemRoutes(app, deps) {
         });
       }
     }
-    const analysis = analyzeSystemDataImport(req.body, readData, { actorScope });
+    let analysis;
+    try {
+      analysis = analyzeSystemDataImport(req.body, readData, { actorScope });
+    } catch (error) {
+      return sendSystemDataImportError(res, error);
+    }
     if (!analysis.ok) {
-      const { sanitizedCollections, ...publicAnalysis } = analysis;
-      return res.status(400).json(publicAnalysis);
+      return res.status(400).json(publicSystemDataImportAnalysis(analysis));
     }
 
-    const imported = {};
-    const writes = [];
-    const importOrder = new Map([
-      ['counterparties', 10],
-      [ROLE_ASSIGNMENTS_COLLECTION, 20],
-      ['clients', 30],
-      ['client_objects', 40],
-      ['client_contracts', 50],
-      ['rentals', 60],
-      ['gantt_rentals', 61],
-      ['service', 70],
-      ['warranty_claims', 80],
-    ]);
-    const importEntries = Object.entries(analysis.sanitizedCollections)
-      .sort(([left], [right]) => (importOrder.get(left) || 100) - (importOrder.get(right) || 100));
-    for (const [collection, list] of importEntries) {
-      const nextList = collection === 'users'
-        ? mergeImportedUsers(list, readData('users') || [])
-        : list;
-      if (collection === 'equipment') {
-        try {
-          assertProductionSmokeFixtureMutationAllowed({
-            action: 'system_import',
-            existingList: readData('equipment') || [],
-            nextList,
-          });
-        } catch (error) {
-          if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
-            return sendSystemFixtureProtectedError(req, res, auditLog, error);
-          }
-          return res.status(error?.status || 400).json({ ok: false, error: error.message });
-        }
+    let plan;
+    try {
+      plan = buildSystemDataImportPlan(analysis, readData);
+      preflightImportDataBatch(plan.writes);
+    } catch (error) {
+      if (error?.code === SYSTEM_FIXTURE_PROTECTED_CODE) {
+        return sendSystemFixtureProtectedError(req, res, auditLog, error);
       }
-      writes.push({ name: collection, value: nextList });
-      imported[collection] = nextList.length;
+      return sendSystemDataImportError(res, error);
     }
 
     try {
-      persistDataBatch(writes);
+      persistDataBatch(plan.writes);
     } catch (error) {
-      return res.status(500).json({
-        ok: false,
-        code: 'SYSTEM_IMPORT_PERSISTENCE_FAILED',
-        errorCode: 'SYSTEM_IMPORT_PERSISTENCE_FAILED',
-        error: error?.message || 'System data import failed atomically.',
+      return sendSystemDataImportError(res, error, {
+        fallbackCode: 'SYSTEM_IMPORT_PERSISTENCE_FAILED',
+        fallbackMessage: 'System data import failed atomically.',
       });
     }
 
@@ -2562,14 +2671,14 @@ function registerSystemRoutes(app, deps) {
       action: 'system_data.import',
       entityType: 'system_data',
       after: {
-        imported,
+        imported: plan.imported,
         conflicts: Object.fromEntries(Object.entries(analysis.conflicts).map(([name, ids]) => [name, ids.length])),
         strippedSensitiveFields: analysis.strippedSensitiveFields,
       },
     });
 
-    const { sanitizedCollections, ...publicAnalysis } = analysis;
-    return res.json({ ...publicAnalysis, ok: true, dryRun: false, imported });
+    const publicAnalysis = publicSystemDataImportAnalysis(analysis);
+    return res.json({ ...publicAnalysis, ok: true, dryRun: false, imported: plan.imported });
   });
 
   app.get('/api/admin/rental-link-diagnostics', requireAuth, requireAdmin, (req, res) => {

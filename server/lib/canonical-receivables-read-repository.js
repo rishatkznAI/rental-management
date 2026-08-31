@@ -5,6 +5,9 @@ const {
   FINANCIAL_AUDIT_EVENTS_TABLE,
 } = require('./canonical-receivables-schema');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+const {
   CANONICAL_PAYMENT_ALLOCATIONS_TABLE,
   CANONICAL_PAYMENTS_TABLE,
   CANONICAL_RECEIVABLE_ADJUSTMENTS_TABLE,
@@ -99,7 +102,7 @@ function createCanonicalReceivablesReadRepository(db) {
   const queries = Object.freeze({
     getCompany(scope = {}) {
       const companyId = requiredText(scope.companyId, 'companyId');
-      return db.prepare(`
+      return prepareSqliteReadonlyStatement(db, `
         SELECT id, receivablesTimezone, createdAt
         FROM ${CANONICAL_COMPANIES_TABLE}
         WHERE id = ?
@@ -114,7 +117,7 @@ function createCanonicalReceivablesReadRepository(db) {
         params[key] = branchId;
         return `@${key}`;
       });
-      return db.prepare(`
+      return prepareSqliteReadonlyStatement(db, `
         SELECT id
         FROM ${CANONICAL_BRANCHES_TABLE}
         WHERE companyId = @companyId
@@ -146,7 +149,7 @@ function createCanonicalReceivablesReadRepository(db) {
         params.limit = options.limit;
         limitClause = 'LIMIT @limit';
       }
-      return db.prepare(`
+      return prepareSqliteReadonlyStatement(db, `
         SELECT receivable.*
         FROM ${CANONICAL_RECEIVABLES_TABLE} receivable
         WHERE ${where.join(' AND ')}
@@ -179,7 +182,7 @@ function createCanonicalReceivablesReadRepository(db) {
         params.receivableId = requiredText(options.receivableId, 'receivableId');
       }
       if (appendReceivableIdScope(where, params, 'allocation', options.receivableIds)) return [];
-      return db.prepare(`
+      return prepareSqliteReadonlyStatement(db, `
         SELECT allocation.*
         FROM ${CANONICAL_PAYMENT_ALLOCATIONS_TABLE} allocation
         WHERE ${where.join(' AND ')}
@@ -195,7 +198,7 @@ function createCanonicalReceivablesReadRepository(db) {
         params.receivableId = requiredText(options.receivableId, 'receivableId');
       }
       if (appendReceivableIdScope(where, params, 'adjustment', options.receivableIds)) return [];
-      return db.prepare(`
+      return prepareSqliteReadonlyStatement(db, `
         SELECT adjustment.*
         FROM ${CANONICAL_RECEIVABLE_ADJUSTMENTS_TABLE} adjustment
         WHERE ${where.join(' AND ')}
@@ -220,7 +223,7 @@ function createCanonicalReceivablesReadRepository(db) {
         });
         where.push(`event.aggregateId IN (${placeholders.join(', ')})`);
       }
-      return db.prepare(`
+      return prepareSqliteReadonlyStatement(db, `
         SELECT event.id, event.aggregateId, event.eventType, event.occurredAt,
           event.previousValueJson, event.newValueJson, event.correlationId
         FROM ${FINANCIAL_AUDIT_EVENTS_TABLE} event
@@ -249,7 +252,7 @@ function createCanonicalReceivablesReadRepository(db) {
         params.limit = options.limit;
         limitClause = 'LIMIT @limit';
       }
-      return db.prepare(`
+      return prepareSqliteReadonlyStatement(db, `
         SELECT payment.*
         FROM ${CANONICAL_PAYMENTS_TABLE} payment
         WHERE ${where.join(' AND ')}
@@ -294,7 +297,7 @@ function createCanonicalReceivablesReadRepository(db) {
         params.limit = options.limit;
         limitClause = 'LIMIT @limit';
       }
-      return db.prepare(`
+      return prepareSqliteReadonlyStatement(db, `
         SELECT allocation.*
         FROM ${CANONICAL_PAYMENT_ALLOCATIONS_TABLE} allocation
         WHERE ${where.join(' AND ')}
@@ -337,7 +340,7 @@ function createCanonicalReceivablesReadRepository(db) {
         params.limit = options.limit;
         limitClause = 'LIMIT @limit';
       }
-      return db.prepare(`
+      return prepareSqliteReadonlyStatement(db, `
         SELECT event.id, event.receivedAt, event.workflowStatus,
           CASE
             WHEN event.reversalOfPaymentId IN (${receiptScope}) THEN event.reversalOfPaymentId

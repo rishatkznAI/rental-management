@@ -160,9 +160,23 @@ async function writeArchivedPhoto({ uploadsRoot, collection, recordId: id, origi
     return { ok: false, code: 'unsupported-mime' };
   }
   fs.mkdirSync(path.dirname(location.absolute), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(location.absolute, bytes, { mode: 0o600 });
+  let created = false;
+  try {
+    fs.writeFileSync(location.absolute, bytes, { mode: 0o600, flag: 'wx' });
+    created = true;
+  } catch (error) {
+    if (error?.code !== 'EEXIST') throw error;
+    const existing = fs.readFileSync(location.absolute);
+    if (!existing.equals(bytes)) {
+      const conflict = new Error('archive-path-content-conflict');
+      conflict.code = 'archive-path-content-conflict';
+      throw conflict;
+    }
+  }
   return {
     ok: true,
+    absolutePath: location.absolute,
+    created,
     metadata: {
       originalUrl,
       localPath: location.publicPath,
@@ -195,7 +209,7 @@ function safeSkip(originalUrl, code, nowIso) {
 
 async function archiveExternalPhotos({
   readData,
-  writeData,
+  writeDataBatch,
   collections,
   uploadsRoot,
   allowDomains = DEFAULT_ALLOWED_DOMAINS,
@@ -205,7 +219,7 @@ async function archiveExternalPhotos({
   maxBytes = DEFAULT_MAX_BYTES,
 } = {}) {
   if (typeof readData !== 'function') throw new Error('readData is required');
-  if (!dryRun && typeof writeData !== 'function') throw new Error('writeData is required');
+  if (!dryRun && typeof writeDataBatch !== 'function') throw new Error('writeDataBatch is required');
   if (!dryRun && typeof downloadPhoto !== 'function') throw new Error('downloadPhoto is required');
 
   const allowed = new Set((Array.isArray(allowDomains) ? allowDomains : [])
@@ -215,6 +229,7 @@ async function archiveExternalPhotos({
   const nowIso = now.toISOString();
   const summary = createSummary();
   const changedCollections = new Map();
+  const createdFiles = new Set();
 
   async function archiveUrl(url, context) {
     const parsed = externalUrl(url);
@@ -265,6 +280,7 @@ async function archiveExternalPhotos({
         increment(summary.skippedReasons, saved.code || 'skipped');
         return { changed: true, value: safeSkip(url, saved.code || 'skipped', nowIso) };
       }
+      if (saved.created) createdFiles.add(saved.absolutePath);
       summary.archived += 1;
       return { changed: true, value: saved.metadata };
     } catch (error) {
@@ -354,9 +370,18 @@ async function archiveExternalPhotos({
     if (collectionChanged) changedCollections.set(collection, nextRecords);
   }
 
-  if (!dryRun) {
-    for (const [collection, nextRecords] of changedCollections.entries()) {
-      writeData(collection, nextRecords);
+  if (!dryRun && changedCollections.size > 0) {
+    try {
+      writeDataBatch([...changedCollections.entries()].map(([name, value]) => ({ name, value })));
+    } catch (error) {
+      for (const file of createdFiles) {
+        try {
+          fs.unlinkSync(file);
+        } catch (cleanupError) {
+          if (cleanupError?.code !== 'ENOENT') throw cleanupError;
+        }
+      }
+      throw error;
     }
   }
 

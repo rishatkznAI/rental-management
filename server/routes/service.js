@@ -4,6 +4,8 @@ function registerServiceRoutes(router, deps) {
     SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
     assertRepairItemsAdmin,
     inferServiceAuditSource,
+    prepareAuditedServiceMutationEntries,
+    prepareServiceMutationAuditEntries,
   } = require('../lib/service-audit-log');
   const {
     buildMechanicWorkloadReport,
@@ -14,6 +16,7 @@ function registerServiceRoutes(router, deps) {
   const {
     readData,
     writeData,
+    writeDataBatch,
     requireAuth,
     requireAdmin,
     requireRead,
@@ -32,6 +35,7 @@ function registerServiceRoutes(router, deps) {
     returnServiceTicketForRevision,
     resolveServiceTicketRevision,
     botNotifications,
+    catalogLifecycle,
   } = deps;
   const requiredAccessMethods = ['filterCollectionByScope', 'assertCanUpdateEntity', 'canAccessEntity'];
   const missingAccessMethods = !accessControl
@@ -39,6 +43,48 @@ function registerServiceRoutes(router, deps) {
     : requiredAccessMethods.filter(name => typeof accessControl[name] !== 'function');
   if (missingAccessMethods.length > 0) {
     throw new Error(`Service routes require access-control methods: ${missingAccessMethods.join(', ')}`);
+  }
+  if (typeof catalogLifecycle?.archiveEffectiveTenantCatalogRecord !== 'function') {
+    throw new Error('Service catalog deactivation requires the trusted logical catalog lifecycle.');
+  }
+
+  function sendCatalogLifecycleError(res, error) {
+    return res.status(error?.status || 409).json({
+      ok: false,
+      ...(error?.code ? { code: error.code } : {}),
+      error: error?.message || 'Catalog lifecycle mutation failed.',
+      ...(error?.details !== undefined ? { details: error.details } : {}),
+    });
+  }
+
+  function requireAtomicServiceWriter() {
+    if (typeof writeDataBatch === 'function') return writeDataBatch;
+    const error = new Error('Atomic service audit persistence is unavailable.');
+    error.code = 'SERVICE_ATOMIC_AUDIT_REQUIRED';
+    error.status = 503;
+    throw error;
+  }
+
+  function serviceAuditEntries(req, serviceEvents, securityEvents) {
+    return prepareServiceMutationAuditEntries({
+      reqOrUser: req,
+      serviceEvents,
+      securityEvents,
+      serviceAuditLog,
+      auditLog,
+    });
+  }
+
+  function persistAuditedServiceMutation(req, businessEntries, serviceEvents, securityEvents) {
+    const entries = prepareAuditedServiceMutationEntries({
+      reqOrUser: req,
+      businessEntries,
+      serviceEvents,
+      securityEvents,
+      serviceAuditLog,
+      auditLog,
+    });
+    requireAtomicServiceWriter()(entries);
   }
 
   const SERVICE_SCENARIO_LABELS = {
@@ -280,20 +326,16 @@ function registerServiceRoutes(router, deps) {
   });
 
   router.post('/service_works/:id/deactivate', requireAuth, requireWrite('service_works'), (req, res) => {
-    const list = readData('service_works') || [];
-    const index = list.findIndex(item => item.id === req.params.id);
-    if (index === -1) {
-      return res.status(404).json({ ok: false, error: 'Работа не найдена' });
+    try {
+      const effective = catalogLifecycle.archiveEffectiveTenantCatalogRecord(
+        'service_works',
+        req.params.id,
+        { archivedAt: nowIso() },
+      );
+      return res.json(effective);
+    } catch (error) {
+      return sendCatalogLifecycleError(res, error);
     }
-    list[index] = normalizeServiceWorkRecord({
-      ...list[index],
-      isActive: false,
-      id: list[index].id,
-      createdAt: list[index].createdAt,
-      updatedAt: nowIso(),
-    });
-    writeData('service_works', list);
-    return res.json(list[index]);
   });
 
   router.get('/spare_parts/active', requireAuth, requireRead('service'), (req, res) => {
@@ -305,20 +347,16 @@ function registerServiceRoutes(router, deps) {
   });
 
   router.post('/spare_parts/:id/deactivate', requireAuth, requireWrite('spare_parts'), (req, res) => {
-    const list = readData('spare_parts') || [];
-    const index = list.findIndex(item => item.id === req.params.id);
-    if (index === -1) {
-      return res.status(404).json({ ok: false, error: 'Запчасть не найдена' });
+    try {
+      const effective = catalogLifecycle.archiveEffectiveTenantCatalogRecord(
+        'spare_parts',
+        req.params.id,
+        { archivedAt: nowIso() },
+      );
+      return res.json(effective);
+    } catch (error) {
+      return sendCatalogLifecycleError(res, error);
     }
-    list[index] = normalizeSparePartRecord({
-      ...list[index],
-      isActive: false,
-      id: list[index].id,
-      createdAt: list[index].createdAt,
-      updatedAt: nowIso(),
-    });
-    writeData('spare_parts', list);
-    return res.json(list[index]);
   });
 
   router.get('/repair_work_items', requireAuth, requireRead('repair_work_items'), (req, res) => {
@@ -354,7 +392,7 @@ function registerServiceRoutes(router, deps) {
     const rows = (readData('service_audit_log') || [])
       .filter(item => item.serviceId === ticket.id)
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-    return res.json(rows);
+    return res.json(accessControl.sanitizeCollectionForRead('service', rows, req.user));
   });
 
   router.post('/service/:id/revision', requireAuth, (req, res) => {
@@ -369,7 +407,23 @@ function registerServiceRoutes(router, deps) {
     try {
       const payload = requireRevisionPayload(req);
       const updated = returnServiceTicketForRevision
-        ? returnServiceTicketForRevision(ticket, payload, req.user)
+        ? returnServiceTicketForRevision(ticket, payload, req.user, {
+            writeDataBatch: requireAtomicServiceWriter(),
+            buildExtraEntries: nextTicket => serviceAuditEntries(req, [{
+              serviceId: ticket.id,
+              action: 'ticket_revision_returned',
+              entityType: 'service_ticket',
+              entityId: ticket.id,
+              snapshot: nextTicket,
+              source: inferServiceAuditSource(req, 'web'),
+            }], [{
+              action: 'service.revision.return',
+              entityType: 'service',
+              entityId: ticket.id,
+              before: { status: ticket.status },
+              after: { status: nextTicket.status, reason: payload.reason, checklist: payload.checklist },
+            }]),
+          })
         : {
             ...ticket,
             status: 'needs_revision',
@@ -377,13 +431,13 @@ function registerServiceRoutes(router, deps) {
             revisionDetails: payload.details,
             revisionChecklist: payload.checklist,
           };
-      auditLog?.(req, {
-        action: 'service.revision.return',
-        entityType: 'service',
-        entityId: ticket.id,
-        before: { status: ticket.status },
-        after: { status: updated.status, reason: payload.reason, checklist: payload.checklist },
-      });
+      if (!returnServiceTicketForRevision) {
+        return res.status(503).json({
+          ok: false,
+          code: 'SERVICE_ATOMIC_AUDIT_REQUIRED',
+          error: 'Atomic service revision persistence is unavailable.',
+        });
+      }
       botNotifications?.notifyServiceRevisionReturned?.(updated);
       return res.json(accessControl.sanitizeEntityForRead('service', updated, req.user));
     } catch (error) {
@@ -404,15 +458,31 @@ function registerServiceRoutes(router, deps) {
       const updated = resolveServiceTicketRevision
         ? resolveServiceTicketRevision(ticket, {
             resolutionComment: String(req.body?.resolutionComment || req.body?.comment || '').trim(),
-          }, req.user)
+          }, req.user, {
+            writeDataBatch: requireAtomicServiceWriter(),
+            buildExtraEntries: nextTicket => serviceAuditEntries(req, [{
+              serviceId: ticket.id,
+              action: 'ticket_revision_resolved',
+              entityType: 'service_ticket',
+              entityId: ticket.id,
+              snapshot: nextTicket,
+              source: inferServiceAuditSource(req, 'web'),
+            }], [{
+              action: 'service.revision.resolve',
+              entityType: 'service',
+              entityId: ticket.id,
+              before: { status: ticket.status },
+              after: { status: nextTicket.status },
+            }]),
+          })
         : { ...ticket, status: 'ready' };
-      auditLog?.(req, {
-        action: 'service.revision.resolve',
-        entityType: 'service',
-        entityId: ticket.id,
-        before: { status: ticket.status },
-        after: { status: updated.status },
-      });
+      if (!resolveServiceTicketRevision) {
+        return res.status(503).json({
+          ok: false,
+          code: 'SERVICE_ATOMIC_AUDIT_REQUIRED',
+          error: 'Atomic service revision persistence is unavailable.',
+        });
+      }
       botNotifications?.notifyServiceRevisionResolved?.(updated);
       return res.json(accessControl.sanitizeEntityForRead('service', updated, req.user));
     } catch (error) {
@@ -486,22 +556,22 @@ function registerServiceRoutes(router, deps) {
         comment: req.body?.comment ? String(req.body.comment).trim() : undefined,
         createdAt: nowIso(),
       };
-      list.push(item);
-      writeData('repair_work_items', list);
-      serviceAuditLog?.(req, {
+      persistAuditedServiceMutation(req, [{
+        name: 'repair_work_items',
+        value: [...list, item],
+      }], [{
         serviceId: repairId,
         action: 'work_added',
         entityType: 'repair_work_item',
         entityId: item.id,
         snapshot: item,
         source: inferServiceAuditSource(req, 'web'),
-      });
-      auditLog?.(req, {
+      }], [{
         action: 'service.work_item.create',
         entityType: 'repair_work_items',
         entityId: item.id,
         after: item,
-      });
+      }]);
       res.status(201).json(redactWorkAccrualForRead(
         accessControl.sanitizeEntityForRead('repair_work_items', item, req.user),
         req.user,
@@ -530,22 +600,31 @@ function registerServiceRoutes(router, deps) {
     } catch (error) {
       return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
     }
-    serviceAuditLog?.(req, {
+    const nextList = list.filter((_item, itemIndex) => itemIndex !== index);
+    try {
+      persistAuditedServiceMutation(req, [{
+        name: 'repair_work_items',
+        value: nextList,
+      }], [{
       serviceId: removed.repairId,
       action: 'work_deleted',
       entityType: 'repair_work_item',
       entityId: removed.id,
       snapshot: removed,
       source: inferServiceAuditSource(req, 'web'),
-    });
-    auditLog?.(req, {
+      }], [{
       action: 'service.work_item.delete',
       entityType: 'repair_work_items',
       entityId: removed.id,
       before: removed,
-    });
-    list.splice(index, 1);
-    writeData('repair_work_items', list);
+      }]);
+    } catch (error) {
+      return res.status(error?.status || 500).json({
+        ok: false,
+        ...(error?.code ? { code: error.code } : {}),
+        error: error?.message || 'Не удалось атомарно удалить работу.',
+      });
+    }
     res.json({ ok: true });
   });
 
@@ -615,22 +694,22 @@ function registerServiceRoutes(router, deps) {
         unitSnapshot: String(part.unit || 'шт').trim() || 'шт',
         createdAt: nowIso(),
       };
-      list.push(item);
-      writeData('repair_part_items', list);
-      serviceAuditLog?.(req, {
+      persistAuditedServiceMutation(req, [{
+        name: 'repair_part_items',
+        value: [...list, item],
+      }], [{
         serviceId: repairId,
         action: 'part_added',
         entityType: 'repair_part_item',
         entityId: item.id,
         snapshot: item,
         source: inferServiceAuditSource(req, 'web'),
-      });
-      auditLog?.(req, {
+      }], [{
         action: 'service.part_item.create',
         entityType: 'repair_part_items',
         entityId: item.id,
         after: item,
-      });
+      }]);
       res.status(201).json(accessControl.sanitizeEntityForRead('repair_part_items', item, req.user));
     } catch (error) {
       res.status(error?.status || 400).json({ ok: false, error: error.message });
@@ -656,22 +735,31 @@ function registerServiceRoutes(router, deps) {
     } catch (error) {
       return res.status(error?.status || 403).json({ ok: false, error: error?.message || 'Forbidden' });
     }
-    serviceAuditLog?.(req, {
+    const nextList = list.filter((_item, itemIndex) => itemIndex !== index);
+    try {
+      persistAuditedServiceMutation(req, [{
+        name: 'repair_part_items',
+        value: nextList,
+      }], [{
       serviceId: removed.repairId,
       action: 'part_deleted',
       entityType: 'repair_part_item',
       entityId: removed.id,
       snapshot: removed,
       source: inferServiceAuditSource(req, 'web'),
-    });
-    auditLog?.(req, {
+      }], [{
       action: 'service.part_item.delete',
       entityType: 'repair_part_items',
       entityId: removed.id,
       before: removed,
-    });
-    list.splice(index, 1);
-    writeData('repair_part_items', list);
+      }]);
+    } catch (error) {
+      return res.status(error?.status || 500).json({
+        ok: false,
+        ...(error?.code ? { code: error.code } : {}),
+        error: error?.message || 'Не удалось атомарно удалить запчасть.',
+      });
+    }
     res.json({ ok: true });
   });
 
@@ -973,8 +1061,15 @@ function registerServiceRoutes(router, deps) {
     requireAdmin || requireWrite('service_works'),
     (req, res) => {
       const dryRun = req.body?.confirm !== true || req.body?.dryRun === true || req.query.dryRun === '1';
-      const result = migrateLegacyRepairFacts({ dryRun });
-      res.json({ ok: true, ...result, dryRun, applied: !dryRun });
+      if (!dryRun) {
+        return res.status(409).json({
+          ok: false,
+          code: 'PLATFORM_MAINTENANCE_REQUIRED',
+          error: 'Repair fact migration requires the audited platform maintenance runner.',
+        });
+      }
+      const result = migrateLegacyRepairFacts({ dryRun: true });
+      return res.json({ ok: true, ...result, dryRun: true, applied: false });
     },
   );
 }

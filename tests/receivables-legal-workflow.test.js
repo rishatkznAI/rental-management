@@ -12,6 +12,7 @@ const receivablesCore = require('../server/lib/receivables-core.js');
 
 function createApp() {
   let idCounter = 0;
+  let nextBatchError = null;
   const state = {
     counterparties: [{ id: 'CP-1', roles: ['customer'], status: 'active' }],
     clients: [{ id: 'c-1', counterpartyId: 'CP-1', company: 'ООО Долг', inn: '7701000000', manager: 'Office' }],
@@ -60,6 +61,16 @@ function createApp() {
   const writeData = (name, value) => {
     state[name] = value;
   };
+  const writeDataBatch = entries => {
+    if (nextBatchError) {
+      const error = nextBatchError;
+      nextBatchError = null;
+      throw error;
+    }
+    const staged = structuredClone(state);
+    for (const entry of entries) staged[entry.name] = structuredClone(entry.value);
+    Object.assign(state, staged);
+  };
   const accessControl = createAccessControl({ readData });
   const app = express();
   const router = express.Router();
@@ -69,6 +80,7 @@ function createApp() {
     const user = users[token];
     if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     req.user = user;
+    req.actorScope = { companyId: 'COMPANY-FINANCE', tenantId: 'COMPANY-FINANCE' };
     next();
   };
   const requireRead = collection => (req, res, next) => {
@@ -86,6 +98,7 @@ function createApp() {
     requireWrite,
     readData,
     writeData,
+    writeDataBatch,
     accessControl,
     generateId: prefix => `${prefix}-${++idCounter}`,
     idPrefixes: { documents: 'D', debt_collection_actions: 'DCA', receivable_payment_plans: 'RPP' },
@@ -95,7 +108,16 @@ function createApp() {
     ...receivablesCore,
   });
   app.use('/api', router);
-  return { app, state };
+  return {
+    app,
+    state,
+    failNextBatch() {
+      const error = new Error('injected receivables atomic batch failure');
+      error.code = 'INJECTED_BATCH_FAILURE';
+      error.status = 503;
+      nextBatchError = error;
+    },
+  };
 }
 
 async function withServer(app, fn) {
@@ -153,6 +175,35 @@ test('receivables legal workflow generates notification document and sends it', 
     assert.equal(after.json.rows[0].notificationDueDate, '2026-05-14');
     assert.equal(after.json.summary.notificationOverdue, 1);
   });
+});
+
+test('receivables document, numbering, workflow action, and semantic audit roll back as one unit', async () => {
+  const { app, state, failNextBatch } = createApp();
+  state.audit_logs = [];
+  const before = structuredClone({
+    documents: state.documents,
+    app_settings: state.app_settings,
+    debt_collection_actions: state.debt_collection_actions,
+    audit_logs: state.audit_logs,
+  });
+  failNextBatch();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/finance/receivables/workflow-actions', 'office', {
+      clientId: 'c-1',
+      actionType: 'generate_notification',
+      comment: 'Must roll back together',
+    });
+    assert.equal(response.response.status, 503);
+    assert.equal(response.json.code, 'INJECTED_BATCH_FAILURE');
+  });
+
+  assert.deepEqual({
+    documents: state.documents,
+    app_settings: state.app_settings,
+    debt_collection_actions: state.debt_collection_actions,
+    audit_logs: state.audit_logs,
+  }, before);
 });
 
 test('receivables legal workflow generates and sends pretrial claim', async () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -61,6 +61,10 @@ import {
   normalizeDeliveriesResponse,
   todayIso,
 } from '../lib/deliveries-view.js';
+import {
+  forgetIdempotentAttempt,
+  idempotencyKeyForAttempt,
+} from '../lib/rental-create-attempt.js';
 
 const DELIVERY_KEYS = {
   all: ['deliveries'] as const,
@@ -490,6 +494,8 @@ export default function Deliveries() {
   const { can } = usePermissions();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const deliveryAttemptsRef = useRef(new Map());
+  const carrierSendAttemptsRef = useRef(new Map());
   const canCreate = can('create', 'deliveries');
   const canEdit = can('edit', 'deliveries');
   const canDelete = can('delete', 'deliveries');
@@ -847,7 +853,14 @@ export default function Deliveries() {
           toast.warning(`MAX: ${updated.botSendError}`);
         }
       } else {
-        const created = await deliveriesService.create(payload);
+        const attempt = idempotencyKeyForAttempt(
+          'delivery-create',
+          payload,
+          deliveryAttemptsRef.current,
+          { persist: true },
+        );
+        const created = await deliveriesService.create(payload, attempt.key);
+        forgetIdempotentAttempt(attempt, deliveryAttemptsRef.current, { persist: true });
         if (created.botSentAt) {
           toast.success('Доставка создана и отправлена перевозчику');
         } else {
@@ -879,7 +892,14 @@ export default function Deliveries() {
 
   async function resendToCarrier(delivery: Delivery) {
     try {
-      const updated = await deliveriesService.resendToCarrier(delivery.id);
+      const attempt = idempotencyKeyForAttempt(
+        'delivery-carrier-send',
+        { deliveryId: delivery.id },
+        carrierSendAttemptsRef.current,
+        { persist: true },
+      );
+      const updated = await deliveriesService.resendToCarrier(delivery.id, attempt.key);
+      forgetIdempotentAttempt(attempt, carrierSendAttemptsRef.current, { persist: true });
       await invalidateDeliveryContext();
       if (updated.botSendError) {
         toast.warning(`MAX: ${updated.botSendError}`);

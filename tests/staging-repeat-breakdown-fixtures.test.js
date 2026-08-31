@@ -73,10 +73,13 @@ test('staging repeat breakdown fixture seed refuses production-like environment'
 
 test('staging repeat breakdown fixture seed is idempotent and scoped to fixture prefixes', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'repeat-breakdown-fixtures-'));
-  const dbPath = path.join(dir, 'app.sqlite');
+  const dbPath = path.join(dir, 'staging-repeat-fixtures.sqlite');
   const env = {
     DB_PATH: dbPath,
     ALLOW_STAGING_FIXTURE_SEED: 'true',
+    STAGING_FIXTURE_DATABASE_DISPOSABLE: 'true',
+    STAGING_COMPANY_ID: 'staging-company-test',
+    STAGING_TENANT_ID: 'staging-company-test',
     RAILWAY_ENVIRONMENT_NAME: 'staging',
     RAILWAY_PROJECT_NAME: 'cooperative-vitality',
     RAILWAY_SERVICE_NAME: 'rental-management',
@@ -116,6 +119,7 @@ test('staging repeat breakdown fixture seed is idempotent and scoped to fixture 
     assert.equal(service.every(item => String(item.id).startsWith(SERVICE_PREFIX)), true);
     assert.equal(workItems.every(item => String(item.id).startsWith(SERVICE_PREFIX) && String(item.repairId).startsWith(SERVICE_PREFIX)), true);
     assert.equal(partItems.every(item => String(item.id).startsWith(SERVICE_PREFIX) && String(item.repairId).startsWith(SERVICE_PREFIX)), true);
+    assert.equal(equipment.every(item => item.companyId === 'staging-company-test' && item.tenantId === 'staging-company-test'), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

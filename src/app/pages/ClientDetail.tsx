@@ -547,7 +547,7 @@ export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { can } = usePermissions();
+  const { can, canReadCollection } = usePermissions();
   const { user } = useAuth();
   const canEdit = can('edit', 'clients');
   const canDelete = user?.role === 'Администратор' && can('delete', 'clients');
@@ -647,7 +647,9 @@ export default function ClientDetail() {
   const { data: paymentAllocations = [] } = usePaymentAllocationsList({ enabled: canViewPayments });
   const { data: serviceTickets = [] } = useServiceTicketsList();
   const { data: clientObjectsAll = [] } = useClientObjectsList();
-  const { data: clientContractsAll = [] } = useClientContractsList();
+  const { data: clientContractsAll = [] } = useClientContractsList({
+    enabled: canReadCollection('client_contracts'),
+  });
   const createClientObject = useCreateClientObject();
   const updateClientObject = useUpdateClientObject();
   const archiveClientObject = useArchiveClientObject();
@@ -655,7 +657,9 @@ export default function ClientDetail() {
   const createClientContract = useCreateClientContract();
   const updateClientContract = useUpdateClientContract();
   const deleteClientContract = useDeleteClientContract();
-  const { data: debtPlanResponse } = useDebtCollectionPlans();
+  const { data: debtPlanResponse } = useDebtCollectionPlans({
+    enabled: canReadCollection('debt_collection_plans'),
+  });
   const { data: crmActivities = [] } = useCrmActivities(client ? { clientId: client.id } : undefined, Boolean(isCrmEnabled && client && can('view', 'crm')));
   const debtCollectionPlans = debtPlanResponse?.plans ?? [];
   const clientRentals = ganttRentals.filter(r =>

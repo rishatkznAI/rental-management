@@ -1,0 +1,47 @@
+{
+  "contractVersion": 1,
+  "productionExecutionAuthorized": false,
+  "candidateCount": 97,
+  "candidateKeySetSha256": "95225641e84cb30af8f9b11b1adec8e6b61d146272498a14203b825acc57ebbe",
+  "candidateAuthoritySha256": "e2313af98cfa92888eb2f9ac45b7c18a5f7941dd940fde26695e1527f697202c",
+  "canonicalScopeSha256": "5d02523044f7cd3f0a39069993c85b46fb23195cbdaa4854e9a9009922fe249e",
+  "fixtureRecordCount": 8,
+  "fixtureKeySetSha256": "0aecca8883993c8213947c742792d1794d215a487678b09b03b5e5dc5bc5b1b1",
+  "collectionRules": [
+    {
+      "collection": "app_settings",
+      "classification": "TENANT_REFERENCE_DATA",
+      "scopeSource": "CONFIG_AUTHORITY"
+    },
+    {
+      "collection": "client_objects",
+      "classification": "TENANT_BUSINESS_DATA",
+      "scopeSource": "PARENT_DERIVED"
+    },
+    {
+      "collection": "clients",
+      "classification": "TENANT_BUSINESS_DATA",
+      "scopeSource": "PARENT_DERIVED"
+    },
+    {
+      "collection": "counterparties",
+      "classification": "TENANT_BUSINESS_DATA",
+      "scopeSource": "DIRECT_OWNER"
+    },
+    {
+      "collection": "counterparty_role_assignments",
+      "classification": "TENANT_BUSINESS_DATA",
+      "scopeSource": "PARENT_DERIVED"
+    },
+    {
+      "collection": "documents",
+      "classification": "TENANT_BUSINESS_DATA",
+      "scopeSource": "PARENT_DERIVED"
+    },
+    {
+      "collection": "equipment",
+      "classification": "TENANT_BUSINESS_DATA",
+      "scopeSource": "DIRECT_OWNER"
+    }
+  ]
+}

@@ -1,65 +1,38 @@
 #!/usr/bin/env node
 
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const path = require('path');
+const { createRequire } = require('module');
 const {
   analyzeGanttRentalLinks,
   backfillGanttRentalLinks,
 } = require('../server/lib/rental-change-requests.js');
+const {
+  assertAuditedMaintenanceApplyUnavailable,
+  createStrictReadOnlyStorage,
+  resolveExplicitDatabasePath,
+} = require('../server/lib/maintenance-script-safety.js');
+
+const rootDir = path.resolve(__dirname, '..');
+const serverRequire = createRequire(path.join(rootDir, 'server', 'package.json'));
+const Database = serverRequire('better-sqlite3');
 
 function parseArgs(argv) {
-  const args = {
-    db: process.env.DB_PATH || path.join(__dirname, '..', 'server', 'data', 'app.sqlite'),
-    id: '',
-    limit: 50,
-    json: false,
-    backfill: false,
-    dryRun: false,
-  };
-
+  const args = { db: '', id: '', limit: 50, json: false, backfill: false, dryRun: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--db') args.db = argv[++index] || args.db;
+    if (arg === '--db') args.db = argv[++index] || '';
     else if (arg === '--id') args.id = argv[++index] || '';
-    else if (arg === '--limit') args.limit = Number(argv[++index]) || args.limit;
-    else if (arg === '--json') args.json = true;
+    else if (arg === '--limit') {
+      const limit = Number(argv[++index]);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('--limit must be an integer from 1 to 1000.');
+      args.limit = limit;
+    } else if (arg === '--json') args.json = true;
     else if (arg === '--backfill') args.backfill = true;
     else if (arg === '--dry-run') args.dryRun = true;
-    else if (!arg.startsWith('--')) args.db = arg;
+    else if (arg === '--help' || arg === '-h') args.help = true;
+    else throw new Error(`Unknown argument: ${arg}`);
   }
-
   return args;
-}
-
-function sqliteJson(dbPath, sql) {
-  const output = execFileSync('sqlite3', ['-json', dbPath, sql], { encoding: 'utf8' });
-  return output.trim() ? JSON.parse(output) : [];
-}
-
-function loadCollections(dbPath) {
-  const rows = sqliteJson(dbPath, "select name,json from app_data where name in ('rentals','gantt_rentals','equipment')");
-  const state = { rentals: [], gantt_rentals: [], equipment: [] };
-  for (const row of rows) {
-    state[row.name] = row.json ? JSON.parse(row.json) : [];
-  }
-  return state;
-}
-
-function writeCollection(dbPath, name, value) {
-  const sql = [
-    'BEGIN;',
-    `UPDATE app_data SET json='${JSON.stringify(value).replace(/'/g, "''")}', updated_at=CURRENT_TIMESTAMP WHERE name='${name.replace(/'/g, "''")}';`,
-    'COMMIT;',
-  ].join('\n');
-  const file = path.join(os.tmpdir(), `rental-links-${process.pid}-${Date.now()}.sql`);
-  fs.writeFileSync(file, sql);
-  try {
-    execFileSync('sqlite3', [dbPath, `.read ${file}`], { stdio: 'pipe' });
-  } finally {
-    fs.rmSync(file, { force: true });
-  }
 }
 
 function formatSummary(label, diagnostics) {
@@ -67,74 +40,69 @@ function formatSummary(label, diagnostics) {
     `${label}:`,
     `  rentals: ${diagnostics.rentalsCount}`,
     `  gantt_rentals: ${diagnostics.ganttRentalsCount}`,
-    `  без rentalId: ${diagnostics.missingRentalIdCount}`,
-    `  без любых связей rentalId/sourceRentalId/originalRentalId: ${diagnostics.missingAnyLinkCount}`,
-    `  rentalId указывает в никуда: ${diagnostics.brokenRentalIdCount}`,
-    `  все связи указывают в никуда: ${diagnostics.brokenAnyLinkCount}`,
-    diagnostics.target ? [
-      `  target ${diagnostics.targetId}:`,
-      `    found in rentals.id: ${diagnostics.target.foundInRentals ? 'yes' : 'no'}`,
-      `    found in gantt_rentals.id: ${diagnostics.target.foundInGanttRentals ? 'yes' : 'no'}`,
-      `    found in gantt links: ${diagnostics.target.foundInGanttLinks ? 'yes' : 'no'}`,
-    ].join('\n') : '',
-  ].filter(Boolean).join('\n');
+    `  without rentalId: ${diagnostics.missingRentalIdCount}`,
+    `  without any stable rental link: ${diagnostics.missingAnyLinkCount}`,
+    `  broken rentalId: ${diagnostics.brokenRentalIdCount}`,
+    `  all stable links broken: ${diagnostics.brokenAnyLinkCount}`,
+  ].join('\n');
 }
 
-function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (!fs.existsSync(args.db)) {
-    console.error(`DB not found: ${args.db}`);
-    process.exit(2);
+function main(argv = process.argv.slice(2)) {
+  const args = parseArgs(argv);
+  if (args.help) {
+    console.log('Usage: node scripts/diagnose-gantt-rental-links.cjs --db /explicit/path/app.sqlite [--id id] [--backfill --dry-run]');
+    return null;
+  }
+  const dbPath = resolveExplicitDatabasePath(args.db, { cwd: rootDir });
+  if (args.backfill && !args.dryRun) {
+    assertAuditedMaintenanceApplyUnavailable(true, 'gantt rental-link backfill');
   }
 
-  const state = loadCollections(args.db);
-  const before = analyzeGanttRentalLinks({
-    rentals: state.rentals,
-    ganttRentals: state.gantt_rentals,
-    equipment: state.equipment,
-    targetId: args.id,
-    limit: args.limit,
-  });
-
-  let backfill = null;
-  let after = before;
-
-  if (args.backfill || args.dryRun) {
-    let nextState = state;
-    backfill = backfillGanttRentalLinks({
-      readData: name => nextState[name] || [],
-      writeData: (name, value) => {
-        nextState = { ...nextState, [name]: value };
-        if (!args.dryRun) writeCollection(args.db, name, value);
-      },
-      logger: args.json ? { log: () => {}, warn: () => {} } : console,
-      dryRun: args.dryRun,
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    const storage = createStrictReadOnlyStorage(db, {
+      allowCollections: ['rentals', 'gantt_rentals', 'equipment'],
     });
-
-    const persistedState = args.dryRun ? nextState : loadCollections(args.db);
-    after = analyzeGanttRentalLinks({
-      rentals: persistedState.rentals,
-      ganttRentals: persistedState.gantt_rentals,
-      equipment: persistedState.equipment,
+    const state = {
+      rentals: storage.readData('rentals'),
+      gantt_rentals: storage.readData('gantt_rentals'),
+      equipment: storage.readData('equipment'),
+    };
+    const before = analyzeGanttRentalLinks({
+      rentals: state.rentals,
+      ganttRentals: state.gantt_rentals,
+      equipment: state.equipment,
       targetId: args.id,
       limit: args.limit,
     });
-  }
-
-  const payload = { db: args.db, before, backfill, after };
-  if (args.json) {
-    console.log(JSON.stringify(payload, null, 2));
-    return;
-  }
-
-  console.log(`DB: ${args.db}`);
-  console.log(formatSummary('Before', before));
-  if (backfill) {
-    console.log('');
-    console.log(`Backfill: checked=${backfill.checked}, missingLink=${backfill.missingLink}, linked=${backfill.linked}, ambiguous=${backfill.ambiguous.length}, unresolved=${backfill.unresolved.length}, dryRun=${backfill.dryRun}`);
-    console.log('');
-    console.log(formatSummary('After', after));
+    const backfill = args.backfill
+      ? backfillGanttRentalLinks({
+        readData: name => state[name],
+        writeData: () => { throw new Error('Readonly diagnostic attempted a write.'); },
+        logger: args.json ? { log() {}, warn() {} } : console,
+        dryRun: true,
+      })
+      : null;
+    const payload = { db: dbPath, mode: 'read-only', productionDataChanged: false, before, backfill };
+    if (args.json) console.log(JSON.stringify(payload, null, 2));
+    else {
+      console.log(`DB: ${dbPath}`);
+      console.log(formatSummary('Current state', before));
+      if (backfill) console.log(`Backfill preview: linked=${backfill.linked}, ambiguous=${backfill.ambiguous.length}, unresolved=${backfill.unresolved.length}`);
+    }
+    return payload;
+  } finally {
+    db.close();
   }
 }
 
-main();
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`${error.code || 'GANTT_LINK_DIAGNOSTIC_FAILED'}: ${error.message || error}`);
+    process.exitCode = 2;
+  }
+}
+
+module.exports = { main, parseArgs };

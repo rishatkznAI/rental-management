@@ -83,9 +83,22 @@ Legend: `Y` = exposed and tenant-enforced, `N/A` = no such application operation
 
 Every `JSON_COLLECTIONS` entry is classified exactly once; a test compares the classifications to the database registry and fails if a collection is added without a decision.
 
-### TENANT_OWNED arrays (67)
+### TENANT_OWNED arrays
 
-`equipment`, `equipment_finance`, `equipment_downtimes`, `rentals`, `gantt_rentals`, `rental_change_requests`, `service`, `warranty_claims`, `counterparties`, `counterparty_role_assignments`, `supplier_profiles`, `contractor_profiles`, `clients`, `client_objects`, `client_contracts`, `inline_relation_idempotency`, `rental_create_idempotency`, `knowledge_base_modules`, `knowledge_base_progress`, `app_settings`, `gsm_devices`, `gsm_packets`, `gsm_commands`, `documents`, `mechanic_documents`, `payments`, `payment_allocations`, `debt_collection_plans`, `debt_collection_actions`, `receivable_payment_plans`, `finance_accounts`, `finance_operations`, `company_expenses`, `leasing_contracts`, `leasing_payment_schedule`, `payroll_profiles`, `payroll_periods`, `payroll_records`, `payroll_adjustments`, `payroll_audit_events`, `crm_deals`, `crm_activities`, `deliveries`, `delivery_carriers`, `shipping_photos`, `equipment_operation_sessions`, `owners`, `mechanics`, `service_works`, `spare_parts`, `service_route_norms`, `service_field_trips`, `repair_work_items`, `repair_part_items`, `service_audit_log`, `service_work_catalog`, `spare_parts_catalog`, `service_work_names`, `spare_part_names`, `planner_items`, `service_vehicles`, `vehicle_trips`, `bot_activity`, `manager_activity`, `bot_notifications`, `audit_log`, `audit_logs`.
+`equipment`, `equipment_finance`, `equipment_downtimes`, `rentals`, `gantt_rentals`, `rental_change_requests`, `service`, `warranty_claims`, `counterparties`, `counterparty_role_assignments`, `supplier_profiles`, `contractor_profiles`, `clients`, `client_objects`, `client_contracts`, `inline_relation_idempotency`, `rental_create_idempotency`, `knowledge_base_progress`, `app_settings`, `gsm_devices`, `gsm_packets`, `gsm_commands`, `documents`, `mechanic_documents`, `payments`, `payment_allocations`, `debt_collection_plans`, `debt_collection_actions`, `receivable_payment_plans`, `finance_accounts`, `finance_operations`, `company_expenses`, `leasing_contracts`, `leasing_payment_schedule`, `payroll_profiles`, `payroll_periods`, `payroll_records`, `payroll_adjustments`, `payroll_audit_events`, `crm_deals`, `crm_activities`, `deliveries`, `delivery_carriers`, `shipping_photos`, `equipment_operation_sessions`, `owners`, `mechanics`, `service_field_trips`, `repair_work_items`, `repair_part_items`, `service_audit_log`, `planner_items`, `service_vehicles`, `vehicle_trips`, `bot_activity`, `manager_activity`, `bot_notifications`, `audit_log`, `audit_logs`.
+
+### PLATFORM_DEFAULT_TENANT_OVERLAY arrays (8)
+
+`knowledge_base_modules`, `service_works`, `spare_parts`, `service_route_norms`, `service_work_catalog`, `spare_parts_catalog`, `service_work_names`, `spare_part_names`.
+
+Each raw array contains two disjoint partitions: unscoped platform defaults and
+exact-tenant rows. A tenant standalone row has its own stable physical `id` and
+no `platformDefaultId`; an override additionally links to one existing unscoped
+default in the same family. Effective reads return platform defaults plus the
+current tenant partition, with one valid active override replacing its linked
+default only for that tenant. Tenant writes preserve the platform and foreign
+tenant partitions byte-for-byte. Names, titles, articles, and other natural keys
+are never used to infer an override.
 
 ### TENANT_OWNED non-array collections
 

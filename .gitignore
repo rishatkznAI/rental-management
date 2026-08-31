@@ -63,3 +63,7 @@ artifacts/
 **/storage-state.json
 **/.auth/
 !server/data/.gitkeep
+
+# Generated production-scope execution artifacts
+server/config/production-scope-remediation-execution-plan.generated.json
+server/config/production-scope-remediation-execution-plan.generated.json.sha256

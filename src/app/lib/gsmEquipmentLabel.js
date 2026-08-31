@@ -43,6 +43,8 @@ export function buildGsmEquipmentLabel(equipment, fallbackEquipmentId = '') {
 export function buildGsmEquipmentLookup(snapshots = [], devices = []) {
   const byEquipmentId = new Map();
   const byTrackerId = new Map();
+  const byDeviceBinding = new Map();
+  const ambiguousDeviceBindings = new Set();
 
   function rememberTracker(value, equipmentId) {
     const key = cleanText(value);
@@ -63,38 +65,58 @@ export function buildGsmEquipmentLookup(snapshots = [], devices = []) {
   for (const device of Array.isArray(devices) ? devices : []) {
     const equipmentId = cleanText(device?.equipmentId);
     if (equipmentId && !byEquipmentId.has(equipmentId)) byEquipmentId.set(equipmentId, device);
+    const deviceRecordId = cleanText(device?.id);
+    const bindingRevision = Number(device?.bindingRevision);
+    if (deviceRecordId && Number.isInteger(bindingRevision) && bindingRevision > 0 && equipmentId) {
+      const key = `${deviceRecordId}:${bindingRevision}`;
+      if (byDeviceBinding.has(key) && byDeviceBinding.get(key) !== equipmentId) ambiguousDeviceBindings.add(key);
+      else byDeviceBinding.set(key, equipmentId);
+    }
     rememberTracker(device?.imei, equipmentId);
     rememberTracker(device?.deviceId, equipmentId);
     rememberTracker(device?.trackerId, equipmentId);
     rememberTracker(device?.id, equipmentId);
   }
+  for (const key of ambiguousDeviceBindings) byDeviceBinding.delete(key);
 
-  return { byEquipmentId, byTrackerId };
+  return { byEquipmentId, byTrackerId, byDeviceBinding };
 }
 
 export function resolveGsmPacketEquipment(packet = {}, lookup = {}) {
   const packetEquipmentId = cleanText(packet.equipmentId);
   const trackerKey = cleanText(packet.imei) || cleanText(packet.deviceId) || cleanText(packet.trackerId);
-  const equipmentId = packetEquipmentId || lookup.byTrackerId?.get(trackerKey) || '';
-  const equipment = equipmentId ? lookup.byEquipmentId?.get(equipmentId) : null;
+  const deviceRecordId = cleanText(packet.gsmDeviceRecordId);
+  const bindingRevision = Number(packet.gsmBindingRevision);
+  const bindingKey = deviceRecordId && Number.isInteger(bindingRevision) && bindingRevision > 0
+    ? `${deviceRecordId}:${bindingRevision}`
+    : '';
+  const boundEquipmentId = bindingKey ? cleanText(lookup.byDeviceBinding?.get(bindingKey)) : '';
+  const linked = Boolean(boundEquipmentId && packetEquipmentId === boundEquipmentId);
+  const equipmentId = linked ? boundEquipmentId : '';
+  const displayEquipmentId = equipmentId
+    || (packetEquipmentId && lookup.byEquipmentId?.has(packetEquipmentId) ? packetEquipmentId : '')
+    || lookup.byTrackerId?.get(trackerKey)
+    || '';
+  const equipment = displayEquipmentId ? lookup.byEquipmentId?.get(displayEquipmentId) : null;
   const packetLabel = cleanText(packet.equipmentLabel);
-  const linked = Boolean(equipmentId);
-  const label = linked
+  const label = equipment
     ? buildGsmEquipmentLabel(equipment || {
       equipmentName: packetLabel,
-      equipmentId,
+      equipmentId: displayEquipmentId,
       manufacturer: packet.equipmentManufacturer,
       model: packet.equipmentModel,
       inventoryNumber: packet.equipmentInventoryNumber,
       serialNumber: packet.equipmentSerialNumber,
-    }, equipmentId)
-    : UNLINKED_EQUIPMENT_LABEL;
+    }, displayEquipmentId)
+    : (packetLabel || UNLINKED_EQUIPMENT_LABEL);
 
   return {
     linked,
     equipmentId: equipmentId || '',
     label,
-    badge: linked ? 'Привязано' : trackerKey ? 'Неизвестный трекер' : 'Без привязки',
+    badge: linked
+      ? 'Привязано'
+      : (displayEquipmentId ? 'Непроверенная привязка' : trackerKey ? 'Неизвестный трекер' : 'Без привязки'),
     trackerId: trackerKey,
   };
 }

@@ -202,7 +202,7 @@ test('carrier deletion blockers use stable IDs only', () => {
   ]);
 });
 
-test('offline migration dry-run is read-only, apply backs up atomically, and repeat apply is idempotent', () => {
+test('offline migration dry-run is read-only and raw apply is blocked without mutation', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'delivery-counterparty-'));
   const dbPath = path.join(tempDir, 'migration.sqlite');
   const db = new Database(dbPath);
@@ -227,19 +227,14 @@ test('offline migration dry-run is read-only, apply backs up atomically, and rep
     verify.close();
 
     const applied = run('--apply');
-    assert.equal(applied.status, 0, applied.stderr);
-    const appliedResult = JSON.parse(applied.stdout);
-    assert.ok(fs.existsSync(appliedResult.backupPath));
+    assert.notEqual(applied.status, 0);
+    assert.match(applied.stderr, /AUDITED_MAINTENANCE_RUNNER_REQUIRED/);
     verify = new Database(dbPath, { readonly: true });
-    const migrated = JSON.parse(verify.prepare('SELECT json FROM app_data WHERE name = ?').get('deliveries').json)[0];
+    const unchanged = JSON.parse(verify.prepare('SELECT json FROM app_data WHERE name = ?').get('deliveries').json)[0];
     verify.close();
-    assert.equal(migrated.counterpartyId, 'CP-C');
-    assert.equal(migrated.carrierCounterpartyId, 'CP-K');
-
-    const repeated = run('--apply');
-    assert.equal(repeated.status, 0, repeated.stderr);
-    assert.equal(JSON.parse(repeated.stdout).changed, false);
-    assert.equal(fs.readdirSync(path.join(tempDir, 'backups')).length, 1);
+    assert.equal(unchanged.counterpartyId, undefined);
+    assert.equal(unchanged.carrierCounterpartyId, undefined);
+    assert.equal(fs.existsSync(path.join(tempDir, 'backups')), false);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

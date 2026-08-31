@@ -2,6 +2,9 @@ const {
   materializeInert,
 } = require('./actual-source-eligibility-dry-run-domain');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+const {
   assertBranchScope,
   assertCapability,
   assertCompanyScope,
@@ -69,7 +72,7 @@ function normalizeLimit(value) {
 }
 
 function readUsersFromDatabase(db) {
-  const row = db.prepare("SELECT json FROM app_data WHERE name = 'users'").get();
+  const row = prepareSqliteReadonlyStatement(db, "SELECT json FROM app_data WHERE name = 'users'").get();
   if (!row) return [];
   try {
     const users = JSON.parse(row.json);
@@ -351,7 +354,7 @@ function createActualSourceEligibilityDryRunReadRepository(db) {
       params.push(normalized.asOfDate);
     }
     const limit = normalizeLimit(rawLimit);
-    return Object.freeze(db.prepare(`
+    return Object.freeze(prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE}
       WHERE companyId = ? AND branchId IN (${scopedQuery.placeholders})
         ${where.length > 0 ? `AND ${where.join(' AND ')}` : ''}
@@ -361,7 +364,7 @@ function createActualSourceEligibilityDryRunReadRepository(db) {
 
   function getDryRun(scope, runId) {
     const scopedQuery = scoped(scope);
-    const row = db.prepare(`
+    const row = prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUNS_TABLE}
       WHERE companyId = ? AND branchId IN (${scopedQuery.placeholders}) AND id = ?
     `).get(...scopedQuery.params, requiredId(runId, 'runId'));
@@ -384,7 +387,7 @@ function createActualSourceEligibilityDryRunReadRepository(db) {
       where.push('candidateKey = ?');
       params.push(normalized.candidateKey);
     }
-    return Object.freeze(db.prepare(`
+    return Object.freeze(prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_CANDIDATES_TABLE}
       WHERE companyId = ? AND branchId IN (${scopedQuery.placeholders}) AND runId = ?
         ${where.length > 0 ? `AND ${where.join(' AND ')}` : ''}
@@ -403,7 +406,7 @@ function createActualSourceEligibilityDryRunReadRepository(db) {
         params.push(normalized[field]);
       }
     }
-    return Object.freeze(db.prepare(`
+    return Object.freeze(prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_CHECKS_TABLE}
       WHERE companyId = ? AND branchId IN (${scopedQuery.placeholders}) AND runId = ?
         ${where.length > 0 ? `AND ${where.join(' AND ')}` : ''}
@@ -429,7 +432,7 @@ function createActualSourceEligibilityDryRunReadRepository(db) {
       where.push('blockerState = ?');
       params.push(normalized.blockerState ? 1 : 0);
     }
-    return Object.freeze(db.prepare(`
+    return Object.freeze(prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_RECONCILIATIONS_TABLE}
       WHERE companyId = ? AND branchId IN (${scopedQuery.placeholders}) AND runId = ?
         ${where.length > 0 ? `AND ${where.join(' AND ')}` : ''}
@@ -448,7 +451,7 @@ function createActualSourceEligibilityDryRunReadRepository(db) {
         params.push(normalized[field]);
       }
     }
-    return Object.freeze(db.prepare(`
+    return Object.freeze(prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_DIAGNOSTICS_TABLE}
       WHERE companyId = ? AND branchId IN (${scopedQuery.placeholders}) AND runId = ?
         ${where.length > 0 ? `AND ${where.join(' AND ')}` : ''}
@@ -458,7 +461,7 @@ function createActualSourceEligibilityDryRunReadRepository(db) {
 
   function inspectOperation(scope, operationId) {
     const scopedQuery = scoped(scope);
-    const row = db.prepare(`
+    const row = prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_OPERATIONS_TABLE}
       WHERE companyId = ? AND branchId IN (${scopedQuery.placeholders}) AND id = ?
     `).get(...scopedQuery.params, requiredId(operationId, 'operationId'));
@@ -468,7 +471,7 @@ function createActualSourceEligibilityDryRunReadRepository(db) {
 
   function inspectAuditHistory(scope, runId, rawLimit) {
     const scopedQuery = scoped(scope);
-    return Object.freeze(db.prepare(`
+    return Object.freeze(prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${ACTUAL_SOURCE_DRY_RUN_AUDIT_EVENTS_TABLE}
       WHERE companyId = ? AND branchId IN (${scopedQuery.placeholders}) AND aggregateId = ?
       ORDER BY createdAt, id LIMIT ?

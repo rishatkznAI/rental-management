@@ -185,7 +185,12 @@ test('non-conserved production smoke proves dashboard executive cockpit and scre
   assert.match(releaseSmokeSource, /not\.toContainText\(\/Выручка аренды \(\?:ниже\|близка\) к плану\//);
   assert.match(releaseSmokeSource, /window\.localStorage\.setItem\('theme', 'dark'\)/);
   assert.match(releaseSmokeSource, /window\.localStorage\.setItem\('theme', 'light'\)/);
-  assert.match(releaseSmokeSource, /captureExecutiveCockpitScreenshots\(page, normalizedConfig\.frontendUrl, testInfo\)/);
+  assert.match(releaseSmokeSource, /expectedCompanyHealthDirectionLinks\?: number/);
+  assert.match(releaseSmokeSource, /normalizedConfig\.expectedCompanyHealthDirectionLinks \?\? 6/);
+  assert.match(
+    releaseSmokeSource,
+    /captureExecutiveCockpitScreenshots\(\s*page,\s*normalizedConfig\.frontendUrl,\s*expectedDirectionLinks,\s*testInfo,\s*\)/,
+  );
 });
 
 test('dashboard cockpit helper preserves caller viewport for mobile artifacts', () => {

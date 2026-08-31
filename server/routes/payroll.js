@@ -56,13 +56,16 @@ const DEFAULT_KPI_SETTINGS = {
 function registerPayrollRoutes(router, deps) {
   const {
     readData,
-    writeData,
+    writeDataBatch,
     requireAuth,
     generateId,
     idPrefixes = {},
     nowIso = () => new Date().toISOString(),
-    auditLog,
   } = deps;
+
+  if (typeof writeDataBatch !== 'function') {
+    throw new TypeError('Payroll routes require an atomic writeDataBatch dependency.');
+  }
 
   const payrollRouter = express.Router();
 
@@ -78,10 +81,6 @@ function registerPayrollRoutes(router, deps) {
   function list(name) {
     const value = readData(name);
     return Array.isArray(value) ? value : [];
-  }
-
-  function save(name, value) {
-    writeData(name, value);
   }
 
   function payrollId(collection, fallback) {
@@ -201,7 +200,7 @@ function registerPayrollRoutes(router, deps) {
     return mergeKpiSettings(existing?.value || {});
   }
 
-  function writeKpiSettings(value) {
+  function prepareKpiSettings(value) {
     const settings = list(APP_SETTINGS_COLLECTION);
     const timestamp = nowIso();
     const normalized = mergeKpiSettings(value);
@@ -215,8 +214,7 @@ function registerPayrollRoutes(router, deps) {
         createdAt: timestamp,
         updatedAt: timestamp,
       }];
-    save(APP_SETTINGS_COLLECTION, next);
-    return normalized;
+    return { normalized, settings: next };
   }
 
   function profilePayload(input, existing = null) {
@@ -447,8 +445,18 @@ function registerPayrollRoutes(router, deps) {
     }
   }
 
-  function audit(req, action, entityType, previous, next) {
-    const event = {
+  function readPayrollAuditEvents() {
+    const value = readData(AUDIT_COLLECTION);
+    if (value === null || value === undefined) return [];
+    if (Array.isArray(value)) return value;
+    const error = new Error('Stored payroll audit history is malformed; refusing to overwrite it.');
+    error.code = 'PAYROLL_AUDIT_HISTORY_SHAPE_INVALID';
+    error.status = 409;
+    throw error;
+  }
+
+  function buildAuditEvent(req, action, entityType, previous, next) {
+    return {
       id: payrollId(AUDIT_COLLECTION, 'PAE'),
       action,
       entityType,
@@ -460,14 +468,16 @@ function registerPayrollRoutes(router, deps) {
       reason: stringValue(next?.reason || next?.adminComment || ''),
       createdAt: nowIso(),
     };
-    save(AUDIT_COLLECTION, [...list(AUDIT_COLLECTION), event]);
-    auditLog?.(req, {
-      action: `payroll.${action}`,
-      entityType,
-      entityId: event.entityId,
-      before: previous || null,
-      after: next || null,
-    });
+  }
+
+  function commitMutation(req, entries, action, entityType, previous, next) {
+    const auditEvents = readPayrollAuditEvents();
+    const auditEvent = buildAuditEvent(req, action, entityType, previous, next);
+    writeDataBatch([
+      ...entries,
+      { name: AUDIT_COLLECTION, value: [...auditEvents, auditEvent] },
+    ]);
+    return auditEvent;
   }
 
   payrollRouter.get('/profiles', (_req, res) => {
@@ -498,9 +508,16 @@ function registerPayrollRoutes(router, deps) {
   payrollRouter.patch('/kpi-settings', (req, res) => {
     try {
       const previous = readKpiSettings();
-      const next = writeKpiSettings(req.body || {});
-      audit(req, 'kpi_settings.update', 'payroll_kpi_settings', previous, next);
-      res.json(next);
+      const prepared = prepareKpiSettings(req.body || {});
+      commitMutation(
+        req,
+        [{ name: APP_SETTINGS_COLLECTION, value: prepared.settings }],
+        'kpi_settings.update',
+        'payroll_kpi_settings',
+        previous,
+        prepared.normalized,
+      );
+      res.json(prepared.normalized);
     } catch (error) {
       res.status(error.status || 400).json({ ok: false, error: error.message });
     }
@@ -515,8 +532,14 @@ function registerPayrollRoutes(router, deps) {
       };
       assertProfileValid(profile);
       ensureSingleActiveProfile(profiles, profile);
-      save(PROFILE_COLLECTION, [...profiles, profile]);
-      audit(req, 'profile.create', 'payroll_profile', null, profile);
+      commitMutation(
+        req,
+        [{ name: PROFILE_COLLECTION, value: [...profiles, profile] }],
+        'profile.create',
+        'payroll_profile',
+        null,
+        profile,
+      );
       res.status(201).json(profile);
     } catch (error) {
       res.status(error.status || 400).json({ ok: false, error: error.message });
@@ -533,8 +556,14 @@ function registerPayrollRoutes(router, deps) {
       assertProfileValid(next);
       ensureSingleActiveProfile(profiles, next, previous.id);
       const updated = profiles.map(item => item.id === previous.id ? next : item);
-      save(PROFILE_COLLECTION, updated);
-      audit(req, 'profile.update', 'payroll_profile', previous, next);
+      commitMutation(
+        req,
+        [{ name: PROFILE_COLLECTION, value: updated }],
+        'profile.update',
+        'payroll_profile',
+        previous,
+        next,
+      );
       res.json(next);
     } catch (error) {
       res.status(error.status || 400).json({ ok: false, error: error.message });
@@ -551,6 +580,7 @@ function registerPayrollRoutes(router, deps) {
       const timestamp = nowIso();
       const periods = list(PERIOD_COLLECTION);
       let period = periods.find(item => item.month === month);
+      const previousPeriod = period || null;
       let nextPeriods = periods;
       if (period?.status === 'closed') {
         const error = new Error('Closed payroll period cannot be recalculated');
@@ -605,9 +635,17 @@ function registerPayrollRoutes(router, deps) {
         };
         nextRecords[existingIndex] = recalculateRecord(nextRecords[existingIndex]);
       }
-      save(PERIOD_COLLECTION, nextPeriods);
-      save(RECORD_COLLECTION, nextRecords);
-      audit(req, 'period.calculate', 'payroll_period', null, period);
+      commitMutation(
+        req,
+        [
+          { name: PERIOD_COLLECTION, value: nextPeriods },
+          { name: RECORD_COLLECTION, value: nextRecords },
+        ],
+        'period.calculate',
+        'payroll_period',
+        previousPeriod,
+        period,
+      );
       res.status(201).json({
         period,
         records: nextRecords.filter(item => item.periodId === period.id),
@@ -693,8 +731,14 @@ function registerPayrollRoutes(router, deps) {
         ],
         updatedAt: nowIso(),
       });
-      save(RECORD_COLLECTION, records.map(item => item.id === previous.id ? next : item));
-      audit(req, 'record.update', 'payroll_record', previous, next);
+      commitMutation(
+        req,
+        [{ name: RECORD_COLLECTION, value: records.map(item => item.id === previous.id ? next : item) }],
+        'record.update',
+        'payroll_record',
+        previous,
+        next,
+      );
       res.json(next);
     } catch (error) {
       res.status(error.status || 400).json({ ok: false, error: error.message });
@@ -747,9 +791,17 @@ function registerPayrollRoutes(router, deps) {
         ],
         updatedAt: nowIso(),
       });
-      save(ADJUSTMENT_COLLECTION, [...list(ADJUSTMENT_COLLECTION), adjustment]);
-      save(RECORD_COLLECTION, records.map(item => item.id === previous.id ? next : item));
-      audit(req, `record.adjustment.${type}`, 'payroll_record', previous, { ...next, reason: adjustment.reason });
+      commitMutation(
+        req,
+        [
+          { name: ADJUSTMENT_COLLECTION, value: [...list(ADJUSTMENT_COLLECTION), adjustment] },
+          { name: RECORD_COLLECTION, value: records.map(item => item.id === previous.id ? next : item) },
+        ],
+        `record.adjustment.${type}`,
+        'payroll_record',
+        previous,
+        { ...next, reason: adjustment.reason },
+      );
       res.status(201).json({ adjustment, record: next });
     } catch (error) {
       res.status(error.status || 400).json({ ok: false, error: error.message });
@@ -773,15 +825,23 @@ function registerPayrollRoutes(router, deps) {
         [dateField]: timestamp,
         updatedAt: timestamp,
       };
-      save(PERIOD_COLLECTION, periods.map(item => item.id === period.id ? next : item));
       const records = list(RECORD_COLLECTION);
       const nextRecords = records.map(item => (
         item.periodId === period.id
           ? { ...item, status: recordStatus, [dateField]: timestamp, updatedAt: timestamp }
           : item
       ));
-      save(RECORD_COLLECTION, nextRecords);
-      audit(req, `period.${nextStatus}`, 'payroll_period', period, next);
+      commitMutation(
+        req,
+        [
+          { name: PERIOD_COLLECTION, value: periods.map(item => item.id === period.id ? next : item) },
+          { name: RECORD_COLLECTION, value: nextRecords },
+        ],
+        `period.${nextStatus}`,
+        'payroll_period',
+        period,
+        next,
+      );
       res.json({
         period: next,
         records: nextRecords.filter(item => item.periodId === period.id),

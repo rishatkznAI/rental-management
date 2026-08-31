@@ -16,7 +16,12 @@
 import { useCallback, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { isCrmEnabled } from './features';
-import { MECHANIC_ROLES, WARRANTY_MECHANIC_ROLE, normalizeUserRole } from './userStorage';
+import {
+  MECHANIC_ROLES,
+  TECHNICAL_AUDITOR_ROLE,
+  WARRANTY_MECHANIC_ROLE,
+  normalizeUserRole,
+} from './userStorage';
 
 // ── Типы ─────────────────────────────────────────────────────────────────────
 
@@ -86,6 +91,14 @@ const PERMISSIONS: Record<string, RolePermissions> = {
     reports:          ALL,
     profile_settings: ['view', 'edit'],
     admin_panel:      ALL,
+  },
+  [TECHNICAL_AUDITOR_ROLE]: {
+    dashboard:        VIEW,
+    equipment:        VIEW,
+    knowledge_base:   VIEW,
+    service:          VIEW,
+    clients:          VIEW,
+    profile_settings: VIEW,
   },
   'Инвестор': {
     equipment: VIEW,

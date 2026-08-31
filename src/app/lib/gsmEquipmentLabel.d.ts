@@ -14,6 +14,7 @@ export function buildGsmEquipmentLookup(
 ): {
   byEquipmentId: Map<string, Partial<Equipment> | Partial<GsmGatewayDevice>>;
   byTrackerId: Map<string, string>;
+  byDeviceBinding: Map<string, string>;
 };
 
 export function resolveGsmPacketEquipment(

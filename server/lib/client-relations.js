@@ -287,7 +287,11 @@ function normalizeClientContractRecord(record, existing = null, deps = {}) {
     ? [...new Set((record?.objectIds ?? existing?.objectIds).map(text).filter(Boolean))]
     : [];
   const number = text(record?.number);
-  if ((!clientId && !counterpartyId && !objectId && objectIds.length === 0) || !number) {
+  const allowMissingServerNumber = deps.allowMissingServerNumber === true && !existing;
+  if (
+    (!clientId && !counterpartyId && !objectId && objectIds.length === 0)
+    || (!number && !allowMissingServerNumber)
+  ) {
     const error = new Error(CONTRACT_REQUIRED_ERROR);
     error.status = 400;
     throw error;

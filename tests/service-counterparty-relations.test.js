@@ -11,6 +11,9 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const Database = serverRequire('better-sqlite3');
 const express = serverRequire('express');
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { createAuditLogger } = require('../server/lib/security-audit.js');
+const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
+const { createServiceCore } = require('../server/lib/service-core.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
 const {
   SERVICE_RELATION_CLASSIFICATIONS,
@@ -56,6 +59,8 @@ function fixture(overrides = {}) {
       { id: 'C-2', counterpartyId: 'CP-2', clientId: 'CL-2', number: 'Договор' },
     ],
     service: [],
+    service_audit_log: [],
+    audit_logs: [],
     ...overrides,
   };
   return {
@@ -295,7 +300,7 @@ test('repair applies only deterministic stable-ID completions and is idempotent'
   assert.equal(repairServiceCounterpartyRelations({ readData: data.readData, dryRun: true }).changed, false);
 });
 
-test('offline migration is read-only in dry-run, backs up before atomic apply, and repeats idempotently', () => {
+test('offline migration is read-only in dry-run and raw apply is blocked without mutation', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'service-counterparty-'));
   const dbPath = path.join(tempDir, 'migration.sqlite');
   const db = new Database(dbPath);
@@ -320,17 +325,12 @@ test('offline migration is read-only in dry-run, backs up before atomic apply, a
     verify.close();
 
     const applied = run('--apply');
-    assert.equal(applied.status, 0, applied.stderr);
-    const appliedResult = JSON.parse(applied.stdout);
-    assert.ok(fs.existsSync(appliedResult.backupPath));
+    assert.notEqual(applied.status, 0);
+    assert.match(applied.stderr, /AUDITED_MAINTENANCE_RUNNER_REQUIRED/);
     verify = new Database(dbPath, { readonly: true });
-    assert.equal(JSON.parse(verify.prepare('SELECT json FROM app_data WHERE name = ?').get('service').json)[0].counterpartyId, 'CP-1');
+    assert.equal(JSON.parse(verify.prepare('SELECT json FROM app_data WHERE name = ?').get('service').json)[0].counterpartyId, undefined);
     verify.close();
-
-    const repeated = run('--apply');
-    assert.equal(repeated.status, 0, repeated.stderr);
-    assert.equal(JSON.parse(repeated.stdout).changed, false);
-    assert.equal(fs.readdirSync(path.join(tempDir, 'backups')).length, 1);
+    assert.equal(fs.existsSync(path.join(tempDir, 'backups')), false);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -342,16 +342,44 @@ async function withServiceCrud(data, run) {
     const canonical = canonicalizeServicePersistenceEntries(entries, { readData });
     for (const entry of canonical) data.collections[entry.name] = entry.value;
   };
+  const writeData = (name, value) => persistEntries([{ name, value }]);
+  const serviceCore = createServiceCore({
+    readData,
+    writeData,
+    writeDataBatch: persistEntries,
+    nowIso: () => '2026-08-12T12:00:00.000Z',
+    equipmentMatchesServiceTicket: (ticket, equipment) => ticket.equipmentId === equipment.id,
+  });
+  let auditSequence = 0;
+  const auditDeps = {
+    readData,
+    writeData,
+    generateId: prefix => `${prefix}-${++auditSequence}`,
+    nowIso: () => '2026-08-12T12:00:00.000Z',
+  };
+  const auditLog = createAuditLogger(auditDeps);
+  const serviceAuditLog = createServiceAuditLog(auditDeps);
   const accessControl = createAccessControl({ readData });
   const app = express();
   app.use(express.json());
+  app.use((req, _res, next) => {
+    req.actorScope = {
+      companyId: 'COMPANY-A',
+      tenantId: 'COMPANY-A',
+      membershipId: 'MEMBERSHIP-U-admin',
+      principalId: 'U-admin',
+      source: 'service-counterparty-test',
+    };
+    next();
+  });
   const pass = () => (_req, _res, next) => next();
   app.use('/api', registerCrudRoutes({
     collections: ['service'],
     idPrefixes: { service: 'S' },
     readData,
-    writeData: (name, value) => persistEntries([{ name, value }]),
+    writeData,
     writeDataBatch: persistEntries,
+    writeServiceDataBatch: persistEntries,
     requireAuth(req, _res, next) {
       req.user = { userId: 'U-admin', userName: 'Admin', userRole: 'Администратор' };
       next();
@@ -369,9 +397,13 @@ async function withServiceCrud(data, run) {
     requireNonEmptyString: () => {},
     generateId: () => `S-${data.collections.service.length + 1}`,
     nowIso: () => '2026-08-12T12:00:00.000Z',
+    applyServiceTicketCreationEffects: serviceCore.applyServiceTicketCreationEffects,
+    persistServiceTicketUpdate: serviceCore.persistServiceTicketUpdate,
+    persistServiceTicketDeletion: serviceCore.persistServiceTicketDeletion,
+    persistServiceTicketBulkReplace: serviceCore.persistServiceTicketBulkReplace,
     accessControl,
-    auditLog: () => {},
-    serviceAuditLog: () => {},
+    auditLog,
+    serviceAuditLog,
     normalizeRecordClientLink: item => item,
   }));
   const server = await new Promise(resolve => {

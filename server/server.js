@@ -125,6 +125,9 @@ const { createAuditLogger } = require('./lib/security-audit');
 const { createServiceAuditLog } = require('./lib/service-audit-log');
 const { createBotHandlers } = require('./lib/bot-commands');
 const {
+  createUserAuthorityTransitionService,
+} = require('./lib/user-authority-transition');
+const {
   createBotNotificationService,
   isBotNotificationSchedulerEnabled,
   startBotNotificationScheduler,
@@ -132,6 +135,11 @@ const {
 const { getBuildInfo } = require('./lib/build-info');
 const { createGprsGateway } = require('./lib/gprs-gateway');
 const { createWialonIpsGateway } = require('./lib/gsm/wialon-ips-gateway');
+const { createTcpIngressAdmissionController } = require('./lib/gsm/tcp-ingress-admission');
+const {
+  createTrustedGsmDeviceProvisioningGuard,
+  createTrustedGsmDeviceScopeResolver,
+} = require('./lib/gsm/trusted-device-scope');
 const { createMaxApiClient } = require('./lib/max-api');
 const {
   createAppDisabledMiddleware,
@@ -144,6 +152,12 @@ const {
   sendAppDisabled,
   shouldWarnForMissingMaxWebhookSecret,
 } = require('./lib/feature-flags');
+const {
+  assertProductionValidationReadOnlyEnvironment,
+  createProductionValidationReadOnlyMiddleware,
+  isExactProductionSmokeReaderUser,
+  runWithProductionValidationSmokeLoginWrites,
+} = require('./lib/production-validation-read-only');
 const { getDemoPublicInfo, isDemoMode } = require('./lib/demo-mode');
 const { seedDemoData } = require('./scripts/seed-demo-data');
 const { createServiceCore } = require('./lib/service-core');
@@ -151,12 +165,13 @@ const {
   normalizeTripText,
   findServiceVehicle: findServiceVehicleCore,
   normalizeVehicleTripPayload: normalizeVehicleTripPayloadCore,
-  applyVehicleMileageFromTrip,
+  buildVehicleTripPersistenceEntries,
 } = require('./lib/service-vehicle-trips-core');
 const {
   MECHANIC_ROLES,
   HEAD_ROLE,
   SERVICE_FOREMAN_ROLE,
+  TECHNICAL_AUDITOR_ROLE,
   WARRANTY_MECHANIC_ROLE,
   WARRANTY_MECHANIC_ROLE_ALIASES,
   normalizeRole,
@@ -182,10 +197,14 @@ const {
   resolveOptionalActorScope,
 } = require('./lib/trusted-actor-scope');
 const {
+  createBoundPlatformSystemScopeRunner,
   createTenantDataBoundary,
   currentTenantContext,
+  isGlobalReferenceCollection,
   runWithDeniedTenantScope,
+  runWithPlatformSystemScope,
   runWithTenantActorScope,
+  runWithTenantHistoryRepositoryScope,
 } = require('./lib/tenant-data-boundary');
 const {
   assertTenantRelationships,
@@ -240,20 +259,23 @@ const {
   createNumberSequenceAllocator,
 } = require('./lib/number-sequences');
 const {
+  createRequestIdempotencyService,
+} = require('./lib/request-idempotency');
+const {
   DB_PATH,
-  cloneCollectionIfMissing,
   countActiveSessions,
   createSqliteBackup,
   cleanupExpiredSessions,
   deleteSession,
   deleteSessionsForUserIds,
   ensureDb,
+  executeProductionValidationSmokeLoginWriteTransaction,
   getData,
   getSession: getStoredSession,
   migrateJsonFilesToDb,
   saveSession,
-  setData,
-  setDataBatch,
+  setDataCompareAndSwap,
+  setDataBatchCompareAndSwap,
   JSON_COLLECTIONS,
 } = require('./db');
 
@@ -312,6 +334,9 @@ function needsPasswordRehash(stored) {
 
 // ── Express ───────────────────────────────────────────────────────────────────
 
+// Validate the exact read-only smoke configuration before the first ensureDb().
+// A partial production-validation configuration must not open or migrate SQLite.
+const productionValidationReadOnlyEnabled = assertProductionValidationReadOnlyEnvironment();
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
@@ -398,6 +423,10 @@ app.use(cors({
   exposedHeaders: ['Content-Disposition', 'Content-Length'],
 }));
 
+app.use(createProductionValidationReadOnlyMiddleware({
+  getEnabled: () => productionValidationReadOnlyEnabled,
+}));
+
 app.use('/bot-assets', express.static(path.join(__dirname, 'assets', 'bot'), {
   maxAge: '1h',
   immutable: false,
@@ -416,6 +445,12 @@ const appDisabledConfig = getAppDisabledConfig();
 const botDisabledConfig = getBotDisabledConfig();
 const gsmDisabledConfig = getGsmDisabledConfig();
 const productionScopeWriteFreezeEnabled = isProductionScopeWriteFreezeEnabled();
+const runtimeMutationSuppressed = productionScopeWriteFreezeEnabled
+  || productionValidationReadOnlyEnabled;
+const requestIdempotency = createRequestIdempotencyService({
+  db: ensureDb(),
+  ensureSchema: false,
+});
 
 function normalizeBotToken(value) {
   return String(value || '').trim();
@@ -465,12 +500,12 @@ function readRawData(name) {
   return getData(name);
 }
 
-function writeRawData(name, data) {
-  return setData(name, data);
+function writeRawData(name, data, { expectedFingerprint } = {}) {
+  return setDataCompareAndSwap(name, data, expectedFingerprint);
 }
 
 function writeRawDataBatch(entries) {
-  return setDataBatch(entries);
+  return setDataBatchCompareAndSwap(entries);
 }
 
 const tenantDataBoundary = createTenantDataBoundary({
@@ -479,6 +514,12 @@ const tenantDataBoundary = createTenantDataBoundary({
   writeRawData,
   writeRawDataBatch,
   assertRelationships: assertTenantRelationships,
+  // Preserve the existing collection-specific public ID format for new
+  // standalone tenant rows. Override physical IDs use the same allocator but
+  // remain internal; effective reads keep the platform default's logical ID.
+  generateCatalogRecordId: (_kindPrefix, { collection }) => generateId(
+    ID_PREFIXES[collection] || collection.slice(0, 3).toUpperCase(),
+  ),
 });
 
 function readData(name) {
@@ -487,7 +528,7 @@ function readData(name) {
 
 const numberSequenceAllocator = createNumberSequenceAllocator({
   db: ensureDb(),
-  ensureSchema: !productionScopeWriteFreezeEnabled,
+  ensureSchema: !runtimeMutationSuppressed,
   resolveScope: () => {
     const context = currentTenantContext();
     if (context?.kind !== 'tenant_actor') {
@@ -507,8 +548,13 @@ const businessNumbering = createBusinessNumberingService({
   readData,
 });
 
-function writeData(name, data) {
-  const numberedEntries = businessNumbering.preparePersistenceEntries([{ name, value: data }]);
+function prepareCanonicalDataBatch(entries, { numberingMode = 'persist' } = {}) {
+  const candidates = numberingMode === 'persist'
+    ? entries
+    : structuredClone(Array.isArray(entries) ? entries : []);
+  const numberedEntries = businessNumbering.preparePersistenceEntries(candidates, {
+    mode: numberingMode,
+  });
   const rentalEntries = canonicalizeRentalPersistenceEntries(
     numberedEntries,
     { readData },
@@ -518,21 +564,58 @@ function writeData(name, data) {
   const warrantyEntries = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
   const finalEntries = canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData });
   assertPaymentAllocationPersistenceEntriesSafe(finalEntries, { readData });
-  businessNumbering.preparePersistenceEntries(finalEntries);
-  const [entry] = finalEntries;
-  tenantDataBoundary.writeData(entry.name, entry.value);
+  businessNumbering.preparePersistenceEntries(finalEntries, { mode: numberingMode });
+  return finalEntries;
+}
+
+const persistCanonicalDataBatch = ensureDb().transaction(entries => {
+  const finalEntries = prepareCanonicalDataBatch(entries);
+  return tenantDataBoundary.writeDataBatch(finalEntries);
+});
+
+const executeAppDataWriteTransaction = ensureDb().transaction(operation => operation());
+
+function runInAppDataWriteTransaction(operation) {
+  if (typeof operation !== 'function') {
+    throw new TypeError('App-data transaction operation must be a function.');
+  }
+  return executeAppDataWriteTransaction.immediate(operation);
+}
+
+function writeData(name, data) {
+  return persistCanonicalDataBatch.immediate([{ name, value: data }]);
 }
 
 function writeDataBatch(entries) {
-  const numberedEntries = businessNumbering.preparePersistenceEntries(entries);
-  const rentalEntries = canonicalizeRentalPersistenceEntries(numberedEntries, { readData });
-  const deliveryEntries = canonicalizeDeliveryPersistenceEntries(rentalEntries, { readData });
-  const serviceEntries = canonicalizeServicePersistenceEntries(deliveryEntries, { readData });
-  const warrantyEntries = canonicalizeWarrantyPersistenceEntries(serviceEntries, { readData });
-  const finalEntries = canonicalizeWarrantyFactoryPersistenceEntries(warrantyEntries, { readData });
-  assertPaymentAllocationPersistenceEntriesSafe(finalEntries, { readData });
-  businessNumbering.preparePersistenceEntries(finalEntries);
-  tenantDataBoundary.writeDataBatch(finalEntries);
+  return persistCanonicalDataBatch.immediate(entries);
+}
+
+function preflightDataBatch(entries) {
+  const finalEntries = prepareCanonicalDataBatch(entries, { numberingMode: 'preview' });
+  return tenantDataBoundary.preflightDataBatch(finalEntries);
+}
+
+function writeTenantAuditBatch(entries, reason, writableCollections = ['audit_logs']) {
+  const context = currentTenantContext();
+  if (context?.kind !== 'tenant_actor') {
+    const error = new Error('Trusted tenant scope is required for semantic audit persistence.');
+    error.code = 'ACTOR_SCOPE_INCOMPLETE';
+    error.status = 403;
+    throw error;
+  }
+  const allowedHistoryCollections = new Set(['audit_logs', 'service_audit_log']);
+  const requestedHistoryCollections = [...new Set(writableCollections)];
+  if (requestedHistoryCollections.some(name => !allowedHistoryCollections.has(name))) {
+    const error = new Error('Requested history collection is not authorized for semantic audit persistence.');
+    error.code = 'HISTORY_REPOSITORY_COLLECTION_INVALID';
+    error.status = 403;
+    throw error;
+  }
+  return runWithTenantHistoryRepositoryScope({
+    scope: context.actorScope,
+    reason,
+    writableCollections: requestedHistoryCollections,
+  }, () => writeDataBatch(entries));
 }
 
 const accessControl = createAccessControl({ readData });
@@ -541,7 +624,15 @@ const auditLog = createAuditLogger({
   writeData,
   generateId: prefix => `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
   nowIso: () => new Date().toISOString(),
-  logger: console,
+  withTenantScope: (scope, operation) => runWithTenantHistoryRepositoryScope({
+    scope,
+    reason: 'security-audit-event',
+    writableCollections: ['audit_logs'],
+  }, operation),
+  withSystemScope: operation => runWithPlatformSystemScope({
+    reason: 'security-audit-event',
+    writableCollections: ['audit_logs'],
+  }, operation),
 });
 const serviceAuditLog = createServiceAuditLog({
   readData,
@@ -552,8 +643,37 @@ const serviceAuditLog = createServiceAuditLog({
 
 function getBotUsers()    { return readData('bot_users') || {}; }
 function saveBotUsers(u)  { writeData('bot_users', u); }
-function getBotSessions() { return readData('bot_sessions') || {}; }
-function saveBotSessions(s) { writeData('bot_sessions', s); }
+const runWithBotSessionSystemScope = createBoundPlatformSystemScopeRunner({
+  reasonPrefix: 'max-bot-session-',
+  readableCollections: ['bot_sessions'],
+  writableCollections: ['bot_sessions'],
+  allowedParentKinds: ['tenant_actor', 'tenant_denied', 'platform_system'],
+});
+function getBotSessions() {
+  return runWithBotSessionSystemScope({
+    reason: 'max-bot-session-read',
+  }, () => readData('bot_sessions')) || {};
+}
+function saveBotSessions(s) {
+  return runWithBotSessionSystemScope({
+    reason: 'max-bot-session-write',
+    writableCollections: ['bot_sessions'],
+  }, () => writeData('bot_sessions', s));
+}
+const userAuthorityTransitionService = createUserAuthorityTransitionService({
+  db: ensureDb(),
+  readUsers: () => readData('users') || [],
+  readBotUsers: getBotUsers,
+  readBotSessions: getBotSessions,
+  persistTenantEntries: entries => writeTenantAuditBatch(
+    entries,
+    'user-authority-transition',
+    ['audit_logs'],
+  ),
+  persistBotSessions: saveBotSessions,
+  deleteSessionsForUserIds,
+});
+const persistUserAuthorityTransition = input => userAuthorityTransitionService.persist(input);
 function getBotActivity() { return readData('bot_activity') || []; }
 function saveBotActivity(a) { writeData('bot_activity', Array.isArray(a) ? a : []); }
 function getSnapshot()    { return readData('snapshot') || {}; }
@@ -602,16 +722,39 @@ const deliverySendMessage = sendMessage;
 const deliveryDeleteMessage = deleteMessage;
 const deliveryAnswerCallback = answerCallback;
 
+const resolveTrustedGsmDeviceScope = createTrustedGsmDeviceScopeResolver({
+  // TCP ingress has no authenticated user; device identity is resolved before
+  // entering the exact authoritative tenant scope.
+  readData: readRawData,
+});
+const assertGsmDeviceIdentityAvailable = createTrustedGsmDeviceProvisioningGuard({
+  readData: readRawData,
+});
+const getCurrentGsmScope = () => {
+  const context = currentTenantContext();
+  return context?.kind === 'tenant_actor' ? context.actorScope : null;
+};
+const gsmTcpAdmissionController = createTcpIngressAdmissionController();
+
 const gprsGateway = createGprsGateway({
   readData,
   writeData,
+  writeDataBatch,
+  resolveTrustedDeviceScope: resolveTrustedGsmDeviceScope,
+  withActorScope: runWithTenantActorScope,
+  getCurrentScope: getCurrentGsmScope,
   logger: console,
+  tcpAdmissionController: gsmTcpAdmissionController,
   enabled: !DEMO_MODE && !gsmDisabledConfig.disabled && String(process.env.GPRS_ENABLED || '').toLowerCase() === 'true',
 });
 const wialonIpsGateway = createWialonIpsGateway({
   readData,
-  writeData,
+  writeDataBatch,
+  resolveTrustedDeviceScope: resolveTrustedGsmDeviceScope,
+  withActorScope: runWithTenantActorScope,
+  getCurrentScope: getCurrentGsmScope,
   logger: console,
+  tcpAdmissionController: gsmTcpAdmissionController,
   enabled: !DEMO_MODE && !gsmDisabledConfig.disabled && String(process.env.ENABLE_GSM_TCP_GATEWAY || '').toLowerCase() === 'true',
   port: Number(process.env.GSM_TCP_PORT || 5050),
   host: '0.0.0.0',
@@ -656,7 +799,7 @@ function destroySession(token) {
 }
 
 // Чистим протухшие сессии каждый час
-if (!productionScopeWriteFreezeEnabled) {
+if (!runtimeMutationSuppressed) {
   const sessionCleanupTimer = setInterval(() => {
     cleanupExpiredSessions();
   }, 3600_000);
@@ -710,7 +853,7 @@ const WRITE_PERMISSIONS = {
   shipping_photos:['Администратор', ...MECHANIC_ROLES, 'Менеджер по аренде'],
   owners:         ['Администратор'],
   mechanics:      ['Администратор'],
-  service_works:  ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE],
+  service_works:  ['Администратор'],
   spare_parts:    ['Администратор'],
   service_route_norms: ['Администратор'],
   service_field_trips: ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...MECHANIC_ROLES],
@@ -724,26 +867,26 @@ const WRITE_PERMISSIONS = {
 };
 
 const READ_PERMISSIONS = {
-  equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  equipment:      ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', 'Инвестор', HEAD_ROLE, TECHNICAL_AUDITOR_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   equipment_downtimes: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   equipment_finance: ['Администратор', 'Офис-менеджер', HEAD_ROLE],
-  client_objects: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
+  client_objects: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер', TECHNICAL_AUDITOR_ROLE],
   client_contracts: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   rentals:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES],
   gantt_rentals:  ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', 'Инвестор', HEAD_ROLE, ...WARRANTY_MECHANIC_ROLES],
   rental_change_requests: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
   deliveries:     ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', HEAD_ROLE, 'Перевозчик'],
   delivery_carriers: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер'],
-  service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  service:        ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, TECHNICAL_AUDITOR_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   warranty_claims: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
-  counterparties: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
-  clients:        ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
-  knowledge_base_modules: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
+  counterparties: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер', TECHNICAL_AUDITOR_ROLE],
+  clients:        ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер', TECHNICAL_AUDITOR_ROLE],
+  knowledge_base_modules: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', TECHNICAL_AUDITOR_ROLE],
   knowledge_base_progress: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам'],
   app_settings: ['Администратор'],
-  gsm_devices: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
-  gsm_packets: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
-  gsm_commands: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', ...MECHANIC_ROLES],
+  gsm_devices: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', SERVICE_FOREMAN_ROLE, ...MECHANIC_ROLES],
+  gsm_packets: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', SERVICE_FOREMAN_ROLE, ...MECHANIC_ROLES],
+  gsm_commands: ['Администратор', 'Офис-менеджер', 'Менеджер по аренде', 'Менеджер по продажам', SERVICE_FOREMAN_ROLE, ...MECHANIC_ROLES],
   documents:      ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
   mechanic_documents: ['Администратор', 'Менеджер по аренде', 'Офис-менеджер', ...MECHANIC_ROLES],
   payments:       ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
@@ -767,9 +910,9 @@ const READ_PERMISSIONS = {
   shipping_photos:['Администратор', 'Менеджер по аренде', 'Офис-менеджер', HEAD_ROLE, ...MECHANIC_ROLES],
   owners:         ['Администратор', 'Инвестор'],
   mechanics:      ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
-  service_works:  ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
-  spare_parts:    ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
-  service_route_norms: ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  service_works:  ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, TECHNICAL_AUDITOR_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  spare_parts:    ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, TECHNICAL_AUDITOR_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
+  service_route_norms: ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, TECHNICAL_AUDITOR_ROLE, ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   service_field_trips: ['Администратор', 'Офис-менеджер', SERVICE_FOREMAN_ROLE, ...MECHANIC_ROLES],
   repair_work_items: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
   repair_part_items: ['Администратор', 'Офис-менеджер', ...WARRANTY_MECHANIC_ROLES, ...MECHANIC_ROLES],
@@ -800,16 +943,26 @@ function requireAuth(req, res, next) {
   // before actor scope exists. Directory endpoints use tenant-scoped readData.
   const users = readRawData('users') || [];
   const currentUser = users.find(item => item.id === session.userId);
+  if (
+    productionValidationReadOnlyEnabled
+    && !isExactProductionSmokeReaderUser(currentUser)
+  ) {
+    return res.status(503).json({
+      ok: false,
+      code: 'PRODUCTION_VALIDATION_SMOKE_IDENTITY_REQUIRED',
+      error: 'Only the approved production smoke reader is available during validation.',
+    });
+  }
   if (!currentUser || currentUser.status !== 'Активен') {
-    destroySession(token);
+    if (!productionValidationReadOnlyEnabled) destroySession(token);
     return res.status(401).json({ ok: false, error: 'Аккаунт отключён или удалён' });
   }
   if ((Number(currentUser.tokenVersion) || 0) !== (Number(session.tokenVersion) || 0)) {
-    destroySession(token);
+    if (!productionValidationReadOnlyEnabled) destroySession(token);
     return res.status(401).json({ ok: false, error: 'Session expired or invalid' });
   }
   if ((currentUser.passwordChangedAt || null) !== (session.passwordChangedAt || null)) {
-    destroySession(token);
+    if (!productionValidationReadOnlyEnabled) destroySession(token);
     return res.status(401).json({ ok: false, error: 'Session expired or invalid' });
   }
   const isBotOnlyCarrier = normalizeRole(currentUser.role) === 'Перевозчик' &&
@@ -817,7 +970,7 @@ function requireAuth(req, res, next) {
     currentUser.allowFrontendLogin !== true &&
     currentUser.frontendAccess !== true;
   if (isBotOnlyCarrier) {
-    destroySession(token);
+    if (!productionValidationReadOnlyEnabled) destroySession(token);
     return res.status(401).json({ ok: false, error: 'Carrier account is available in MAX bot only' });
   }
   const liveActorScope = resolveOptionalActorScope(resolveTrustedActorScope, currentUser.id);
@@ -836,7 +989,7 @@ function requireAuth(req, res, next) {
     || Number(storedActorScope.membershipVersion) !== Number(liveActorScope.membershipVersion)
   );
   if (actorScopeChanged) {
-    destroySession(token);
+    if (!productionValidationReadOnlyEnabled) destroySession(token);
     return res.status(401).json({ ok: false, error: 'Session scope changed; sign in again.' });
   }
   req.actorScope = actorScopeChanged ? null : liveActorScope;
@@ -864,11 +1017,21 @@ function requireAuth(req, res, next) {
 
 function requireWrite(collection) {
   return (req, res, next) => {
-    const allowed = WRITE_PERMISSIONS[collection] || ['Администратор'];
+    if (isGlobalReferenceCollection(collection)) {
+      return res.status(403).json({
+        ok: false,
+        code: 'GLOBAL_REFERENCE_WRITE_REQUIRES_PLATFORM',
+        error: 'Global reference data requires the external platform catalogue lifecycle.',
+      });
+    }
+    const allowed = WRITE_PERMISSIONS[collection];
+    if (!Array.isArray(allowed)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden: collection is not writable' });
+    }
     if (!allowed.includes(normalizeRole(req.user.userRole))) {
       return res.status(403).json({ ok: false, error: 'Forbidden: insufficient role' });
     }
-    next();
+    return next();
   };
 }
 
@@ -1212,6 +1375,25 @@ function safeNonNegativeNumber(value, fallback = 0) {
   return Number.isFinite(numeric) && numeric >= 0 ? numeric : fallback;
 }
 
+function preserveCatalogClassification(record) {
+  const projection = {};
+  for (const field of ['companyId', 'tenantId', 'platformDefaultId', 'catalogOrigin']) {
+    if (Object.prototype.hasOwnProperty.call(record || {}, field)) {
+      projection[field] = record[field];
+    }
+  }
+  return projection;
+}
+
+function preserveOrCreateCatalogTimestamps(record, timestamp) {
+  const projection = {};
+  if (record?.createdAt) projection.createdAt = record.createdAt;
+  else if (!record?.catalogOrigin) projection.createdAt = timestamp;
+  if (record?.updatedAt) projection.updatedAt = record.updatedAt;
+  else if (!record?.catalogOrigin) projection.updatedAt = timestamp;
+  return projection;
+}
+
 function normalizeServiceWorkRecord(record) {
   const timestamp = nowIso();
   const defaultNormHours = safeNonNegativeNumber(record.defaultNormHours ?? record.normHours, 0);
@@ -1223,6 +1405,7 @@ function normalizeServiceWorkRecord(record) {
   const comment = record.comment ?? record.description;
   return {
     id: record.id || generateId(ID_PREFIXES.service_works),
+    ...preserveCatalogClassification(record),
     name: String(record.name || '').trim(),
     category: record.category ? String(record.category).trim() : undefined,
     equipmentType: record.equipmentType ? String(record.equipmentType).trim() : 'универсально',
@@ -1237,8 +1420,7 @@ function normalizeServiceWorkRecord(record) {
     ratePerHour: defaultMechanicRate,
     isActive: record.isActive !== false,
     sortOrder: Number.isFinite(Number(record.sortOrder)) ? Number(record.sortOrder) : 0,
-    createdAt: record.createdAt || timestamp,
-    updatedAt: record.updatedAt || timestamp,
+    ...preserveOrCreateCatalogTimestamps(record, timestamp),
   };
 }
 
@@ -1249,6 +1431,7 @@ function normalizeSparePartRecord(record) {
   const comment = record.comment ?? record.notes;
   return {
     id: record.id || generateId(ID_PREFIXES.spare_parts),
+    ...preserveCatalogClassification(record),
     name: String(record.name || '').trim(),
     article: article ? String(article).trim() : undefined,
     sku: article ? String(article).trim() : undefined,
@@ -1258,8 +1441,7 @@ function normalizeSparePartRecord(record) {
     manufacturer: manufacturer ? String(manufacturer).trim() : undefined,
     comment: comment ? String(comment).trim() : undefined,
     isActive: record.isActive !== false,
-    createdAt: record.createdAt || timestamp,
-    updatedAt: record.updatedAt || timestamp,
+    ...preserveOrCreateCatalogTimestamps(record, timestamp),
   };
 }
 
@@ -1446,7 +1628,10 @@ const apiRouter = express.Router();
 
 const clientMasterDataLifecycle = createClientMasterDataLifecycleService({
   readData,
-  writeDataBatch,
+  writeDataBatch: entries => writeTenantAuditBatch(
+    entries,
+    'client-master-data-lifecycle',
+  ),
   generateId,
   nowIso,
 });
@@ -1493,6 +1678,28 @@ const COLLECTIONS = [
 registerAuthRoutes(app, {
   readData,
   writeData,
+  readAuthUsers: () => runWithPlatformSystemScope({
+    reason: 'authentication-user-directory-read',
+  }, () => readData('users')),
+  writeAuthUsers: users => runWithPlatformSystemScope({
+    reason: 'authentication-password-rehash',
+    writableCollections: ['users'],
+  }, () => writeData('users', users)),
+  rehashAuthUser: ({ userId, expectedPasswordHash, nextPasswordHash }) => runWithPlatformSystemScope({
+    reason: 'authentication-password-rehash',
+    writableCollections: ['users'],
+  }, () => {
+    const users = readData('users') || [];
+    const index = users.findIndex(candidate => String(candidate?.id || '') === String(userId || ''));
+    if (index < 0 || users[index]?.password !== expectedPasswordHash || users[index]?.status !== 'Активен') {
+      return null;
+    }
+    const nextUser = { ...users[index], password: nextPasswordHash };
+    const nextUsers = [...users];
+    nextUsers[index] = nextUser;
+    writeData('users', nextUsers);
+    return nextUser;
+  }),
   verifyPassword,
   hashPassword,
   needsPasswordRehash,
@@ -1506,6 +1713,13 @@ registerAuthRoutes(app, {
   getRoleAccessSummary: roleAccessSummary,
   getAppDisabledConfig: () => appDisabledConfig,
   sendAppDisabled,
+  isProductionValidationReadOnly: () => productionValidationReadOnlyEnabled,
+  isExactProductionSmokeReaderUser,
+  runProductionValidationLoginTransaction: operation => (
+    runWithProductionValidationSmokeLoginWrites(
+      () => executeProductionValidationSmokeLoginWriteTransaction(ensureDb(), operation),
+    )
+  ),
   nowIso,
 });
 
@@ -1630,6 +1844,7 @@ apiRouter.use(registerRentalRoutes({
   readData,
   writeData,
   writeDataBatch,
+  writeAuditDataBatch: entries => writeTenantAuditBatch(entries, 'rental-semantic-audit'),
   requireAuth,
   requireRead,
   validateRentalPayload,
@@ -1645,13 +1860,14 @@ apiRouter.use(registerRentalRoutes({
   normalizeServiceTicketForWrite,
   botNotifications,
   businessNumbering,
+  requestIdempotency,
   nowIso,
 }));
 
 apiRouter.use(registerRentalChangeRequestRoutes({
   readData,
   writeData,
-  writeDataBatch,
+  writeDataBatch, writeAuditDataBatch: entries => writeTenantAuditBatch(entries, 'finance-semantic-audit'),
   requireAuth,
   requireRead,
   validateRentalPayload,
@@ -1681,7 +1897,7 @@ registerFinanceRoutes(apiRouter, {
   normalizePaymentPlan,
   validateStageTransition,
   writeData,
-  writeDataBatch,
+  writeDataBatch, writeAuditDataBatch: entries => writeTenantAuditBatch(entries, 'finance-semantic-audit'),
   requireWrite,
   requireAdmin,
   generateId,
@@ -1692,7 +1908,7 @@ registerFinanceRoutes(apiRouter, {
 
 apiRouter.use(registerDebtCollectionPlanRoutes({
   readData,
-  writeData,
+  writeAuditDataBatch: entries => writeTenantAuditBatch(entries, 'debt-collection-plan-semantic-audit'),
   requireAuth,
   requireRead,
   requireWrite,
@@ -1715,11 +1931,15 @@ apiRouter.use(registerTasksCenterRoutes({
 registerGsmRoutes(apiRouter, {
   requireAuth,
   requireWrite,
+  canReadCollection,
+  accessControl,
   gprsGateway,
+  wialonIpsGateway,
   readData,
-  writeData,
+  writeDataBatch,
   generateId,
   nowIso,
+  assertGsmDeviceIdentityAvailable,
   getGsmDisabledConfig: () => gsmDisabledConfig,
 });
 
@@ -1780,6 +2000,7 @@ apiRouter.use(registerStaffRoutes({
 registerDocumentRoutes(apiRouter, {
   readData,
   writeData,
+  writeDataBatch,
   requireAuth,
   requireRead,
   requireWrite,
@@ -1791,6 +2012,7 @@ registerDocumentRoutes(apiRouter, {
   normalizeRecordClientLink,
   getDb: ensureDb,
   businessNumbering,
+  runInAppDataWriteTransaction,
 });
 
 apiRouter.use(registerEquipmentReadinessRoutes({
@@ -1805,7 +2027,7 @@ apiRouter.use(registerEquipmentReadinessRoutes({
 
 registerPayrollRoutes(apiRouter, {
   readData,
-  writeData,
+  writeDataBatch,
   requireAuth,
   generateId,
   idPrefixes: ID_PREFIXES,
@@ -1819,6 +2041,12 @@ apiRouter.use(registerCrudRoutes({
   readData,
   writeData,
   writeDataBatch,
+  writeServiceDataBatch: entries => writeTenantAuditBatch(
+    entries,
+    'service-domain-semantic-audit',
+    ['audit_logs', 'service_audit_log'],
+  ),
+  persistUserAuthorityTransition,
   deleteSessionsForUserIds,
   requireAuth,
   requireRead,
@@ -1844,12 +2072,14 @@ apiRouter.use(registerCrudRoutes({
   normalizeRecordClientLink,
   normalizeServiceTicketForWrite,
   businessNumbering,
+  requestIdempotency,
+  catalogLifecycle: tenantDataBoundary,
   db: ensureDb(),
 }));
 
 registerLeasingRoutes(apiRouter, {
   readData,
-  writeData,
+  writeDataBatch,
   requireAuth,
   requireRead,
   accessControl,
@@ -1871,6 +2101,11 @@ function requireNonEmptyString(value, fieldName) {
 registerServiceRoutes(apiRouter, {
   readData,
   writeData,
+  writeDataBatch: entries => writeTenantAuditBatch(
+    entries,
+    'service-domain-semantic-audit',
+    ['audit_logs', 'service_audit_log'],
+  ),
   requireAuth,
   requireAdmin,
   requireRead,
@@ -1889,6 +2124,7 @@ registerServiceRoutes(apiRouter, {
   returnServiceTicketForRevision,
   resolveServiceTicketRevision,
   botNotifications,
+  catalogLifecycle: tenantDataBoundary,
 });
 
 apiRouter.use(registerReportRoutes({
@@ -2636,10 +2872,14 @@ function normalizeVehicleTripPayload(body, { previous = null, req, trips }) {
   });
 }
 
-function updateVehicleMileageFromTrip(trip) {
+function persistVehicleTripAndMileage(trips, trip) {
   const vehicles = readData('service_vehicles') || [];
-  const nextVehicles = applyVehicleMileageFromTrip(vehicles, trip, nowIso);
-  if (nextVehicles !== vehicles) writeData('service_vehicles', nextVehicles);
+  writeDataBatch(buildVehicleTripPersistenceEntries({
+    trips,
+    vehicles,
+    trip,
+    nowIso,
+  }));
 }
 
 function sendTripError(res, error, fallback = 'Ошибка путевого листа') {
@@ -2655,10 +2895,8 @@ apiRouter.post('/vehicle-trips', requireAuth, requireWrite('vehicle_trips'), (re
     assertBusinessNumberNotProvided(req.body, { fields: ['number', 'sheetNumber'] });
     const trips = readData('vehicle_trips') || [];
     const trip = normalizeVehicleTripPayload(req.body || {}, { req, trips });
-    businessNumbering.assignNewRecord('vehicle_trips', trip);
     trips.push(trip);
-    writeData('vehicle_trips', trips);
-    updateVehicleMileageFromTrip(trip);
+    persistVehicleTripAndMileage(trips, trip);
 
     res.status(201).json(trip);
   } catch (err) {
@@ -2697,8 +2935,7 @@ apiRouter.put('/vehicle-trips/:id', requireAuth, requireWrite('vehicle_trips'), 
 
     const updated = normalizeVehicleTripPayload(req.body || {}, { previous: trips[idx], req, trips });
     trips[idx] = updated;
-    writeData('vehicle_trips', trips);
-    updateVehicleMileageFromTrip(updated);
+    persistVehicleTripAndMileage(trips, updated);
     res.json(updated);
   } catch (err) {
     console.error('[VT] PUT error:', err.message);
@@ -2730,10 +2967,8 @@ apiRouter.post('/service-vehicles/:vehicleId/trip-sheets', requireAuth, requireW
     assertBusinessNumberNotProvided(req.body, { fields: ['number', 'sheetNumber'] });
     const trips = readData('vehicle_trips') || [];
     const trip = normalizeVehicleTripPayload({ ...(req.body || {}), vehicleId: req.params.vehicleId }, { req, trips });
-    businessNumbering.assignNewRecord('vehicle_trips', trip);
     trips.push(trip);
-    writeData('vehicle_trips', trips);
-    updateVehicleMileageFromTrip(trip);
+    persistVehicleTripAndMileage(trips, trip);
     res.status(201).json(trip);
   } catch (err) {
     console.error('[VT] trip-sheet POST error:', err.message);
@@ -2749,8 +2984,7 @@ apiRouter.patch('/service-vehicles/:vehicleId/trip-sheets/:id', requireAuth, req
     if (idx === -1) return res.status(404).json({ ok: false, error: 'Путевой лист не найден' });
     const updated = normalizeVehicleTripPayload({ ...(req.body || {}), vehicleId: req.params.vehicleId }, { previous: trips[idx], req, trips });
     trips[idx] = updated;
-    writeData('vehicle_trips', trips);
-    updateVehicleMileageFromTrip(updated);
+    persistVehicleTripAndMileage(trips, updated);
     res.json(updated);
   } catch (err) {
     console.error('[VT] trip-sheet PATCH error:', err.message);
@@ -3050,9 +3284,13 @@ startServer({
     startBotPolling: startMaxBotPolling,
     startGprsGateway: () => gprsGateway.start(),
     startWialonIpsGateway: () => wialonIpsGateway.start(),
+    stopGprsGateway: () => gprsGateway.stop(),
+    stopWialonIpsGateway: () => wialonIpsGateway.stop(),
     dbPath: DB_PATH,
     botToken: BOT_TOKEN,
     productionScopeWriteFreezeEnabled,
+    productionValidationReadOnlyEnabled,
+    runWithPlatformSystemScope,
     readData,
     writeData,
     normalizeClientLinks,

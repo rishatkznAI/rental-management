@@ -52,6 +52,7 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         DB_PATH: e2eDbPath,
+        E2E_DATABASE_DISPOSABLE: '1',
         ...adminResetEnv,
         NODE_ENV: 'test',
         ...(!usesExternalDb ? { E2E_TRUSTED_SCOPE_BOOTSTRAP: '1' } : {}),

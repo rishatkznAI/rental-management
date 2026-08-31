@@ -54,6 +54,7 @@ function registerFinanceRoutes(router, deps) {
     validateStageTransition,
     writeData,
     writeDataBatch,
+    writeAuditDataBatch = writeDataBatch,
     requireWrite,
     requireAdmin = (req, res, next) => (
       (req.user?.userRole || req.user?.role) === 'Администратор'
@@ -142,15 +143,18 @@ function registerFinanceRoutes(router, deps) {
     return Array.isArray(readData(name)) ? readData(name) : [];
   }
 
-  function syncPaymentStatusesAfterAllocationWrite() {
-    writeData(
-      'gantt_rentals',
-      syncGanttRentalPaymentStatuses(
-        collectionList('gantt_rentals'),
-        collectionList('payments'),
-        collectionList('payment_allocations'),
-      ),
-    );
+  function buildPaymentAllocationProjectionEntries(nextAllocations) {
+    return [
+      { name: 'payment_allocations', value: nextAllocations },
+      {
+        name: 'gantt_rentals',
+        value: syncGanttRentalPaymentStatuses(
+          collectionList('gantt_rentals'),
+          collectionList('payments'),
+          nextAllocations,
+        ),
+      },
+    ];
   }
 
   function dateOnly(value) {
@@ -191,17 +195,37 @@ function registerFinanceRoutes(router, deps) {
       error.status = 400;
       throw error;
     }
-    const account = text(input.account ?? previous?.account);
-    const accountFrom = text(input.accountFrom ?? previous?.accountFrom);
-    const accountTo = text(input.accountTo ?? previous?.accountTo);
+    const accounts = collectionList('finance_accounts');
+    const accountId = text(input.accountId ?? input.financeAccountId ?? previous?.accountId ?? previous?.financeAccountId);
+    const accountFromId = text(input.accountFromId ?? previous?.accountFromId);
+    const accountToId = text(input.accountToId ?? previous?.accountToId);
+    const accountRecord = type === 'transfer' ? null : findAccountById(accounts, accountId);
+    const accountFromRecord = type === 'transfer' ? findAccountById(accounts, accountFromId) : null;
+    const accountToRecord = type === 'transfer' ? findAccountById(accounts, accountToId) : null;
     if (type === 'transfer') {
-      if (!accountFrom || !accountTo) {
-        const error = new Error('Для перевода укажите счёт-источник и счёт-получатель.');
+      if (!accountFromId || !accountToId) {
+        const error = new Error('Для перевода укажите stable ID счёта-источника и счёта-получателя.');
         error.status = 400;
         throw error;
       }
-      if (accountFrom.toLowerCase() === accountTo.toLowerCase()) {
+      if (!accountFromRecord || !accountToRecord) {
+        const error = new Error('Счёт-источник или счёт-получатель по stable ID не найден.');
+        error.status = 400;
+        throw error;
+      }
+      if (accountFromId === accountToId) {
         const error = new Error('Нельзя перевести деньги на тот же счёт.');
+        error.status = 400;
+        throw error;
+      }
+    } else {
+      if (!accountId) {
+        const error = new Error('Укажите stable ID счёта или кассы.');
+        error.status = 400;
+        throw error;
+      }
+      if (!accountRecord) {
+        const error = new Error('Счёт или касса по stable ID не найдены.');
         error.status = 400;
         throw error;
       }
@@ -222,9 +246,12 @@ function registerFinanceRoutes(router, deps) {
       category,
       description: text(input.description ?? previous?.description) || undefined,
       counterparty: text(input.counterparty ?? previous?.counterparty) || undefined,
-      account: type === 'transfer' ? undefined : (account || undefined),
-      accountFrom: type === 'transfer' ? accountFrom : undefined,
-      accountTo: type === 'transfer' ? accountTo : undefined,
+      accountId: type === 'transfer' ? undefined : accountRecord.id,
+      account: type === 'transfer' ? undefined : accountRecord.name,
+      accountFromId: type === 'transfer' ? accountFromRecord.id : undefined,
+      accountToId: type === 'transfer' ? accountToRecord.id : undefined,
+      accountFrom: type === 'transfer' ? accountFromRecord.name : undefined,
+      accountTo: type === 'transfer' ? accountToRecord.name : undefined,
       relatedEntityType: text(input.relatedEntityType ?? previous?.relatedEntityType) || undefined,
       relatedEntityId: text(input.relatedEntityId ?? previous?.relatedEntityId) || undefined,
       relatedEntityLabel: text(input.relatedEntityLabel ?? previous?.relatedEntityLabel) || undefined,
@@ -291,12 +318,11 @@ function registerFinanceRoutes(router, deps) {
     };
   }
 
-  function findAccount(accounts, value) {
-    const needle = text(value).toLowerCase();
-    if (!needle) return null;
-    return accounts.find(account =>
-      text(account.id).toLowerCase() === needle || text(account.name).toLowerCase() === needle
-    ) || null;
+  function findAccountById(accounts, value) {
+    const id = text(value);
+    if (!id) return null;
+    const matches = accounts.filter(account => text(account.id) === id);
+    return matches.length === 1 ? matches[0] : null;
   }
 
   function accountHasActiveLinks(account) {
@@ -305,10 +331,14 @@ function registerFinanceRoutes(router, deps) {
     if (!id && !name) return false;
     return collectionList('finance_operations').some(operation => {
       if (operation?.status === 'archived') return false;
-      const values = [operation.account, operation.accountFrom, operation.accountTo]
+      const stableIds = [operation.accountId, operation.financeAccountId, operation.accountFromId, operation.accountToId]
         .map(value => text(value).toLowerCase())
         .filter(Boolean);
-      return values.includes(id) || values.includes(name);
+      if (stableIds.length > 0) return stableIds.includes(id);
+      const legacyLabels = [operation.account, operation.accountFrom, operation.accountTo]
+        .map(value => text(value).toLowerCase())
+        .filter(Boolean);
+      return legacyLabels.includes(name);
     });
   }
 
@@ -317,14 +347,32 @@ function registerFinanceRoutes(router, deps) {
     return items.findIndex(item => String(item?.id || '').trim() === needle);
   }
 
-  function audit(req, action, entityType, previous, next) {
-    auditLog?.(req, {
+  function semanticAuditEntry(req, action, entityType, previous, next) {
+    return createAuditEntry(req, {
       action,
       entityType,
       entityId: next?.id || previous?.id,
       before: previous || null,
       after: next || null,
-    });
+    }, { generateId, nowIso });
+  }
+
+  function persistAudited(req, entries, events) {
+    if (typeof writeAuditDataBatch !== 'function') {
+      throw new Error('Atomic semantic audit persistence is unavailable.');
+    }
+    const auditEntries = (events || []).map(event => semanticAuditEntry(
+      req,
+      event.action,
+      event.entityType,
+      event.previous,
+      event.next,
+    ));
+    const auditLogs = [...collectionList(AUDIT_COLLECTION), ...auditEntries];
+    writeAuditDataBatch([
+      ...(entries || []),
+      { name: AUDIT_COLLECTION, value: auditLogs },
+    ]);
   }
 
   function workflowErrorResponse(res, error, fallback) {
@@ -381,7 +429,7 @@ function registerFinanceRoutes(router, deps) {
     };
   }
 
-  function writeCompanyTaxSettings(value) {
+  function prepareCompanyTaxSettings(value) {
     const settings = collectionList('app_settings');
     const now = nowIso();
     const existing = settings.find(item => item?.key === 'company_tax_settings');
@@ -393,12 +441,10 @@ function registerFinanceRoutes(router, deps) {
       updatedAt: now,
     };
     if (!existing) next.createdAt = now;
-    writeData('app_settings', existing ? settings.map(item => item === existing ? next : item) : [...settings, next]);
-    return next.value;
-  }
-
-  function saveDocumentSettings(settings) {
-    writeData('app_settings', writeNumberingSettings(collectionList('app_settings'), settings, nowIso));
+    return {
+      value: next.value,
+      settings: existing ? settings.map(item => item === existing ? next : item) : [...settings, next],
+    };
   }
 
   function findReceivableRow(req, selector = {}) {
@@ -451,7 +497,7 @@ function registerFinanceRoutes(router, deps) {
 </html>`;
   }
 
-  function createReceivableDocument(req, row, actionId, documentType, payload = {}) {
+  function prepareReceivableDocument(req, row, actionId, documentType, payload = {}) {
     const documents = collectionList('documents');
     const firstRental = row.rentals?.[0] || {};
     const prepared = prepareDocumentCreate({
@@ -480,10 +526,11 @@ function registerFinanceRoutes(router, deps) {
       idPrefix: idPrefixes.documents || 'D',
       user: req.user,
     });
-    writeData('documents', [...documents, prepared.document]);
-    saveDocumentSettings(prepared.settings);
-    audit(req, 'documents.create', 'documents', null, prepared.document);
-    return prepared.document;
+    return {
+      document: prepared.document,
+      documents: [...documents, prepared.document],
+      settings: writeNumberingSettings(collectionList('app_settings'), prepared.settings, nowIso),
+    };
   }
 
   function receivablesResponse(req) {
@@ -591,7 +638,7 @@ function registerFinanceRoutes(router, deps) {
         openingReceivableUpdatedBy: actorName,
       };
       clients[index] = next;
-      if (typeof writeDataBatch !== 'function') {
+      if (typeof writeAuditDataBatch !== 'function') {
         throw new Error('Atomic opening receivable persistence is unavailable.');
       }
       const auditEntry = createAuditEntry(req, {
@@ -608,8 +655,8 @@ function registerFinanceRoutes(router, deps) {
           reason,
         },
       }, { generateId, nowIso });
-      const auditLogs = [...collectionList(AUDIT_COLLECTION), auditEntry].slice(-10000);
-      writeDataBatch([
+      const auditLogs = [...collectionList(AUDIT_COLLECTION), auditEntry];
+      writeAuditDataBatch([
         { name: 'clients', value: clients },
         { name: AUDIT_COLLECTION, value: auditLogs },
       ]);
@@ -638,11 +685,12 @@ function registerFinanceRoutes(router, deps) {
   router.post('/finance/accounts', requireAuth, requireWrite('finance_accounts'), (req, res) => {
     try {
       accessControl.assertCanCreateCollection('finance_accounts', req.user, req.body);
-      const accounts = collectionList('finance_accounts');
+      const accounts = [...collectionList('finance_accounts')];
       const next = normalizeFinanceAccount(req.body, null, req);
       accounts.push(next);
-      writeData('finance_accounts', accounts);
-      audit(req, 'finance_accounts.create', 'finance_accounts', null, next);
+      persistAudited(req, [{ name: 'finance_accounts', value: accounts }], [
+        { action: 'finance_accounts.create', entityType: 'finance_accounts', previous: null, next },
+      ]);
       return res.status(201).json(next);
     } catch (error) {
       return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось создать счёт' });
@@ -651,9 +699,9 @@ function registerFinanceRoutes(router, deps) {
 
   router.post('/finance/accounts/transfer', requireAuth, requireWrite('finance_accounts'), (req, res) => {
     try {
-      const accounts = collectionList('finance_accounts');
-      const from = findAccount(accounts, req.body.accountFrom);
-      const to = findAccount(accounts, req.body.accountTo);
+      const accounts = [...collectionList('finance_accounts')];
+      const from = findAccountById(accounts, req.body.accountFromId ?? req.body.accountFrom);
+      const to = findAccountById(accounts, req.body.accountToId ?? req.body.accountTo);
       if (!from || !to) {
         const error = new Error('Укажите существующие счёт-источник и счёт-получатель.');
         error.status = 400;
@@ -685,16 +733,27 @@ function registerFinanceRoutes(router, deps) {
       const previousFrom = { ...from };
       const previousTo = { ...to };
       const now = nowIso();
-      from.balance = money(Number(from.balance || 0) - amount);
-      from.actualAt = date;
-      from.updatedAt = now;
-      from.updatedBy = userName(req.user) || undefined;
-      from.updatedByUserId = req.user?.userId || req.user?.id || undefined;
-      to.balance = money(Number(to.balance || 0) + amount);
-      to.actualAt = date;
-      to.updatedAt = now;
-      to.updatedBy = userName(req.user) || undefined;
-      to.updatedByUserId = req.user?.userId || req.user?.id || undefined;
+      const nextFrom = {
+        ...from,
+        balance: money(Number(from.balance || 0) - amount),
+        actualAt: date,
+        updatedAt: now,
+        updatedBy: userName(req.user) || undefined,
+        updatedByUserId: req.user?.userId || req.user?.id || undefined,
+      };
+      const nextTo = {
+        ...to,
+        balance: money(Number(to.balance || 0) + amount),
+        actualAt: date,
+        updatedAt: now,
+        updatedBy: userName(req.user) || undefined,
+        updatedByUserId: req.user?.userId || req.user?.id || undefined,
+      };
+      const nextAccounts = accounts.map(account => {
+        if (text(account.id) === text(nextFrom.id)) return nextFrom;
+        if (text(account.id) === text(nextTo.id)) return nextTo;
+        return account;
+      });
 
       const operations = collectionList('finance_operations');
       const operation = normalizeFinanceOperation({
@@ -703,26 +762,29 @@ function registerFinanceRoutes(router, deps) {
         amount,
         category: 'Перевод между счетами',
         description: text(req.body.description) || `Перевод: ${from.name} → ${to.name}`,
-        accountFrom: from.name,
-        accountTo: to.name,
+        accountFromId: from.id,
+        accountToId: to.id,
         comment: req.body.comment,
       }, null, req);
-      operations.push(operation);
+      const nextOperations = [...operations, operation];
 
-      writeData('finance_accounts', accounts);
-      writeData('finance_operations', operations);
-      audit(req, 'finance_accounts.transfer.from', 'finance_accounts', previousFrom, from);
-      audit(req, 'finance_accounts.transfer.to', 'finance_accounts', previousTo, to);
-      audit(req, 'finance_operations.create', 'finance_operations', null, operation);
-      return res.status(201).json({ from, to, operation });
+      persistAudited(req, [
+        { name: 'finance_accounts', value: nextAccounts },
+        { name: 'finance_operations', value: nextOperations },
+      ], [
+        { action: 'finance_accounts.transfer.from', entityType: 'finance_accounts', previous: previousFrom, next: nextFrom },
+        { action: 'finance_accounts.transfer.to', entityType: 'finance_accounts', previous: previousTo, next: nextTo },
+        { action: 'finance_operations.create', entityType: 'finance_operations', previous: null, next: operation },
+      ]);
+      return res.status(201).json({ from: nextFrom, to: nextTo, operation });
     } catch (error) {
-      return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось выполнить перевод' });
+      return res.status(error?.status || 500).json({ ok: false, error: error?.message || 'Не удалось выполнить перевод' });
     }
   });
 
   router.patch('/finance/accounts/:id', requireAuth, requireWrite('finance_accounts'), (req, res) => {
     try {
-      const accounts = collectionList('finance_accounts');
+      const accounts = [...collectionList('finance_accounts')];
       const index = findIndexById(accounts, req.params.id);
       if (index < 0) return res.status(404).json({ ok: false, error: 'Счёт не найден' });
       accessControl.assertCanUpdateEntity('finance_accounts', accounts[index], req.user);
@@ -741,8 +803,9 @@ function registerFinanceRoutes(router, deps) {
       }
       const next = normalizeFinanceAccount(req.body, previous, req);
       accounts[index] = next;
-      writeData('finance_accounts', accounts);
-      audit(req, 'finance_accounts.update', 'finance_accounts', previous, next);
+      persistAudited(req, [{ name: 'finance_accounts', value: accounts }], [
+        { action: 'finance_accounts.update', entityType: 'finance_accounts', previous, next },
+      ]);
       return res.json(next);
     } catch (error) {
       return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось обновить счёт' });
@@ -778,11 +841,12 @@ function registerFinanceRoutes(router, deps) {
   router.post('/finance/operations', requireAuth, requireWrite('finance_operations'), (req, res) => {
     try {
       accessControl.assertCanCreateCollection('finance_operations', req.user, req.body);
-      const operations = collectionList('finance_operations');
+      const operations = [...collectionList('finance_operations')];
       const next = normalizeFinanceOperation(req.body, null, req);
       operations.push(next);
-      writeData('finance_operations', operations);
-      audit(req, 'finance_operations.create', 'finance_operations', null, next);
+      persistAudited(req, [{ name: 'finance_operations', value: operations }], [
+        { action: 'finance_operations.create', entityType: 'finance_operations', previous: null, next },
+      ]);
       return res.status(201).json(next);
     } catch (error) {
       return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось создать операцию' });
@@ -791,15 +855,16 @@ function registerFinanceRoutes(router, deps) {
 
   router.patch('/finance/operations/:id', requireAuth, requireWrite('finance_operations'), (req, res) => {
     try {
-      const operations = collectionList('finance_operations');
+      const operations = [...collectionList('finance_operations')];
       const index = findIndexById(operations, req.params.id);
       if (index < 0) return res.status(404).json({ ok: false, error: 'Операция не найдена' });
       accessControl.assertCanUpdateEntity('finance_operations', operations[index], req.user);
       const previous = operations[index];
       const next = normalizeFinanceOperation(req.body, previous, req);
       operations[index] = next;
-      writeData('finance_operations', operations);
-      audit(req, 'finance_operations.update', 'finance_operations', previous, next);
+      persistAudited(req, [{ name: 'finance_operations', value: operations }], [
+        { action: 'finance_operations.update', entityType: 'finance_operations', previous, next },
+      ]);
       return res.json(next);
     } catch (error) {
       return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось обновить операцию' });
@@ -1008,9 +1073,11 @@ function registerFinanceRoutes(router, deps) {
     try {
       const previous = readCompanyTaxSettings();
       const next = normalizeCompanyTaxSettings(req.body, previous);
-      const saved = writeCompanyTaxSettings(next);
-      audit(req, 'company_tax_settings.update', 'app_settings', previous, saved);
-      return res.json(saved);
+      const prepared = prepareCompanyTaxSettings(next);
+      persistAudited(req, [{ name: 'app_settings', value: prepared.settings }], [
+        { action: 'company_tax_settings.update', entityType: 'app_settings', previous, next: prepared.value },
+      ]);
+      return res.json(prepared.value);
     } catch (error) {
       return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось сохранить настройки НДС' });
     }
@@ -1067,7 +1134,7 @@ function registerFinanceRoutes(router, deps) {
     try {
       const equipment = collectionList('equipment').find(item => text(item.id) === text(req.params.id));
       if (!equipment) return res.status(404).json({ ok: false, error: 'Техника не найдена' });
-      const rows = collectionList('equipment_finance');
+      const rows = [...collectionList('equipment_finance')];
       const index = rows.findIndex(item => text(item.equipmentId) === text(req.params.id));
       const previous = index >= 0 ? rows[index] : null;
       const next = normalizeEquipmentFinance(req.body, previous || {}, req.params.id);
@@ -1076,8 +1143,9 @@ function registerFinanceRoutes(router, deps) {
       if (!previous) next.createdAt = next.updatedAt;
       if (index >= 0) rows[index] = next;
       else rows.push(next);
-      writeData('equipment_finance', rows);
-      audit(req, 'equipment_finance.update', 'equipment_finance', previous, next);
+      persistAudited(req, [{ name: 'equipment_finance', value: rows }], [
+        { action: 'equipment_finance.update', entityType: 'equipment_finance', previous, next },
+      ]);
       return res.json({ equipmentId: req.params.id, finance: next, depreciation: calculateEquipmentDepreciation(next, nowIso().slice(0, 10)) });
     } catch (error) {
       return res.status(error?.status || 400).json({ ok: false, error: error?.message || 'Не удалось сохранить экономику техники' });
@@ -1183,15 +1251,17 @@ function registerFinanceRoutes(router, deps) {
         remaining -= amount;
       }
       for (const item of created) accessControl.assertCanCreateCollection('payment_allocations', req.user, item);
-      assertPaymentAllocationPersistenceEntriesSafe([
-        { name: 'payment_allocations', value: [...allocations, ...created] },
-      ], { readData });
-      writeData('payment_allocations', [...allocations, ...created]);
-      syncPaymentStatusesAfterAllocationWrite();
-      created.forEach(item => audit(req, 'payment_allocations.create', 'payment_allocations', null, item));
+      const entries = buildPaymentAllocationProjectionEntries([...allocations, ...created]);
+      assertPaymentAllocationPersistenceEntriesSafe(entries, { readData });
+      persistAudited(req, entries, created.map(item => ({
+        action: 'payment_allocations.create',
+        entityType: 'payment_allocations',
+        previous: null,
+        next: item,
+      })));
       return res.status(201).json({ paymentId: req.params.id, allocations: created });
     } catch (error) {
-      return res.status(error?.status || 400).json({
+      return res.status(error?.status || 500).json({
         ok: false,
         ...(error?.code ? { code: error.code } : {}),
         error: error?.message || 'Не удалось распределить платёж',
@@ -1225,7 +1295,7 @@ function registerFinanceRoutes(router, deps) {
         counterpartyId: req.body.counterpartyId,
         clientId: req.body.clientId,
       });
-      const actions = collectionList('debt_collection_actions');
+      const actions = [...collectionList('debt_collection_actions')];
       const actionId = String(req.body.id || '').trim() || generateId(idPrefixes.debt_collection_actions || 'DCA');
       let next = normalizeAction({
         ...req.body,
@@ -1253,17 +1323,26 @@ function registerFinanceRoutes(router, deps) {
         comment: next.comment,
         userRole: req.user?.userRole,
       });
-      let document = null;
+      let preparedDocument = null;
       if (req.body.actionType === 'generate_notification') {
-        document = createReceivableDocument(req, row, actionId, 'debt_notification', req.body);
+        preparedDocument = prepareReceivableDocument(req, row, actionId, 'debt_notification', req.body);
       }
       if (req.body.actionType === 'generate_pretrial_claim') {
-        document = createReceivableDocument(req, row, actionId, 'pretrial_claim', req.body);
+        preparedDocument = prepareReceivableDocument(req, row, actionId, 'pretrial_claim', req.body);
       }
+      const document = preparedDocument?.document || null;
       if (document?.id) next.documentId = document.id;
       actions.push(next);
-      writeData('debt_collection_actions', actions);
-      audit(req, 'debt_collection_actions.workflow', 'debt_collection_actions', null, next);
+      persistAudited(req, [
+        ...(preparedDocument ? [
+          { name: 'documents', value: preparedDocument.documents },
+          { name: 'app_settings', value: preparedDocument.settings },
+        ] : []),
+        { name: 'debt_collection_actions', value: actions },
+      ], [
+        ...(document ? [{ action: 'documents.create', entityType: 'documents', previous: null, next: document }] : []),
+        { action: 'debt_collection_actions.workflow', entityType: 'debt_collection_actions', previous: null, next },
+      ]);
       return res.status(201).json({ action: next, document });
     } catch (error) {
       return workflowErrorResponse(res, error, 'Не удалось выполнить этап взыскания');
@@ -1273,7 +1352,7 @@ function registerFinanceRoutes(router, deps) {
   router.post('/finance/receivables/actions', requireAuth, requireWrite('debt_collection_actions'), (req, res) => {
     try {
       accessControl.assertCanCreateCollection('debt_collection_actions', req.user, req.body);
-      const actions = collectionList('debt_collection_actions');
+      const actions = [...collectionList('debt_collection_actions')];
       let next = normalizeAction(req.body, null, {
         generateId,
         idPrefix: idPrefixes.debt_collection_actions || 'DCA',
@@ -1284,8 +1363,9 @@ function registerFinanceRoutes(router, deps) {
         recordId: next.id,
       });
       actions.push(next);
-      writeData('debt_collection_actions', actions);
-      audit(req, 'debt_collection_actions.create', 'debt_collection_actions', null, next);
+      persistAudited(req, [{ name: 'debt_collection_actions', value: actions }], [
+        { action: 'debt_collection_actions.create', entityType: 'debt_collection_actions', previous: null, next },
+      ]);
       return res.status(201).json(next);
     } catch (error) {
       return workflowErrorResponse(res, error, 'Не удалось создать действие взыскания');
@@ -1294,7 +1374,7 @@ function registerFinanceRoutes(router, deps) {
 
   router.patch('/finance/receivables/actions/:id', requireAuth, requireWrite('debt_collection_actions'), (req, res) => {
     try {
-      const actions = collectionList('debt_collection_actions');
+      const actions = [...collectionList('debt_collection_actions')];
       const index = findIndexById(actions, req.params.id);
       if (index < 0) return res.status(404).json({ ok: false, error: 'Действие взыскания не найдено' });
       accessControl.assertCanUpdateEntity('debt_collection_actions', actions[index], req.user);
@@ -1309,8 +1389,9 @@ function registerFinanceRoutes(router, deps) {
         recordId: next.id,
       });
       actions[index] = next;
-      writeData('debt_collection_actions', actions);
-      audit(req, 'debt_collection_actions.update', 'debt_collection_actions', previous, next);
+      persistAudited(req, [{ name: 'debt_collection_actions', value: actions }], [
+        { action: 'debt_collection_actions.update', entityType: 'debt_collection_actions', previous, next },
+      ]);
       return res.json(next);
     } catch (error) {
       return workflowErrorResponse(res, error, 'Не удалось обновить действие взыскания');
@@ -1320,7 +1401,7 @@ function registerFinanceRoutes(router, deps) {
   router.post('/finance/receivables/payment-plans', requireAuth, requireWrite('receivable_payment_plans'), (req, res) => {
     try {
       accessControl.assertCanCreateCollection('receivable_payment_plans', req.user, req.body);
-      const plans = collectionList('receivable_payment_plans');
+      const plans = [...collectionList('receivable_payment_plans')];
       let next = normalizePaymentPlan(req.body, null, {
         generateId,
         idPrefix: idPrefixes.receivable_payment_plans || 'RPP',
@@ -1331,8 +1412,9 @@ function registerFinanceRoutes(router, deps) {
         recordId: next.id,
       });
       plans.push(next);
-      writeData('receivable_payment_plans', plans);
-      audit(req, 'receivable_payment_plans.create', 'receivable_payment_plans', null, next);
+      persistAudited(req, [{ name: 'receivable_payment_plans', value: plans }], [
+        { action: 'receivable_payment_plans.create', entityType: 'receivable_payment_plans', previous: null, next },
+      ]);
       return res.status(201).json(next);
     } catch (error) {
       return workflowErrorResponse(res, error, 'Не удалось создать график погашения');
@@ -1341,7 +1423,7 @@ function registerFinanceRoutes(router, deps) {
 
   router.patch('/finance/receivables/payment-plans/:id', requireAuth, requireWrite('receivable_payment_plans'), (req, res) => {
     try {
-      const plans = collectionList('receivable_payment_plans');
+      const plans = [...collectionList('receivable_payment_plans')];
       const index = findIndexById(plans, req.params.id);
       if (index < 0) return res.status(404).json({ ok: false, error: 'Платёж плана не найден' });
       accessControl.assertCanUpdateEntity('receivable_payment_plans', plans[index], req.user);
@@ -1356,8 +1438,9 @@ function registerFinanceRoutes(router, deps) {
         recordId: next.id,
       });
       plans[index] = next;
-      writeData('receivable_payment_plans', plans);
-      audit(req, 'receivable_payment_plans.update', 'receivable_payment_plans', previous, next);
+      persistAudited(req, [{ name: 'receivable_payment_plans', value: plans }], [
+        { action: 'receivable_payment_plans.update', entityType: 'receivable_payment_plans', previous, next },
+      ]);
       return res.json(next);
     } catch (error) {
       return workflowErrorResponse(res, error, 'Не удалось обновить график погашения');

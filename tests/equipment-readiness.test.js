@@ -14,6 +14,11 @@ const {
   calculateEquipmentReadiness,
 } = require('../server/lib/equipment-readiness.js');
 const { registerEquipmentReadinessRoutes } = require('../server/routes/equipment-readiness.js');
+const {
+  applyEquipmentGsmConfigurationProjection,
+} = require('../server/lib/gsm/trusted-device-scope.js');
+
+const TEST_SCOPE = Object.freeze({ companyId: 'COMPANY-READINESS', tenantId: 'COMPANY-READINESS' });
 
 function baseEquipment(extra = {}) {
   return {
@@ -23,8 +28,45 @@ function baseEquipment(extra = {}) {
     manufacturer: 'LGMG',
     model: 'AS1413',
     status: 'available',
+    ...TEST_SCOPE,
     ...extra,
   };
+}
+
+function canonicalGsmDevice(equipment, extra = {}) {
+  const id = extra.id || `GDEV-${equipment.id}`;
+  const bindingRevision = Number(extra.bindingRevision) || 1;
+  const imei = extra.imei || `IMEI-${equipment.id}`;
+  const deviceId = extra.deviceId || `DEVICE-${equipment.id}`;
+  const device = {
+    id,
+    equipmentId: equipment.id,
+    imei,
+    deviceId,
+    trackerId: extra.trackerId || null,
+    protocol: extra.protocol || 'GPRS',
+    ingressCredentialConfigured: extra.ingressCredentialConfigured ?? true,
+    sim1: extra.sim1 || null,
+    status: extra.status || 'online',
+    companyId: equipment.companyId,
+    tenantId: equipment.tenantId,
+    bindingRevision,
+    ...extra,
+  };
+  if (!Array.isArray(device.bindingHistory)) {
+    device.bindingHistory = [{
+      revision: bindingRevision,
+      equipmentId: equipment.id,
+      companyId: equipment.companyId,
+      tenantId: equipment.tenantId,
+      imei: device.imei || null,
+      deviceId: device.deviceId || device.trackerId || null,
+      linkedAt: '2026-05-01T00:00:00.000Z',
+      unlinkedAt: null,
+      reason: 'test_provisioned',
+    }];
+  }
+  return device;
 }
 
 test('ready equipment without blockers returns ready', () => {
@@ -113,18 +155,202 @@ test('blocked equipment without reliable rate returns unavailable source and nul
 });
 
 test('conflicting readiness rules choose the higher-risk status', () => {
-  const equipment = baseEquipment({ gsmImei: '866123456789012' });
+  const originalEquipment = baseEquipment();
+  const device = canonicalGsmDevice(originalEquipment, { id: 'GDEV-1' });
+  const equipment = applyEquipmentGsmConfigurationProjection(originalEquipment, device);
   const result = calculateEquipmentReadiness(equipment, {
     equipment: [equipment],
     serviceTickets: [{ id: 'S-1', equipmentId: 'EQ-1', status: 'in_progress' }],
     deliveries: [{ id: 'D-1', equipmentId: 'EQ-1', status: 'sent' }],
-    gsmPackets: [],
+    gsmDevices: [device],
+    gsmPackets: [{
+      id: 'GPKT-1',
+      equipmentId: 'EQ-1',
+      gsmDeviceRecordId: 'GDEV-1',
+      gsmBindingRevision: 1,
+      receivedAt: '2026-05-20T11:00:00Z',
+      parseStatus: 'ok',
+    }],
   });
 
   assert.equal(result.readinessStatus, 'delivery_blocked');
   assert.match(result.blockers.join('\n'), /S-1/);
   assert.match(result.blockers.join('\n'), /D-1/);
   assert.match(result.blockers.join('\n'), /GSM/);
+});
+
+test('readiness ignores mutable inventory, serial, and GSM identifiers as relationships', () => {
+  const equipment = baseEquipment({ gsmImei: 'IMEI-LEGACY', gsmDeviceId: 'DEVICE-LEGACY' });
+  const result = calculateEquipmentReadiness(equipment, {
+    equipment: [equipment],
+    rentals: [{ id: 'R-legacy', equipmentInv: 'INV-1', status: 'active' }],
+    serviceTickets: [{ id: 'S-legacy', serialNumber: 'SN-1', status: 'in_progress' }],
+    deliveries: [{ id: 'D-legacy', inventoryNumber: 'INV-1', status: 'sent' }],
+    documents: [{ id: 'DOC-legacy', serialNumber: 'SN-1', status: 'missing' }],
+    gsmPackets: [{ id: 'G-legacy', imei: 'IMEI-LEGACY', receivedAt: '2026-05-20T11:00:00Z' }],
+  });
+
+  assert.equal(result.readinessStatus, 'ready');
+  assert.deepEqual(result.blockers, []);
+});
+
+test('readiness quarantines equipmentId-only GSM packets without an active device binding', () => {
+  const equipment = baseEquipment();
+  const result = calculateEquipmentReadiness(equipment, {
+    equipment: [equipment],
+    gsmDevices: [],
+    gsmPackets: [{
+      id: 'GPKT-legacy-direct',
+      equipmentId: 'EQ-1',
+      parseStatus: 'failed',
+      receivedAt: '2026-05-20T11:00:00Z',
+    }],
+  });
+
+  assert.equal(result.readinessStatus, 'ready');
+  assert.deepEqual(result.blockers, []);
+});
+
+test('readiness accepts GSM packets only through stable equipment/device-record linkage', () => {
+  const originalEquipment = baseEquipment({ gsmImei: 'IMEI-LEGACY' });
+  const device = canonicalGsmDevice(originalEquipment, { id: 'GDEV-1', imei: 'IMEI-LEGACY' });
+  const equipment = applyEquipmentGsmConfigurationProjection(originalEquipment, device);
+  const context = {
+    now: new Date('2026-05-20T12:00:00Z'),
+    equipment: [equipment],
+    gsmDevices: [device],
+    gsmPackets: [{
+      id: 'GPKT-wrong-device',
+      equipmentId: 'EQ-1',
+      gsmDeviceRecordId: 'GDEV-2',
+      gsmBindingRevision: 1,
+      receivedAt: '2026-05-20T11:00:00Z',
+    }],
+  };
+
+  assert.equal(calculateEquipmentReadiness(equipment, context).readinessStatus, 'gsm_attention');
+  const linkedContext = {
+    ...context,
+    gsmPackets: [{
+      id: 'GPKT-good',
+      equipmentId: 'EQ-1',
+      gsmDeviceRecordId: 'GDEV-1',
+      gsmBindingRevision: 1,
+      receivedAt: '2026-05-20T11:00:00Z',
+    }],
+  };
+  assert.equal(calculateEquipmentReadiness(equipment, linkedContext).readinessStatus, 'ready');
+});
+
+test('readiness uses server receipt time and fails closed on future GSM clocks', () => {
+  const originalEquipment = baseEquipment();
+  const device = canonicalGsmDevice(originalEquipment, { id: 'GDEV-FUTURE-CLOCK' });
+  const equipment = applyEquipmentGsmConfigurationProjection(originalEquipment, device);
+  const now = new Date('2026-05-20T12:00:00.000Z');
+  const basePacket = {
+    equipmentId: equipment.id,
+    gsmDeviceRecordId: device.id,
+    gsmBindingRevision: device.bindingRevision,
+    parseStatus: 'parsed',
+  };
+
+  const futureDeviceClock = calculateEquipmentReadiness(equipment, {
+    now,
+    equipment: [equipment],
+    gsmDevices: [device],
+    gsmPackets: [{
+      ...basePacket,
+      id: 'GPKT-FUTURE-DEVICE-CLOCK',
+      deviceTime: '2099-01-01T00:00:00.000Z',
+      receivedAt: '2026-05-16T11:59:59.000Z',
+    }],
+  });
+  assert.equal(futureDeviceClock.readinessStatus, 'gsm_attention');
+  assert.match(futureDeviceClock.blockers.join('\n'), /давно не выходил/);
+
+  const futureReceiptClock = calculateEquipmentReadiness(equipment, {
+    now,
+    equipment: [equipment],
+    gsmDevices: [device],
+    gsmPackets: [{
+      ...basePacket,
+      id: 'GPKT-FUTURE-RECEIPT-CLOCK',
+      deviceTime: '2026-05-20T11:59:00.000Z',
+      receivedAt: '2026-05-20T12:00:00.001Z',
+    }],
+  });
+  assert.equal(futureReceiptClock.readinessStatus, 'gsm_attention');
+  assert.match(futureReceiptClock.blockers.join('\n'), /будущую дату/);
+});
+
+test('readiness never treats a fresh outbound GSM row as tracker contact', () => {
+  const originalEquipment = baseEquipment();
+  const device = canonicalGsmDevice(originalEquipment, { id: 'GDEV-OUTBOUND' });
+  const equipment = applyEquipmentGsmConfigurationProjection(originalEquipment, device);
+  const packetScope = {
+    equipmentId: equipment.id,
+    gsmDeviceRecordId: device.id,
+    gsmBindingRevision: device.bindingRevision,
+    parseStatus: 'parsed',
+  };
+
+  const result = calculateEquipmentReadiness(equipment, {
+    now: new Date('2026-05-20T12:00:00.000Z'),
+    equipment: [equipment],
+    gsmDevices: [device],
+    gsmPackets: [
+      {
+        ...packetScope,
+        id: 'GPKT-STALE-INBOUND',
+        direction: 'inbound',
+        receivedAt: '2026-05-16T11:59:00.000Z',
+      },
+      {
+        ...packetScope,
+        id: 'GPKT-FRESH-OUTBOUND',
+        direction: 'outbound',
+        receivedAt: '2026-05-20T11:59:00.000Z',
+      },
+    ],
+  });
+
+  assert.equal(result.readinessStatus, 'gsm_attention');
+  assert.match(result.blockers.join('\n'), /давно не выходил/);
+});
+
+test('readiness quarantines stale GSM projections and invalid binding lifecycles', () => {
+  const originalEquipment = baseEquipment();
+  const device = canonicalGsmDevice(originalEquipment, { id: 'GDEV-STRICT' });
+  const equipment = applyEquipmentGsmConfigurationProjection(originalEquipment, device);
+  const failedPacket = {
+    id: 'GPKT-failed',
+    equipmentId: equipment.id,
+    gsmDeviceRecordId: device.id,
+    gsmBindingRevision: 1,
+    receivedAt: '2026-05-20T11:59:00.000Z',
+    parseStatus: 'failed',
+  };
+  const baseContext = {
+    now: new Date('2026-05-20T12:00:00.000Z'),
+    gsmPackets: [failedPacket],
+  };
+
+  const staleProjection = { ...equipment, gsmImei: 'STALE-IMEI' };
+  assert.equal(calculateEquipmentReadiness(staleProjection, {
+    ...baseContext,
+    equipment: [staleProjection],
+    gsmDevices: [device],
+  }).readinessStatus, 'ready');
+
+  const invalidLifecycle = {
+    ...device,
+    bindingHistory: [...device.bindingHistory, { ...device.bindingHistory[0] }],
+  };
+  assert.equal(calculateEquipmentReadiness(equipment, {
+    ...baseContext,
+    equipment: [equipment],
+    gsmDevices: [invalidLifecycle],
+  }).readinessStatus, 'ready');
 });
 
 test('fleet readiness summary counts practical statuses', () => {
@@ -146,7 +372,7 @@ test('fleet readiness summary counts practical statuses', () => {
 });
 
 test('fleet readiness builds direct lookup indexes for large related collections', () => {
-  const equipment = Array.from({ length: 200 }, (_, index) => baseEquipment({
+  const originalEquipment = Array.from({ length: 200 }, (_, index) => baseEquipment({
     id: `EQ-${index}`,
     inventoryNumber: `INV-${index}`,
     serialNumber: `SN-${index}`,
@@ -155,6 +381,13 @@ test('fleet readiness builds direct lookup indexes for large related collections
     gsmImei: `IMEI-${index}`,
     dailyRate: 5000 + index,
   }));
+  const gsmDevices = originalEquipment.map((item, index) => canonicalGsmDevice(item, {
+    id: `GDEV-${index}`,
+    imei: item.gsmImei,
+  }));
+  const equipment = originalEquipment.map((item, index) => (
+    applyEquipmentGsmConfigurationProjection(item, gsmDevices[index])
+  ));
   const serviceTickets = equipment
     .filter((_, index) => index % 5 === 0)
     .map(item => ({ id: `S-${item.id}`, equipmentId: item.id, status: 'new', createdAt: '2026-05-18' }));
@@ -165,8 +398,8 @@ test('fleet readiness builds direct lookup indexes for large related collections
     .filter((_, index) => index % 11 === 0)
     .map(item => ({ id: `DOC-${item.id}`, equipmentId: item.id, status: 'missing', createdAt: '2026-05-19' }));
   const gsmPackets = equipment.flatMap((item, index) => [
-    { id: `G-old-${item.id}`, imei: item.gsmImei, receivedAt: '2026-05-01T00:00:00.000Z', parseStatus: 'ok' },
-    { id: `G-new-${item.id}`, imei: item.gsmImei, receivedAt: `2026-05-${String((index % 20) + 1).padStart(2, '0')}T12:00:00.000Z`, parseStatus: index % 13 === 0 ? 'failed' : 'ok' },
+    { id: `G-old-${item.id}`, equipmentId: item.id, gsmDeviceRecordId: `GDEV-${index}`, gsmBindingRevision: 1, imei: item.gsmImei, receivedAt: '2026-05-01T00:00:00.000Z', parseStatus: 'ok' },
+    { id: `G-new-${item.id}`, equipmentId: item.id, gsmDeviceRecordId: `GDEV-${index}`, gsmBindingRevision: 1, imei: item.gsmImei, receivedAt: `2026-05-${String((index % 20) + 1).padStart(2, '0')}T12:00:00.000Z`, parseStatus: index % 13 === 0 ? 'failed' : 'ok' },
   ]);
   const context = {
     now: new Date('2026-05-20T12:00:00Z'),
@@ -175,6 +408,7 @@ test('fleet readiness builds direct lookup indexes for large related collections
     serviceTickets,
     deliveries,
     documents,
+    gsmDevices,
     gsmPackets,
     shippingPhotos: [],
   };
@@ -307,12 +541,13 @@ test('management action queue summary totals are correct', () => {
   assert.equal(queue.summary.byResponsibleArea.office, 1);
 });
 
-function createApp(stateOverride = {}) {
+function createApp(stateOverride = {}, readableOverride = null) {
   const state = {
     users: [
       { id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' },
       { id: 'U-mechanic', name: 'Механик', role: 'Механик', status: 'Активен' },
       { id: 'U-investor', name: 'Инвестор', role: 'Инвестор', status: 'Активен', ownerId: 'OWN-1' },
+      { id: 'U-technical-auditor', name: 'Технический аудитор', role: 'Технический аудитор', status: 'Активен' },
     ],
     equipment: [baseEquipment({ password: 'hidden', token: 'hidden-token' })],
     rentals: [],
@@ -320,6 +555,7 @@ function createApp(stateOverride = {}) {
     service: [],
     deliveries: [],
     documents: [],
+    gsm_devices: [],
     gsm_packets: [],
     shipping_photos: [],
     management_action_states: [],
@@ -336,8 +572,19 @@ function createApp(stateOverride = {}) {
     ['admin-token', 'U-admin'],
     ['mechanic-token', 'U-mechanic'],
     ['investor-token', 'U-investor'],
+    ['technical-auditor-token', 'U-technical-auditor'],
   ]);
-  const readable = new Set(['equipment', 'rentals', 'gantt_rentals', 'service', 'deliveries', 'documents', 'gsm_packets', 'shipping_photos']);
+  const readable = new Set(readableOverride || [
+    'equipment',
+    'rentals',
+    'gantt_rentals',
+    'service',
+    'deliveries',
+    'documents',
+    'gsm_devices',
+    'gsm_packets',
+    'shipping_photos',
+  ]);
 
   function requireAuth(req, res, next) {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -421,6 +668,164 @@ test('GET /api/equipment/readiness returns summary and does not expose secrets',
     assert.equal(payload.includes('hidden-token'), false);
     assert.equal(payload.includes('password'), false);
     assert.equal(payload.includes('token'), false);
+  });
+});
+
+test('readiness route uses only the current stable GSM device binding and revision', async () => {
+  const now = new Date().toISOString();
+  const currentEquipmentBase = baseEquipment({ id: 'EQ-current', inventoryNumber: 'INV-current' });
+  const currentDevice = canonicalGsmDevice(currentEquipmentBase, {
+    id: 'GDEV-current',
+    bindingRevision: 2,
+    status: 'online',
+    lastOnlineAt: now,
+  });
+  const created = createApp({
+    equipment: [
+      applyEquipmentGsmConfigurationProjection(currentEquipmentBase, currentDevice),
+      baseEquipment({ id: 'EQ-legacy', inventoryNumber: 'INV-legacy' }),
+    ],
+    gsm_devices: [currentDevice],
+    gsm_packets: [
+      {
+        id: 'GPKT-current',
+        ...TEST_SCOPE,
+        equipmentId: 'EQ-current',
+        gsmDeviceRecordId: 'GDEV-current',
+        gsmBindingRevision: 2,
+        parseStatus: 'failed',
+        receivedAt: now,
+      },
+      {
+        id: 'GPKT-stale-revision',
+        ...TEST_SCOPE,
+        equipmentId: 'EQ-current',
+        gsmDeviceRecordId: 'GDEV-current',
+        gsmBindingRevision: 1,
+        parseStatus: 'parsed',
+        receivedAt: new Date(Date.now() + 1000).toISOString(),
+      },
+      {
+        id: 'GPKT-legacy-direct',
+        ...TEST_SCOPE,
+        equipmentId: 'EQ-legacy',
+        parseStatus: 'failed',
+        receivedAt: now,
+      },
+    ],
+  });
+
+  await withServer(created.app, async (baseUrl) => {
+    for (const token of ['admin-token', 'mechanic-token']) {
+      const response = await getJson(baseUrl, '/api/equipment/readiness', token);
+      assert.equal(response.status, 200, token);
+      const byEquipmentId = Object.fromEntries(response.body.items.map(item => [item.equipmentId, item]));
+      assert.equal(byEquipmentId['EQ-current'].readinessStatus, 'gsm_attention', token);
+      assert.match(byEquipmentId['EQ-current'].blockers.join('\n'), /ошибкой/, token);
+      assert.equal(byEquipmentId['EQ-legacy'].readinessStatus, 'ready', token);
+    }
+  });
+});
+
+test('readiness route derives credentialConfigured from a stored hash without exposing it', async () => {
+  const now = new Date().toISOString();
+  const equipmentBase = baseEquipment({ id: 'EQ-hash-only', inventoryNumber: 'INV-hash-only' });
+  const device = canonicalGsmDevice(equipmentBase, {
+    id: 'GDEV-hash-only',
+    protocol: 'GPRS TCP',
+    ingressMode: 'tcp_device_credential',
+    ingressSecretHash: `scrypt$v1$${'a'.repeat(32)}$${'b'.repeat(64)}`,
+    status: 'online',
+    lastPacketAt: now,
+    lastOnlineAt: now,
+  });
+  delete device.ingressCredentialConfigured;
+  const equipment = applyEquipmentGsmConfigurationProjection(equipmentBase, device);
+  const created = createApp({
+    equipment: [equipment],
+    gsm_devices: [device],
+    gsm_packets: [{
+      id: 'GPKT-hash-only',
+      ...TEST_SCOPE,
+      equipmentId: equipment.id,
+      gsmDeviceRecordId: device.id,
+      gsmBindingRevision: device.bindingRevision,
+      direction: 'inbound',
+      parseStatus: 'parsed',
+      receivedAt: now,
+    }],
+  });
+
+  await withServer(created.app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/equipment/readiness', 'admin-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.items[0].readinessStatus, 'ready');
+    assert.doesNotMatch(JSON.stringify(response.body), /scrypt\$v1\$/);
+  });
+});
+
+test('readiness validates distinct secret-looking device identities before response redaction', async () => {
+  const equipmentBases = [
+    baseEquipment({ id: 'EQ-secret-identity-one', inventoryNumber: 'INV-secret-one' }),
+    baseEquipment({ id: 'EQ-secret-identity-two', inventoryNumber: 'INV-secret-two' }),
+  ];
+  const devices = equipmentBases.map((equipment, index) => {
+    const secretIdentity = `token:${index === 0 ? 'one-private-identity' : 'two-private-identity'}`;
+    const device = canonicalGsmDevice(equipment, {
+      id: `GDEV-secret-identity-${index + 1}`,
+      imei: null,
+      deviceId: secretIdentity,
+      protocol: 'GPRS TCP',
+      ingressMode: 'tcp_device_credential',
+      ingressSecretHash: `scrypt$v1$${String(index + 1).repeat(32)}$${String(index + 2).repeat(64)}`,
+      status: 'unknown',
+      lastPacketAt: null,
+      lastOnlineAt: null,
+    });
+    delete device.ingressCredentialConfigured;
+    return device;
+  });
+  const equipment = equipmentBases.map((record, index) => (
+    applyEquipmentGsmConfigurationProjection(record, devices[index])
+  ));
+  const created = createApp({ equipment, gsm_devices: devices, gsm_packets: [] });
+
+  await withServer(created.app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/equipment/readiness', 'admin-token');
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.items.map(item => item.readinessStatus), ['gsm_attention', 'gsm_attention']);
+    for (const item of response.body.items) assert.match(item.blockers.join('\n'), /пакетов\/last seen нет/);
+    const serialized = JSON.stringify(response.body);
+    for (const secret of ['one-private-identity', 'two-private-identity', 'scrypt$v1$']) {
+      assert.doesNotMatch(serialized, new RegExp(secret.replaceAll('$', '\\$')));
+    }
+  });
+});
+
+test('equipment readiness cannot derive blockers from collections the actor cannot read', async () => {
+  const created = createApp({
+    equipment: [baseEquipment({ id: 'EQ-visible', status: 'available' })],
+    service: [{
+      id: 'S-hidden',
+      equipmentId: 'EQ-visible',
+      status: 'in_progress',
+      description: 'restricted service context',
+    }],
+    documents: [{
+      id: 'DOC-hidden',
+      equipmentId: 'EQ-visible',
+      status: 'missing',
+    }],
+  }, ['equipment']);
+
+  await withServer(created.app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/equipment/readiness', 'technical-auditor-token');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.items[0].readinessStatus, 'ready');
+    const payload = JSON.stringify(response.body);
+    assert.equal(payload.includes('S-hidden'), false);
+    assert.equal(payload.includes('DOC-hidden'), false);
+    assert.equal(payload.includes('restricted service context'), false);
   });
 });
 
@@ -751,13 +1156,45 @@ test('GET /api/management/action-queue?view=attention returns compact summary gr
   });
 });
 
+test('GET /api/management/action-queue?view=attention preserves proven canonical action identities', async () => {
+  const equipmentId = 'token:canonical-equipment';
+  const actionId = `equipment_readiness:${equipmentId}:in_service`;
+  await withServer(createApp({
+    equipment: [baseEquipment({
+      id: equipmentId,
+      inventoryNumber: 'INV-canonical-attention',
+      status: 'in_service',
+      dailyRate: 12000,
+    })],
+    service: [{
+      id: 'S-canonical-attention',
+      equipmentId,
+      status: 'new',
+      createdAt: '2026-05-18',
+    }],
+  }).app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/management/action-queue?view=attention', 'admin-token');
+    assert.equal(response.status, 200);
+    const item = [
+      ...response.body.groups.critical,
+      ...response.body.groups.today,
+      ...response.body.groups.unassigned,
+      ...response.body.groups.topLoss,
+    ].find(candidate => candidate.equipmentId === equipmentId);
+    assert.ok(item);
+    assert.equal(item.equipmentId, equipmentId);
+    assert.equal(item.actionId, actionId);
+    assert.equal(item.links.equipment, `/equipment/${encodeURIComponent(equipmentId)}`);
+  });
+});
+
 test('GET /api/management/action-queue?view=attention preserves role visibility', async () => {
   await withServer(createApp({
     equipment: [
       baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 5000 }),
       baseEquipment({ id: 'EQ-delivery', inventoryNumber: 'INV-delivery', dailyRate: 8000 }),
     ],
-    service: [{ id: 'S-service', equipmentId: 'EQ-service', status: 'new', createdAt: '2026-05-18' }],
+    service: [{ id: 'S-service', equipmentId: 'EQ-service', assignedMechanicId: 'U-mechanic', status: 'new', createdAt: '2026-05-18' }],
     deliveries: [{ id: 'D-delivery', equipmentId: 'EQ-delivery', status: 'sent', scheduledDate: '2026-05-18' }],
   }).app, async (baseUrl) => {
     const mechanic = await getJson(baseUrl, '/api/management/action-queue?view=attention', 'mechanic-token');
@@ -844,10 +1281,18 @@ test('PATCH /api/management/action-queue/:actionId/state validates status and au
       dueDate: '2026-02-31',
     }, 'admin-token');
     assert.equal(badDate.status, 400);
+
+    const unknownAssignee = await patchJson(baseUrl, `/api/management/action-queue/${encodeURIComponent(actionId)}/state`, {
+      status: 'resolved',
+      assignedToUserId: 'U-other-tenant',
+      assignedToName: 'Spoofed name',
+    }, 'admin-token');
+    assert.equal(unknownAssignee.status, 409);
+    assert.equal(unknownAssignee.body.code, 'ACTION_ASSIGNEE_UNAVAILABLE');
   });
 });
 
-test('PATCH /api/management/action-queue/:actionId/state denies roles outside action scope', async () => {
+test('PATCH /api/management/action-queue/:actionId/state hides actions outside the actor read scope', async () => {
   const actionId = 'equipment_readiness:EQ-service:in_service';
   await withServer(createApp({
     equipment: [baseEquipment({ id: 'EQ-service', inventoryNumber: 'INV-service', status: 'in_service', dailyRate: 30000, ownerId: 'OWN-1' })],
@@ -856,7 +1301,7 @@ test('PATCH /api/management/action-queue/:actionId/state denies roles outside ac
     const response = await patchJson(baseUrl, `/api/management/action-queue/${encodeURIComponent(actionId)}/state`, {
       status: 'resolved',
     }, 'investor-token');
-    assert.equal(response.status, 403);
+    assert.equal(response.status, 404);
   });
 });
 
@@ -884,7 +1329,7 @@ test('management action state persists across generated queue recalculation', as
   });
 });
 
-test('GET /api/equipment/readiness calculates blockers even when related collections are not directly readable', async () => {
+test('GET /api/equipment/readiness does not infer blockers from unreadable related collections', async () => {
   const state = {
     users: [{ id: 'U-mechanic', name: 'Механик', role: 'Механик', status: 'Активен' }],
     equipment: [baseEquipment()],
@@ -922,7 +1367,46 @@ test('GET /api/equipment/readiness calculates blockers even when related collect
   await withServer(app, async (baseUrl) => {
     const response = await getJson(baseUrl, '/api/equipment/readiness', 'mechanic-token');
     assert.equal(response.status, 200);
-    assert.equal(response.body.items[0].readinessStatus, 'rented');
-    assert.equal(JSON.stringify(response.body).includes('R-1'), true);
+    assert.equal(response.body.items[0].readinessStatus, 'ready');
+    assert.equal(JSON.stringify(response.body).includes('R-1'), false);
+  });
+});
+
+test('investor readiness cannot infer restricted GSM stale or parse-error state', async () => {
+  const now = new Date().toISOString();
+  const equipment = baseEquipment({
+    id: 'EQ-INVESTOR-GSM',
+    inventoryNumber: 'INV-INVESTOR-GSM',
+    ownerId: 'OWN-1',
+    status: 'available',
+  });
+  const device = canonicalGsmDevice(equipment, {
+    id: 'GDEV-INVESTOR-GSM',
+    status: 'offline',
+    lastOnlineAt: '2020-01-01T00:00:00.000Z',
+  });
+  const created = createApp({
+    equipment: [applyEquipmentGsmConfigurationProjection(equipment, device)],
+    gsm_devices: [device],
+    gsm_packets: [{
+      id: 'GPKT-INVESTOR-GSM',
+      equipmentId: equipment.id,
+      gsmDeviceRecordId: device.id,
+      gsmBindingRevision: device.bindingRevision,
+      parseStatus: 'failed',
+      parseError: 'restricted_parser_failure',
+      receivedAt: now,
+    }],
+  }, ['equipment']);
+
+  await withServer(created.app, async (baseUrl) => {
+    for (const token of ['investor-token', 'technical-auditor-token']) {
+      const response = await getJson(baseUrl, '/api/equipment/readiness', token);
+      assert.equal(response.status, 200, token);
+      const serialized = JSON.stringify(response.body);
+      assert.equal(serialized.includes('gsm_attention'), false, token);
+      assert.equal(serialized.includes('restricted_parser_failure'), false, token);
+      assert.equal(serialized.includes('GPKT-INVESTOR-GSM'), false, token);
+    }
   });
 });

@@ -4,6 +4,11 @@ const {
   buildManagementActionQueue,
   buildManagementActionQueueFromReadiness,
 } = require('../lib/equipment-readiness');
+const {
+  sanitizeGsmRecordForRead,
+  sanitizeTrustedGsmRecordForRead,
+} = require('../lib/gsm/secret-redaction');
+const { EQUIPMENT_GSM_CONFIGURATION_PROJECTION_FIELDS } = require('../lib/gsm/trusted-device-scope');
 
 const ACTION_STATE_COLLECTION = 'management_action_states';
 const ACTION_EXECUTION_STATUSES = new Set(['open', 'in_progress', 'postponed', 'resolved', 'ignored']);
@@ -39,6 +44,71 @@ function scopedCollection({ collection, req, readData, accessControl, canReadCol
 function internalCollection(readData, collection) {
   const data = readData(collection);
   return Array.isArray(data) ? data : [];
+}
+
+function permissionScopedGsmCollection({ collection, req, readData, canReadCollection }) {
+  if (typeof canReadCollection === 'function' && !canReadCollection(req, collection)) return [];
+  const companyId = String(req.actorScope?.companyId || req.user?.companyId || '').trim();
+  const tenantId = String(req.actorScope?.tenantId || req.user?.tenantId || '').trim();
+  const raw = internalCollection(readData, collection);
+  const tenantScoped = companyId && tenantId
+    ? raw.filter(item => (
+      String(item?.companyId || '').trim() === companyId
+      && String(item?.tenantId || '').trim() === tenantId
+    ))
+    : raw;
+  return tenantScoped.map((item) => {
+    if (collection === 'gsm_packets') {
+      return {
+        id: item?.id,
+        equipmentId: item?.equipmentId,
+        gsmDeviceRecordId: item?.gsmDeviceRecordId,
+        gsmBindingRevision: item?.gsmBindingRevision,
+        direction: item?.direction,
+        parseStatus: item?.parseStatus,
+        receivedAt: item?.receivedAt,
+        createdAt: item?.createdAt,
+      };
+    }
+    return {
+      id: item?.id,
+      equipmentId: item?.equipmentId,
+      companyId: item?.companyId,
+      tenantId: item?.tenantId,
+      imei: item?.imei,
+      deviceId: item?.deviceId,
+      trackerId: item?.trackerId,
+      sim1: item?.sim1,
+      protocol: item?.protocol,
+      ingressMode: item?.ingressMode,
+      ingressCredentialConfigured: Boolean(item?.ingressSecretHash || item?.ingressCredentialConfigured),
+      status: item?.status,
+      bindingRevision: item?.bindingRevision,
+      bindingHistory: item?.bindingHistory,
+      lastPacketAt: item?.lastPacketAt,
+      lastOnlineAt: item?.lastOnlineAt,
+      createdAt: item?.createdAt,
+      updatedAt: item?.updatedAt,
+    };
+  });
+}
+
+function gsmValidationEquipmentCollection({ req, readData, visibleEquipment }) {
+  const companyId = String(req.actorScope?.companyId || req.user?.companyId || '').trim();
+  const tenantId = String(req.actorScope?.tenantId || req.user?.tenantId || '').trim();
+  const visibleIds = new Set((visibleEquipment || []).map(item => String(item?.id || '').trim()).filter(Boolean));
+  return internalCollection(readData, 'equipment')
+    .filter(item => visibleIds.has(String(item?.id || '').trim()))
+    .filter(item => !companyId || !tenantId || (
+      String(item?.companyId || '').trim() === companyId
+      && String(item?.tenantId || '').trim() === tenantId
+    ))
+    .map(item => ({
+      id: item?.id,
+      companyId: item?.companyId,
+      tenantId: item?.tenantId,
+      ...Object.fromEntries(EQUIPMENT_GSM_CONFIGURATION_PROJECTION_FIELDS.map(field => [field, item?.[field]])),
+    }));
 }
 
 function managementActionAreasForUser(user, accessControl) {
@@ -317,6 +387,45 @@ function compactAttentionAction(item) {
   };
 }
 
+const TRUSTED_ATTENTION_LINK_PATTERNS = {
+  equipment: /^\/equipment\/[^/?#\s]+$/,
+  serviceTicket: /^\/service\/[^/?#\s]+$/,
+  delivery: /^\/deliveries\?deliveryId=[^&#\s]+$/,
+  document: /^\/documents\?documentId=[^&#\s]+$/,
+};
+
+function sanitizeAttentionAction(item) {
+  const sanitized = sanitizeTrustedGsmRecordForRead(item);
+  const equipmentId = String(item?.equipmentId || '');
+  const readinessStatus = String(item?.readinessStatus || '');
+  const expectedActionId = `equipment_readiness:${equipmentId}:${readinessStatus}`;
+  if (equipmentId && readinessStatus && String(item?.actionId || '') === expectedActionId) {
+    sanitized.actionId = expectedActionId;
+  }
+  const sourceLinks = item?.links && typeof item.links === 'object' ? item.links : {};
+  sanitized.links = Object.fromEntries(
+    Object.keys(TRUSTED_ATTENTION_LINK_PATTERNS).map((key) => {
+      const value = String(sourceLinks[key] || '');
+      return [key, TRUSTED_ATTENTION_LINK_PATTERNS[key].test(value) ? value : ''];
+    }),
+  );
+  return sanitized;
+}
+
+function sanitizeAttentionGroups(groups = {}) {
+  const source = groups && typeof groups === 'object' ? groups : {};
+  const sanitizeItems = value => (
+    Array.isArray(value) ? value.map(sanitizeAttentionAction) : []
+  );
+  return {
+    critical: sanitizeItems(source.critical),
+    today: sanitizeItems(source.today),
+    unassigned: sanitizeItems(source.unassigned),
+    topLoss: sanitizeItems(source.topLoss),
+    byResponsibleArea: sanitizeGsmRecordForRead(source.byResponsibleArea || []),
+  };
+}
+
 function attentionActionSort(left, right) {
   const priorityRank = { critical: 4, high: 3, medium: 2, low: 1 };
   return Number(right.isOverdue) - Number(left.isOverdue)
@@ -368,15 +477,26 @@ function buildAttentionActionQueueView(queue) {
 }
 
 function actionQueueContext({ readData, req, accessControl, canReadCollection }) {
+  // A derived readiness label is still a disclosure of its source data. Every
+  // input therefore follows the same collection permission and row scope as a
+  // direct read; no role may infer a restricted rental, service, or GSM fact.
+  const source = collection => (
+    collection === 'gsm_devices' || collection === 'gsm_packets'
+      ? permissionScopedGsmCollection({ collection, req, readData, canReadCollection })
+      : scopedCollection({ collection, req, readData, accessControl, canReadCollection })
+  );
+  const equipment = scopedCollection({ collection: 'equipment', req, readData, accessControl, canReadCollection });
   return {
-    equipment: scopedCollection({ collection: 'equipment', req, readData, accessControl, canReadCollection }),
-    rentals: internalCollection(readData, 'rentals'),
-    ganttRentals: internalCollection(readData, 'gantt_rentals'),
-    serviceTickets: internalCollection(readData, 'service'),
-    deliveries: internalCollection(readData, 'deliveries'),
-    documents: internalCollection(readData, 'documents'),
-    gsmPackets: internalCollection(readData, 'gsm_packets'),
-    shippingPhotos: internalCollection(readData, 'shipping_photos'),
+    equipment,
+    gsmValidationEquipment: gsmValidationEquipmentCollection({ req, readData, visibleEquipment: equipment }),
+    rentals: source('rentals'),
+    ganttRentals: source('gantt_rentals'),
+    serviceTickets: source('service'),
+    deliveries: source('deliveries'),
+    documents: source('documents'),
+    gsmDevices: source('gsm_devices'),
+    gsmPackets: source('gsm_packets'),
+    shippingPhotos: source('shipping_photos'),
   };
 }
 
@@ -388,6 +508,7 @@ function contextCounts(context, actionStates = []) {
     service: context.serviceTickets.length,
     deliveries: context.deliveries.length,
     documents: context.documents.length,
+    gsmDevices: context.gsmDevices.length,
     gsmPackets: context.gsmPackets.length,
     shippingPhotos: context.shippingPhotos.length,
     actionStates: actionStates.length,
@@ -470,8 +591,8 @@ function registerEquipmentReadinessRoutes(deps) {
 
     return res.json({
       ok: true,
-      summary: report.summary,
-      items: report.items,
+      summary: sanitizeGsmRecordForRead(report.summary),
+      items: report.items.map(item => sanitizeTrustedGsmRecordForRead(item)),
     });
   });
 
@@ -494,15 +615,15 @@ function registerEquipmentReadinessRoutes(deps) {
       const attention = buildAttentionActionQueueView(visibleQueue);
       return res.json({
         ok: true,
-        summary: attention.summary,
-        groups: attention.groups,
+        summary: sanitizeGsmRecordForRead(attention.summary),
+        groups: sanitizeAttentionGroups(attention.groups),
       });
     }
 
     return res.json({
       ok: true,
-      summary: visibleQueue.summary,
-      items: visibleQueue.items,
+      summary: sanitizeGsmRecordForRead(visibleQueue.summary),
+      items: visibleQueue.items.map(item => sanitizeTrustedGsmRecordForRead(item)),
     });
   });
 
@@ -545,10 +666,20 @@ function registerEquipmentReadinessRoutes(deps) {
 
     const assignedToUserId = String(req.body?.assignedToUserId || '').trim();
     const users = internalCollection(readData, 'users');
-    const assignedUser = assignedToUserId ? users.find(user => String(user.id) === assignedToUserId) : null;
+    const assignedMatches = assignedToUserId
+      ? users.filter(user => String(user.id) === assignedToUserId && user.status === 'Активен')
+      : [];
+    if (assignedToUserId && assignedMatches.length !== 1) {
+      return res.status(409).json({
+        ok: false,
+        code: 'ACTION_ASSIGNEE_UNAVAILABLE',
+        error: 'Assignee is not an active member of this company.',
+      });
+    }
+    const assignedUser = assignedMatches[0] || null;
     const assignedToName = assignedUser?.name
       ? String(assignedUser.name)
-      : String(req.body?.assignedToName || '').trim().slice(0, 120);
+      : '';
     const comment = String(req.body?.comment || '').trim().slice(0, MAX_ACTION_COMMENT_LENGTH);
     const nowIso = new Date().toISOString();
     const states = readActionStates(readData);

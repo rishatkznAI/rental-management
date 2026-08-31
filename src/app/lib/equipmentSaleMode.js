@@ -1,3 +1,5 @@
+import { hasMeaningfulEquipmentGsmData } from './gsmSignalState.js';
+
 function text(value) {
   return String(value ?? '').trim();
 }
@@ -144,15 +146,9 @@ export function getSaleOperationHistory(equipment = {}, context = {}) {
   const serviceTickets = context.serviceTickets || context.serviceHistory || [];
   const rentalRevenue = Number(context.rentalRevenue ?? context.revenue ?? equipment.rentalRevenue ?? equipment.totalRentalRevenue ?? 0) || 0;
   const hasMaintenance = Boolean(text(equipment.maintenanceCHTO) || text(equipment.maintenancePTO));
-  const hasGsm = Boolean(
-    text(equipment.gsmImei)
-    || text(equipment.gsmDeviceId)
-    || text(equipment.gsmTrackerId)
-    || text(equipment.gsmStatus)
-    || text(equipment.gsmSignalStatus)
-    || text(equipment.gsmLastSeenAt)
-    || text(equipment.gsmLastSignalAt)
-  );
+  const hasGsm = equipment.gsmBindingVerified === true
+    && equipment.gsmTelemetryVerified === true
+    && hasMeaningfulEquipmentGsmData(equipment);
   const hasServiceHistory = hasItems(serviceTickets);
   const hasRentalHistory = hasItems(rentals) || hasNumber(context.rentalCount) || hasNumber(equipment.rentalCount);
   const hasRevenue = rentalRevenue > 0;

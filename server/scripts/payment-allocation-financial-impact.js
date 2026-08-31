@@ -28,7 +28,7 @@ function printUsage() {
     '  node server/scripts/payment-allocation-financial-impact.js [--db /path/to/backup.sqlite] [--json]',
     '',
     'Runs the Stage J-H1.3 historical Payment/PaymentAllocation financial-impact diagnostic.',
-    'DB_PATH is used when --db is omitted; otherwise server/data/app.sqlite is the default.',
+    'An explicit --db path is required.',
     'The database is opened with SQLite readonly + fileMustExist. No apply or write mode exists.',
   ].join('\n'));
 }
@@ -94,11 +94,8 @@ function printHuman({ dbPath, diagnostic }) {
 }
 
 function resolveDatabasePath(argumentPath) {
-  return path.resolve(
-    argumentPath
-      || process.env.DB_PATH
-      || path.join(__dirname, '..', 'data', 'app.sqlite'),
-  );
+  if (!argumentPath) throw new Error('Refusing diagnostics without an explicit --db path.');
+  return path.resolve(argumentPath);
 }
 
 function main(argv = process.argv.slice(2)) {

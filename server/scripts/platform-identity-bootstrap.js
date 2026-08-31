@@ -6,20 +6,27 @@ const Database = require('better-sqlite3');
 const {
   runPlatformIdentityBootstrap,
 } = require('../lib/platform-identity-bootstrap');
+const {
+  assertAuditedMaintenanceApplyUnavailable,
+  resolveExplicitDatabasePath,
+} = require('../lib/maintenance-script-safety');
 
 function parseArgs(argv) {
   const [mode, ...rest] = argv;
   const values = { mode, explicitApply: false };
+  const valued = new Set(['--db', '--config', '--expected-checksum']);
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index];
     if (argument === '--apply') {
       values.explicitApply = true;
       continue;
     }
-    if (argument.startsWith('--')) {
-      values[argument.slice(2)] = rest[index + 1];
+    if (valued.has(argument)) {
+      values[argument.slice(2)] = rest[index + 1] || '';
       index += 1;
+      continue;
     }
+    throw new Error(`Unknown argument: ${argument}`);
   }
   return values;
 }
@@ -29,14 +36,14 @@ function main() {
   if (!['inspect', 'validate', 'plan', 'apply'].includes(args.mode)) {
     throw new Error('Usage: platform-identity-bootstrap.js <inspect|validate|plan|apply> --db <path> [--config <path>] [--expected-checksum <sha256>] [--apply]');
   }
-  const dbPath = path.resolve(args.db || process.env.DB_PATH || path.join(__dirname, '..', 'data', 'app.sqlite'));
-  const readonly = args.mode !== 'apply';
-  const db = new Database(dbPath, { readonly, fileMustExist: true });
+  const dbPath = resolveExplicitDatabasePath(args.db);
+  assertAuditedMaintenanceApplyUnavailable(args.mode === 'apply' || args.explicitApply, 'standalone platform-identity bootstrap');
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     db.pragma('foreign_keys = ON');
     const config = args.mode === 'inspect'
       ? undefined
-      : JSON.parse(fs.readFileSync(path.resolve(args.config), 'utf8'));
+      : JSON.parse(fs.readFileSync(path.resolve(String(args.config || '')), 'utf8'));
     const result = runPlatformIdentityBootstrap({
       db,
       mode: args.mode,

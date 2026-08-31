@@ -21,6 +21,7 @@ import { api } from './api';
 
 export type UserRole =
   | 'Администратор'
+  | 'Технический аудитор'
   | 'Инвестор'
   | 'Руководитель'
   | 'Менеджер по аренде'
@@ -71,6 +72,7 @@ export const MECHANIC_ROLES: UserRole[] = [
 ];
 
 export const WARRANTY_MECHANIC_ROLE: UserRole = 'Механик по гарантии';
+export const TECHNICAL_AUDITOR_ROLE: UserRole = 'Технический аудитор';
 export const WARRANTY_MECHANIC_ROLE_ALIASES: UserRole[] = [
   'механик по гарантии',
   'warranty_mechanic',
@@ -119,6 +121,8 @@ const ROLE_ALIASES = new Map<string, string>([
   ['manager_head', 'Руководитель'],
   ['supervisor', 'Руководитель'],
   ['director_viewer', 'Руководитель'],
+  ['technical_auditor', TECHNICAL_AUDITOR_ROLE],
+  ['smoke_reader', TECHNICAL_AUDITOR_ROLE],
 ]);
 
 type UserWithManagerRole = {

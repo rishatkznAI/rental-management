@@ -13,9 +13,11 @@ const express = serverRequire('express');
 const Database = serverRequire('better-sqlite3');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { createAuditLogger } = require('../server/lib/security-audit.js');
 const { createBusinessNumberingService } = require('../server/lib/business-numbering.js');
 const { createNumberSequenceAllocator } = require('../server/lib/number-sequences.js');
 const { createServiceCore } = require('../server/lib/service-core.js');
+const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
 const { backfillServiceTicketCreatedAt, normalizeServiceTicketForWrite } = require('../server/lib/service-dto.js');
 const { startServer } = require('../server/lib/startup.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
@@ -36,6 +38,7 @@ function createState() {
     payments: [],
     documents: [],
     service_audit_log: [],
+    audit_logs: [],
   };
 }
 
@@ -43,7 +46,13 @@ function createApp(state = createState()) {
   const app = express();
   app.use(express.json());
   const readData = name => state[name] || [];
-  const writeData = (name, value) => { state[name] = value; };
+  let businessNumbering = null;
+  let persistCanonicalDataBatch = null;
+  let nextBatchFailure = null;
+  const writeData = (name, value) => persistCanonicalDataBatch.immediate([{ name, value }]);
+  const writeDataBatch = entries => {
+    persistCanonicalDataBatch.immediate(entries);
+  };
   const accessControl = createAccessControl({ readData });
   const nowValues = [
     '2026-05-18T10:00:00.000Z',
@@ -53,24 +62,72 @@ function createApp(state = createState()) {
   let nowIndex = 0;
   const nowIso = () => nowValues[Math.min(nowIndex++, nowValues.length - 1)];
   const numberingDb = new Database(':memory:');
+  numberingDb.exec(`
+    CREATE TABLE app_data (
+      name TEXT PRIMARY KEY,
+      json TEXT NOT NULL
+    )
+  `);
   const allocator = createNumberSequenceAllocator({
     db: numberingDb,
     nowIso: () => '2026-05-18T10:00:00.000Z',
   });
-  const businessNumbering = createBusinessNumberingService({
+  businessNumbering = createBusinessNumberingService({
     allocator,
     readData,
     nowIso: () => '2026-05-18T10:00:00.000Z',
   });
+  const upsertAppData = numberingDb.prepare(`
+    INSERT INTO app_data (name, json)
+    VALUES (?, ?)
+    ON CONFLICT(name) DO UPDATE SET json = excluded.json
+  `);
+  persistCanonicalDataBatch = numberingDb.transaction(entries => {
+    businessNumbering.preparePersistenceEntries(entries);
+    if (nextBatchFailure) {
+      const error = nextBatchFailure;
+      nextBatchFailure = null;
+      throw error;
+    }
+    const staged = (entries || []).map(entry => ({
+      name: entry.name,
+      value: structuredClone(entry.value),
+    }));
+    for (const entry of staged) {
+      upsertAppData.run(entry.name, JSON.stringify(entry.value));
+      state[entry.name] = entry.value;
+    }
+  });
   const serviceCore = createServiceCore({
     readData,
     writeData,
+    writeDataBatch,
     nowIso: () => '2026-05-18T10:00:00.000Z',
     equipmentMatchesServiceTicket: (ticket, equipment) => ticket.equipmentId === equipment.id,
+  });
+  let auditSequence = 0;
+  const serviceAuditLog = createServiceAuditLog({
+    readData,
+    writeData,
+    generateId: prefix => `${prefix}-${++auditSequence}`,
+    nowIso: () => '2026-05-18T10:00:00.000Z',
+  });
+  const auditLog = createAuditLogger({
+    readData,
+    writeData,
+    generateId: prefix => `${prefix}-${++auditSequence}`,
+    nowIso: () => '2026-05-18T10:00:00.000Z',
   });
 
   app.use((req, _res, next) => {
     req.user = { userId: 'U-admin', userName: 'Админ', userRole: 'Администратор' };
+    req.actorScope = {
+      companyId: 'COMPANY-A',
+      tenantId: 'COMPANY-A',
+      membershipId: 'MEMBERSHIP-U-admin',
+      principalId: 'U-admin',
+      source: 'service-created-at-test',
+    };
     next();
   });
   app.use('/api', registerCrudRoutes({
@@ -78,6 +135,8 @@ function createApp(state = createState()) {
     idPrefixes: { service: 'S' },
     readData,
     writeData,
+    writeDataBatch,
+    writeServiceDataBatch: writeDataBatch,
     deleteSessionsForUserIds: () => {},
     requireAuth: (_req, _res, next) => next(),
     requireRead: () => (_req, _res, next) => next(),
@@ -94,14 +153,27 @@ function createApp(state = createState()) {
     generateId: prefix => `${prefix}-${readData('service').length + 1}`,
     nowIso,
     applyServiceTicketCreationEffects: serviceCore.applyServiceTicketCreationEffects,
+    persistServiceTicketUpdate: serviceCore.persistServiceTicketUpdate,
+    persistServiceTicketDeletion: serviceCore.persistServiceTicketDeletion,
+    persistServiceTicketBulkReplace: serviceCore.persistServiceTicketBulkReplace,
     accessControl,
-    auditLog: () => {},
-    serviceAuditLog: () => {},
+    auditLog,
+    serviceAuditLog,
     normalizeRecordClientLink: item => item,
     normalizeClientLinks: () => {},
     businessNumbering,
   }));
-  return { app, state, numberingDb };
+  return {
+    app,
+    state,
+    numberingDb,
+    failNextBatch() {
+      const error = new Error('Injected service batch failure');
+      error.code = 'INJECTED_SERVICE_BATCH_FAILURE';
+      error.status = 503;
+      nextBatchFailure = error;
+    },
+  };
 }
 
 async function withServer(app, fn) {
@@ -159,6 +231,7 @@ function createStartupDeps(state, writeEvents = []) {
     startWialonIpsGateway: () => {},
     dbPath: path.join(os.tmpdir(), 'startup-created-at-test.sqlite'),
     botToken: 'test-token',
+    runWithPlatformSystemScope: (_scope, operation) => operation(),
     readData,
     writeData,
     normalizeClientLinks: () => {},
@@ -245,6 +318,29 @@ test('backend creates service ticket createdAt when payload omits it', async () 
     assert.equal(response.body.createdBy, 'Админ');
     assert.equal(response.body.createdByName, 'Админ');
     assert.equal(state.service[0].createdAt, '2026-05-18T10:00:00.000Z');
+  });
+});
+
+test('service route rolls back numbering and app_data when its audited batch fails', async () => {
+  const context = createApp();
+
+  await withServer(context.app, async baseUrl => {
+    context.failNextBatch();
+    const failed = await request(baseUrl, 'POST', '/api/service', baseTicket);
+    assert.equal(failed.status, 503, JSON.stringify(failed.body));
+    assert.equal(failed.body.code, 'INJECTED_SERVICE_BATCH_FAILURE');
+    assert.equal(context.state.service.length, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM app_data').get().count, 0);
+
+    const created = await request(baseUrl, 'POST', '/api/service', baseTicket);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body.number, 'SRV-26-000001');
+    assert.equal(context.state.service[0].number, created.body.number);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 1);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 1);
+    assert.equal(context.numberingDb.prepare("SELECT COUNT(*) AS count FROM app_data WHERE name = 'service'").get().count, 1);
   });
 });
 
@@ -349,7 +445,7 @@ test('manual service createdAt backfill script dry-run does not write', () => {
   }
 });
 
-test('manual service createdAt backfill script apply updates only missing createdAt and is idempotent', () => {
+test('manual service createdAt raw apply is blocked and leaves every record unchanged', () => {
   const original = [
     { id: 'S-created', counterpartyId: 'CP-1', clientId: 'CL-1', rentalId: 'R-1', objectId: 'O-1', contractId: 'C-1', createdAt: '2026-04-01T08:00:00.000Z', updatedAt: '2026-04-01T08:00:00.000Z' },
     { id: 'S-created-date', counterpartyId: 'CP-2', clientId: 'CL-2', createdDate: '2026-05-01T08:00:00.000Z' },
@@ -359,37 +455,10 @@ test('manual service createdAt backfill script apply updates only missing create
 
   try {
     const first = runBackfillScript(['--apply'], dbPath);
-    const afterFirst = readServiceFromDb(dbPath);
-    const second = runBackfillScript(['--apply'], dbPath);
-    const afterSecond = readServiceFromDb(dbPath);
-
-    assert.equal(first.status, 0, first.stderr);
-    assert.match(first.stdout, /Mode: apply/);
-    assert.match(first.stdout, /Backup created:/);
-    assert.match(first.stdout, /Applied: changed=2/);
-    assert.equal(afterFirst[0].createdAt, original[0].createdAt);
-    assert.equal(afterFirst[1].createdAt, '2026-05-01T08:00:00.000Z');
-    assert.equal(afterFirst[2].createdAt, '2026-05-02T08:00:00.000Z');
-    assert.deepEqual(
-      afterFirst.map(item => ({
-        counterpartyId: item.counterpartyId,
-        clientId: item.clientId,
-        rentalId: item.rentalId,
-        objectId: item.objectId,
-        contractId: item.contractId,
-      })),
-      original.map(item => ({
-        counterpartyId: item.counterpartyId,
-        clientId: item.clientId,
-        rentalId: item.rentalId,
-        objectId: item.objectId,
-        contractId: item.contractId,
-      })),
-    );
-
-    assert.equal(second.status, 0, second.stderr);
-    assert.match(second.stdout, /Apply requested: nothing to update/);
-    assert.deepEqual(afterSecond, afterFirst);
+    assert.notEqual(first.status, 0);
+    assert.match(first.stderr, /raw offline apply is disabled/);
+    assert.deepEqual(readServiceFromDb(dbPath), original);
+    assert.equal(fs.existsSync(path.join(tempDir, 'backups')), false);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

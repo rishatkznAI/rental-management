@@ -132,7 +132,12 @@ function buildAuditDescription({ action, entityType, entityId, before, after, me
 }
 
 function normalizeAuditLogList(value) {
-  return Array.isArray(value) ? value : [];
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value;
+  const error = new Error('Stored audit history is malformed; refusing to overwrite it.');
+  error.code = 'AUDIT_HISTORY_SHAPE_INVALID';
+  error.status = 409;
+  throw error;
 }
 
 function createAuditEntry(reqOrUser, {
@@ -145,15 +150,30 @@ function createAuditEntry(reqOrUser, {
 } = {}, {
   generateId = prefix => `${prefix}-${Date.now()}`,
   nowIso = () => new Date().toISOString(),
+  auditKind = null,
 } = {}) {
   if (!action || !entityType) return null;
   const user = reqOrUser?.user || reqOrUser || {};
   const headers = reqOrUser?.headers || {};
-  const companyId = String(reqOrUser?.actorScope?.companyId || user.companyId || '').trim();
-  const tenantId = String(reqOrUser?.actorScope?.tenantId || user.tenantId || '').trim();
+  // Scope is accepted only from the trusted resolver output attached to the
+  // request. Mutable user/profile fields are display metadata, not authority.
+  const companyId = String(reqOrUser?.actorScope?.companyId || '').trim();
+  const tenantId = String(reqOrUser?.actorScope?.tenantId || '').trim();
   const trustedScope = companyId && tenantId && companyId === tenantId
     ? { companyId, tenantId }
-    : {};
+    : null;
+  if (!trustedScope && auditKind !== 'GLOBAL_SYSTEM') {
+    const error = new Error('Audit events require exact tenant scope or an explicit system-audit path.');
+    error.code = 'AUDIT_SCOPE_REQUIRED';
+    error.status = 403;
+    throw error;
+  }
+  if (trustedScope && auditKind === 'GLOBAL_SYSTEM') {
+    const error = new Error('Tenant requests cannot be downgraded to global system audit events.');
+    error.code = 'AUDIT_SCOPE_CONFLICT';
+    error.status = 403;
+    throw error;
+  }
   return {
     id: generateId('AUD'),
     userId: user.userId || user.id || null,
@@ -161,7 +181,8 @@ function createAuditEntry(reqOrUser, {
     role: user.userRole || user.role || null,
     rawRole: user.rawRole || user.role || null,
     normalizedRole: user.normalizedRole || user.userRole || user.role || null,
-    ...trustedScope,
+    ...(trustedScope || {}),
+    auditKind: trustedScope ? 'TENANT' : 'GLOBAL_SYSTEM',
     action,
     entityType,
     entityId: entityId || null,
@@ -182,35 +203,64 @@ function createAuditLogger({
   writeData,
   generateId = prefix => `${prefix}-${Date.now()}`,
   nowIso = () => new Date().toISOString(),
-  logger = console,
+  withTenantScope = (_scope, operation) => operation(),
+  withSystemScope = operation => operation(),
 }) {
-  return function auditLog(reqOrUser, {
-    action,
-    entityType,
-    entityId,
-    before = null,
-    after = null,
-    metadata = null,
-  } = {}) {
-    try {
-      const entry = createAuditEntry(reqOrUser, {
-        action,
-        entityType,
-        entityId,
-        before,
-        after,
-        metadata,
-      }, { generateId, nowIso });
-      if (!entry) return null;
-      const log = normalizeAuditLogList(readData(AUDIT_COLLECTION));
-      log.push(entry);
-      writeData(AUDIT_COLLECTION, log.slice(-10000));
+  function buildEntry(reqOrUser, event, auditKind = null) {
+    const {
+      action,
+      entityType,
+      entityId,
+      before = null,
+      after = null,
+      metadata = null,
+    } = event || {};
+    return createAuditEntry(reqOrUser, {
+      action,
+      entityType,
+      entityId,
+      before,
+      after,
+      metadata,
+    }, { generateId, nowIso, auditKind });
+  }
+
+  function appendPreparedEntries(entries) {
+    return [...normalizeAuditLogList(readData(AUDIT_COLLECTION)), ...entries];
+  }
+
+  function preparePersistenceEntry(reqOrUser, events, auditKind = null) {
+    const prepared = (Array.isArray(events) ? events : [events])
+      .map(event => buildEntry(reqOrUser, event, auditKind))
+      .filter(Boolean);
+    if (prepared.length === 0) return null;
+    return {
+      name: AUDIT_COLLECTION,
+      value: appendPreparedEntries(prepared),
+      auditEntries: prepared,
+    };
+  }
+
+  function buildAndPersist(reqOrUser, event, auditKind = null) {
+    const entry = buildEntry(reqOrUser, event, auditKind);
+    if (!entry) return null;
+    const persist = () => {
+      writeData(AUDIT_COLLECTION, appendPreparedEntries([entry]));
       return entry;
-    } catch (error) {
-      logger.warn?.('[AUDIT] Не удалось записать audit log:', error?.message || error);
-      return null;
+    };
+    if (entry.auditKind === 'TENANT') {
+      return withTenantScope({ companyId: entry.companyId, tenantId: entry.tenantId }, persist);
     }
-  };
+    return withSystemScope(persist);
+  }
+
+  function auditLog(reqOrUser, event = {}) {
+    return buildAndPersist(reqOrUser, event, null);
+  }
+  auditLog.system = (reqOrUser, event = {}) => buildAndPersist(reqOrUser, event, 'GLOBAL_SYSTEM');
+  auditLog.buildEntry = (reqOrUser, event = {}) => buildEntry(reqOrUser, event, null);
+  auditLog.preparePersistenceEntry = (reqOrUser, events = []) => preparePersistenceEntry(reqOrUser, events, null);
+  return auditLog;
 }
 
 module.exports = {

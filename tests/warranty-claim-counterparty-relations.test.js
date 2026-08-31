@@ -11,6 +11,8 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const Database = serverRequire('better-sqlite3');
 const express = serverRequire('express');
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { createBusinessNumberingService } = require('../server/lib/business-numbering.js');
+const { createNumberSequenceAllocator } = require('../server/lib/number-sequences.js');
 const { findRoleRemovalBlockers } = require('../server/lib/counterparty-role-profiles.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
 const {
@@ -387,7 +389,7 @@ test('repair is dry-run by default, fail-closed, precondition-aware, determinist
   }), error => error.code === 'WARRANTY_COUNTERPARTY_REPAIR_PRECONDITION_CHANGED');
 });
 
-test('offline CLI backs up before apply, changes only deterministic rows, and second apply is a no-op', () => {
+test('offline CLI dry-run is read-only and raw apply is blocked without mutation', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'warranty-counterparty-'));
   const dbPath = path.join(tempDir, 'migration.sqlite');
   const db = new Database(dbPath);
@@ -410,27 +412,55 @@ test('offline CLI backs up before apply, changes only deterministic rows, and se
     verify.close();
 
     const applied = run('--apply');
-    assert.equal(applied.status, 0, applied.stderr);
-    const result = JSON.parse(applied.stdout);
-    assert.ok(fs.existsSync(result.backupPath));
+    assert.notEqual(applied.status, 0);
+    assert.match(applied.stderr, /AUDITED_MAINTENANCE_RUNNER_REQUIRED/);
     verify = new Database(dbPath, { readonly: true });
-    const repaired = JSON.parse(verify.prepare('SELECT json FROM app_data WHERE name = ?').get('warranty_claims').json)[0];
+    const unchanged = JSON.parse(verify.prepare('SELECT json FROM app_data WHERE name = ?').get('warranty_claims').json)[0];
     verify.close();
-    assert.equal(repaired.counterpartyId, 'CP-1');
-    assert.equal(repaired.decision, 'unchanged');
-
-    const repeated = run('--apply');
-    assert.equal(repeated.status, 0, repeated.stderr);
-    assert.equal(JSON.parse(repeated.stdout).changed, false);
-    assert.equal(fs.readdirSync(path.join(tempDir, 'backups')).length, 1);
+    assert.equal(unchanged.counterpartyId, undefined);
+    assert.equal(unchanged.decision, 'unchanged');
+    assert.equal(fs.existsSync(path.join(tempDir, 'backups')), false);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
-async function withWarrantyCrud(data, user, run) {
+async function withWarrantyCrud(data, user, run, options = {}) {
   const readData = name => data.collections[name] || [];
+  let nextBatchFailure = null;
+  const numberingDb = options.businessNumbering ? new Database(':memory:') : null;
+  if (numberingDb) {
+    numberingDb.exec('CREATE TABLE app_data (name TEXT PRIMARY KEY, json TEXT NOT NULL)');
+  }
+  const businessNumbering = numberingDb ? createBusinessNumberingService({
+    allocator: createNumberSequenceAllocator({
+      db: numberingDb,
+      scope: { scopeType: 'company', scopeId: 'COMPANY-A' },
+      nowIso: () => '2026-08-13T12:00:00.000Z',
+    }),
+    readData,
+    nowIso: () => '2026-08-13T12:00:00.000Z',
+  }) : null;
+  const upsertAppData = numberingDb ? numberingDb.prepare(`
+    INSERT INTO app_data (name, json)
+    VALUES (?, ?)
+    ON CONFLICT(name) DO UPDATE SET json = excluded.json
+  `) : null;
+  const persistNumberedEntries = numberingDb ? numberingDb.transaction(entries => {
+    businessNumbering.preparePersistenceEntries(entries);
+    const canonical = canonicalizeWarrantyPersistenceEntries(entries, { readData });
+    if (nextBatchFailure) {
+      const error = nextBatchFailure;
+      nextBatchFailure = null;
+      throw error;
+    }
+    for (const entry of canonical) {
+      upsertAppData.run(entry.name, JSON.stringify(entry.value));
+      data.collections[entry.name] = entry.value;
+    }
+  }) : null;
   const persistEntries = entries => {
+    if (persistNumberedEntries) return persistNumberedEntries.immediate(entries);
     const canonical = canonicalizeWarrantyPersistenceEntries(entries, { readData });
     for (const entry of canonical) data.collections[entry.name] = entry.value;
   };
@@ -462,6 +492,7 @@ async function withWarrantyCrud(data, user, run) {
     auditLog: () => {},
     serviceAuditLog: () => {},
     normalizeRecordClientLink: item => item,
+    businessNumbering,
   }));
   const server = await new Promise(resolve => {
     const instance = app.listen(0, '127.0.0.1', () => resolve(instance));
@@ -475,11 +506,54 @@ async function withWarrantyCrud(data, user, run) {
     return { status: response.status, body: await response.json() };
   };
   try {
-    await run(request);
+    await run(request, {
+      numberingDb,
+      failNextBatch() {
+        const error = new Error('Injected warranty batch failure');
+        error.code = 'INJECTED_WARRANTY_BATCH_FAILURE';
+        error.status = 503;
+        nextBatchFailure = error;
+      },
+    });
   } finally {
     await new Promise(resolve => server.close(resolve));
+    numberingDb?.close();
   }
 }
+
+test('Warranty route rolls back numbering and app_data when canonical persistence fails', async () => {
+  const data = fixture();
+  const admin = { userId: 'U-admin', userName: 'Admin', userRole: 'Администратор' };
+  const payload = {
+    serviceTicketId: 'S-1',
+    equipmentId: 'EQ-1',
+    equipmentLabel: 'Lift',
+    factoryName: 'Factory',
+    failureDescription: 'Failure',
+    requestedResolution: 'Repair',
+    status: 'draft',
+    priority: 'medium',
+  };
+
+  await withWarrantyCrud(data, admin, async (request, context) => {
+    context.failNextBatch();
+    const failed = await request('POST', '/api/warranty_claims', payload);
+    assert.equal(failed.status, 503, JSON.stringify(failed.body));
+    assert.equal(failed.body.code, 'INJECTED_WARRANTY_BATCH_FAILURE');
+    assert.equal(data.collections.warranty_claims.length, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM app_data').get().count, 0);
+
+    const created = await request('POST', '/api/warranty_claims', payload);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body.number, 'WCL-26-000001');
+    assert.equal(data.collections.warranty_claims[0].number, created.body.number);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 1);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 1);
+    assert.equal(context.numberingDb.prepare("SELECT COUNT(*) AS count FROM app_data WHERE name = 'warranty_claims'").get().count, 1);
+  }, { businessNumbering: true });
+});
 
 test('generic Warranty CRUD canonicalizes POST/PATCH/PUT, decorates reads, filters by Counterparty ID, and keeps failures atomic', async () => {
   const data = fixture();

@@ -1,4 +1,5 @@
 export const SPARE_PARTS_CSV_COLUMNS = [
+  'ID',
   'Наименование',
   'Артикул',
   'Категория',
@@ -9,6 +10,7 @@ export const SPARE_PARTS_CSV_COLUMNS = [
 ];
 
 const HEADER_ALIASES = {
+  id: ['id', 'идентификатор', 'logical id', 'logicalid'],
   name: ['наименование', 'название', 'запчасть', 'name'],
   article: ['артикул', 'sku', 'код', 'номер'],
   category: ['категория', 'category'],
@@ -18,20 +20,27 @@ const HEADER_ALIASES = {
   comment: ['комментарий', 'примечание', 'comment', 'notes'],
 };
 
+const FORBIDDEN_IMPORT_HEADERS = new Map([
+  ['companyid', 'companyId'],
+  ['company id', 'companyId'],
+  ['tenantid', 'tenantId'],
+  ['tenant id', 'tenantId'],
+  ['platformdefaultid', 'platformDefaultId'],
+  ['platform default id', 'platformDefaultId'],
+  ['catalogorigin', 'catalogOrigin'],
+  ['catalog origin', 'catalogOrigin'],
+  ['physicalid', 'physicalId'],
+  ['physical id', 'physicalId'],
+  ['_physicalid', '_physicalId'],
+  ['_id', '_id'],
+]);
+
 function normalizeText(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
 function normalizeKey(value) {
   return normalizeText(value).toLowerCase().replace(/[ё]/g, 'е');
-}
-
-function normalizeDuplicateName(value) {
-  return normalizeKey(value);
-}
-
-function normalizeArticle(value) {
-  return normalizeKey(value);
 }
 
 function parsePrice(value) {
@@ -101,6 +110,13 @@ function resolveHeaderMap(headers) {
   return map;
 }
 
+function findForbiddenImportHeaders(headers) {
+  return [...new Set(headers
+    .map(normalizeKey)
+    .map(header => FORBIDDEN_IMPORT_HEADERS.get(header))
+    .filter(Boolean))];
+}
+
 function readCell(row, index) {
   return index === undefined ? '' : normalizeText(row[index]);
 }
@@ -125,6 +141,14 @@ export function buildSparePartsImportPlan(existingParts, csvText, options = {}) 
   }
 
   const headerMap = resolveHeaderMap(rows[0]);
+  const forbiddenHeaders = findForbiddenImportHeaders(rows[0]);
+  if (forbiddenHeaders.length > 0) {
+    return {
+      parts: existingParts.map(item => ({ ...item })),
+      stats: { ...stats, errors: 1 },
+      errors: [`Запрещены служебные колонки: ${forbiddenHeaders.join(', ')}`],
+    };
+  }
   if (headerMap.name === undefined) {
     return {
       parts: [...existingParts],
@@ -135,21 +159,32 @@ export function buildSparePartsImportPlan(existingParts, csvText, options = {}) 
 
   const now = options.now || new Date().toISOString();
   const parts = existingParts.map(item => ({ ...item }));
-  const existingIds = new Set(parts.map(item => String(item.id || '')));
-  const indexByArticle = new Map();
-  const indexByName = new Map();
+  const existingIds = new Set();
+  const indexById = new Map();
+  const invalidExistingIds = [];
 
-  const reindexPart = (part, index) => {
-    const articleKey = normalizeArticle(part.article || part.sku);
-    if (articleKey) indexByArticle.set(articleKey, index);
-    const nameKey = normalizeDuplicateName(part.name);
-    if (nameKey) indexByName.set(nameKey, index);
-  };
+  parts.forEach((item, index) => {
+    const id = typeof item?.id === 'string' ? item.id.trim() : '';
+    if (!id || id !== item.id || indexById.has(id)) {
+      invalidExistingIds.push(id || `#${index + 1}`);
+      return;
+    }
+    existingIds.add(id);
+    indexById.set(id, index);
+  });
+  if (invalidExistingIds.length > 0) {
+    return {
+      parts,
+      stats: { ...stats, errors: 1 },
+      errors: ['Текущий каталог содержит пустые или дублирующиеся ID; импорт запрещён'],
+    };
+  }
 
-  parts.forEach(reindexPart);
+  const seenExplicitIds = new Set();
 
   rows.slice(1).forEach((row, rowIndex) => {
     const displayRow = rowIndex + 2;
+    const explicitId = readCell(row, headerMap.id);
     const name = readCell(row, headerMap.name);
     if (!name) {
       stats.skipped += 1;
@@ -168,11 +203,22 @@ export function buildSparePartsImportPlan(existingParts, csvText, options = {}) 
     const category = readCell(row, headerMap.category);
     const manufacturer = readCell(row, headerMap.manufacturer);
     const comment = readCell(row, headerMap.comment);
-    const articleKey = normalizeArticle(article);
-    const nameKey = normalizeDuplicateName(name);
-    const existingIndex = articleKey && indexByArticle.has(articleKey)
-      ? indexByArticle.get(articleKey)
-      : indexByName.get(nameKey);
+
+    let existingIndex;
+    if (explicitId) {
+      if (seenExplicitIds.has(explicitId)) {
+        stats.errors += 1;
+        errors.push(`Строка ${displayRow}: ID ${explicitId} повторяется в файле`);
+        return;
+      }
+      seenExplicitIds.add(explicitId);
+      existingIndex = indexById.get(explicitId);
+      if (existingIndex === undefined) {
+        stats.errors += 1;
+        errors.push(`Строка ${displayRow}: неизвестный или недоступный ID ${explicitId}`);
+        return;
+      }
+    }
 
     const patch = {
       name,
@@ -194,7 +240,6 @@ export function buildSparePartsImportPlan(existingParts, csvText, options = {}) 
         id: parts[existingIndex].id,
         createdAt: parts[existingIndex].createdAt,
       };
-      reindexPart(parts[existingIndex], existingIndex);
       stats.updated += 1;
       return;
     }
@@ -206,11 +251,15 @@ export function buildSparePartsImportPlan(existingParts, csvText, options = {}) 
       createdAt: now,
     };
     parts.push(nextPart);
-    reindexPart(nextPart, parts.length - 1);
+    indexById.set(nextPart.id, parts.length - 1);
     stats.added += 1;
   });
 
-  return { parts, stats, errors };
+  return {
+    parts: errors.length > 0 ? existingParts.map(item => ({ ...item })) : parts,
+    stats,
+    errors,
+  };
 }
 
 function csvEscape(value) {
@@ -225,6 +274,7 @@ export function sparePartsToCsv(parts) {
   const rows = [
     SPARE_PARTS_CSV_COLUMNS,
     ...parts.map(part => [
+      part.id || '',
       part.name || '',
       part.article || part.sku || '',
       part.category || '',

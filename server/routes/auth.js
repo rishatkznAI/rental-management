@@ -5,6 +5,9 @@ function registerAuthRoutes(app, deps) {
   const {
     readData,
     writeData,
+    readAuthUsers = () => readData('users'),
+    writeAuthUsers = users => writeData('users', users),
+    rehashAuthUser = null,
     verifyPassword,
     hashPassword,
     needsPasswordRehash,
@@ -18,6 +21,9 @@ function registerAuthRoutes(app, deps) {
     getRoleAccessSummary,
     getAppDisabledConfig,
     sendAppDisabled,
+    isProductionValidationReadOnly = () => false,
+    isExactProductionSmokeReaderUser = () => false,
+    runProductionValidationLoginTransaction = operation => operation(),
     nowIso = () => new Date().toISOString(),
   } = deps;
 
@@ -58,12 +64,14 @@ function registerAuthRoutes(app, deps) {
 
   async function rejectLogin(req, res, login, status = 401, auditMetadata = {}) {
     recordFailedLogin(req, login);
-    auditLog?.(req, {
-      action: 'login.fail',
-      entityType: 'auth',
-      entityId: normalizeLoginInput(login) || null,
-      metadata: auditMetadata,
-    });
+    if (!isProductionValidationReadOnly()) {
+      auditLog?.system?.(req, {
+        action: 'login.fail',
+        entityType: 'auth',
+        entityId: normalizeLoginInput(login) || null,
+        metadata: auditMetadata,
+      });
+    }
     await sleep(Number(process.env.LOGIN_FAILURE_DELAY_MS || 250));
     return res.status(status).json({ ok: false, error: 'Неверный логин или пароль' });
   }
@@ -117,7 +125,7 @@ function registerAuthRoutes(app, deps) {
         return res.status(429).json({ ok: false, error: 'Слишком много попыток входа. Попробуйте позже.' });
       }
 
-      const users = readData('users') || [];
+      const users = readAuthUsers() || [];
       const { user, error: loginError } = resolveUserByLogin(users, loginValue);
 
       if (loginError) {
@@ -136,61 +144,100 @@ function registerAuthRoutes(app, deps) {
         return rejectLogin(req, res, loginValue, 401, { reason: 'carrier_bot_only' });
       }
 
+      const productionValidationLogin = isProductionValidationReadOnly();
+      if (productionValidationLogin && !isExactProductionSmokeReaderUser(user)) {
+        return res.status(503).json({
+          ok: false,
+          code: 'PRODUCTION_VALIDATION_SMOKE_IDENTITY_INVALID',
+          error: 'The approved production smoke reader identity is not exact.',
+        });
+      }
+
       if (!verifyPassword(password, user.password)) {
         return rejectLogin(req, res, loginValue, 401, { reason: 'invalid_credentials' });
       }
 
       clearLoginAttempts(req, loginValue);
 
+      let authenticatedUser = user;
       if (typeof needsPasswordRehash === 'function' && needsPasswordRehash(user.password)) {
-        const userIndex = users.findIndex(item => item.id === user.id);
-        if (userIndex >= 0) {
+        if (productionValidationLogin) {
+          return res.status(503).json({
+            ok: false,
+            code: 'PRODUCTION_VALIDATION_SMOKE_HASH_INVALID',
+            error: 'The production smoke reader credential is not in the approved immutable format.',
+          });
+        }
+        const nextPasswordHash = hashPassword(String(password));
+        if (typeof rehashAuthUser === 'function') {
+          authenticatedUser = rehashAuthUser({
+            userId: user.id,
+            expectedPasswordHash: user.password,
+            nextPasswordHash,
+          });
+          if (!authenticatedUser) {
+            return rejectLogin(req, res, loginValue, 401, { reason: 'credentials_changed_during_login' });
+          }
+        } else {
+          const userIndex = users.findIndex(item => item.id === user.id);
+          if (userIndex < 0) {
+            return rejectLogin(req, res, loginValue, 401, { reason: 'credentials_changed_during_login' });
+          }
           users[userIndex] = {
             ...users[userIndex],
-            password: hashPassword(String(password)),
+            password: nextPasswordHash,
           };
-          writeData('users', users);
+          writeAuthUsers(users);
+          authenticatedUser = users[userIndex];
         }
       }
 
-      const actorScope = resolveActorScope(user.id);
+      const actorScope = resolveActorScope(authenticatedUser.id);
       if (requireActorScopeOnLogin && !actorScope) {
-        auditLog?.(req, {
-          action: 'login.fail',
-          entityType: 'auth',
-          entityId: user.id,
-          metadata: { reason: 'actor_scope_incomplete' },
-        });
+        if (!productionValidationLogin) {
+          auditLog?.system?.(req, {
+            action: 'login.fail',
+            entityType: 'auth',
+            entityId: authenticatedUser.id,
+            metadata: { reason: 'actor_scope_incomplete' },
+          });
+        }
         return res.status(403).json({
           ok: false,
           code: 'ACTOR_SCOPE_INCOMPLETE',
           error: 'Trusted company/tenant scope пользователя не настроен.',
         });
       }
-      const token = createSession(user, actorScope);
-      console.log(`[AUTH] Вход: ${user.name} (${user.role})`);
-      auditLog?.({ ...req, actorScope, user: buildSessionUser(user, actorScope) }, {
-        action: 'login.success',
-        entityType: 'auth',
-        entityId: user.id,
-        after: { userId: user.id, email: user.email, role: user.role },
-      });
+      const persistSuccessfulLogin = () => {
+        const nextToken = createSession(authenticatedUser, actorScope);
+        auditLog?.({ ...req, actorScope, user: buildSessionUser(authenticatedUser, actorScope) }, {
+          action: 'login.success',
+          entityType: 'auth',
+          entityId: authenticatedUser.id,
+          after: { userId: authenticatedUser.id, email: authenticatedUser.email, role: authenticatedUser.role },
+        });
+        return nextToken;
+      };
+      const token = productionValidationLogin
+        ? runProductionValidationLoginTransaction(persistSuccessfulLogin)
+        : persistSuccessfulLogin();
+      console.log(`[AUTH] Вход: ${authenticatedUser.name} (${authenticatedUser.role})`);
 
       return res.json({
         ok: true,
         token,
         user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: normalizeRole(user.role),
-          rawRole: user.role,
-          normalizedRole: normalizeRole(user.role),
-          permissions: typeof getRoleAccessSummary === 'function' ? getRoleAccessSummary(user.role) : undefined,
-          profilePhoto: user.profilePhoto || undefined,
-          ownerId: user.ownerId || undefined,
-          ownerName: user.ownerName || undefined,
-          ...(user.carrierId ? { carrierId: user.carrierId } : {}),
+          id: authenticatedUser.id,
+          name: authenticatedUser.name,
+          email: authenticatedUser.email,
+          role: normalizeRole(authenticatedUser.role),
+          rawRole: authenticatedUser.role,
+          normalizedRole: normalizeRole(authenticatedUser.role),
+          permissions: typeof getRoleAccessSummary === 'function' ? getRoleAccessSummary(authenticatedUser.role) : undefined,
+          profilePhoto: authenticatedUser.profilePhoto || undefined,
+          ownerId: authenticatedUser.ownerId || undefined,
+          ownerName: authenticatedUser.ownerName || undefined,
+          ...(authenticatedUser.carrierId ? { carrierId: authenticatedUser.carrierId } : {}),
           ...(actorScope ? {
             companyId: actorScope.companyId,
             tenantId: actorScope.tenantId,
@@ -208,7 +255,7 @@ function registerAuthRoutes(app, deps) {
     const user = users.find(item => item.id === req.user.userId);
     if (!user || user.status !== 'Активен') {
       const auth = req.headers['authorization'];
-      if (auth?.startsWith('Bearer ')) {
+      if (!isProductionValidationReadOnly() && auth?.startsWith('Bearer ')) {
         destroySession(auth.slice(7));
       }
       return res.status(401).json({ ok: false, error: 'Аккаунт отключён или удалён' });

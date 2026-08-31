@@ -97,6 +97,7 @@ test('equipment downtime validation ignores orphan Gantt projections', () => {
   });
 
   assert.equal(result.ok, true);
+  assert.equal(result.downtime.equipmentId, 'EQ-1');
 });
 
 test('equipment downtime validation prefers equipment id over placeholder inventory matches', () => {

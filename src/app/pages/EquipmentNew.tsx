@@ -192,10 +192,6 @@ export default function EquipmentNew() {
     location: '',
     status: 'available',
     plannedMonthlyRevenue: '',
-    gsmImei: '',
-    gsmDeviceId: '',
-    gsmProtocol: '',
-    gsmSimNumber: '',
     notes: '',
   });
 
@@ -265,17 +261,6 @@ export default function EquipmentNew() {
       nextMaintenance:       new Date().toISOString().split('T')[0],
       maintenanceCHTO:       form.maintenanceCHTO || undefined,
       maintenancePTO:        form.maintenancePTO || undefined,
-      gsmImei:               form.gsmImei.trim() || null,
-      gsmDeviceId:           form.gsmDeviceId.trim() || null,
-      gsmProtocol:           form.gsmProtocol.trim() || null,
-      gsmSimNumber:          form.gsmSimNumber.trim() || null,
-      gsmLastSeenAt:         null,
-      gsmLastLat:            null,
-      gsmLastLng:            null,
-      gsmLastSpeed:          null,
-      gsmLastVoltage:        null,
-      gsmLastMotoHours:      null,
-      gsmStatus:             'unknown',
       notes:                 form.notes || undefined,
       history: [
         createAuditEntry(
@@ -783,36 +768,15 @@ export default function EquipmentNew() {
               </CardTitle>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Input
-                label="GSM IMEI"
-                placeholder="866123456789012"
-                value={form.gsmImei}
-                onChange={e => update('gsmImei', e.target.value)}
-              />
-              <Input
-                label="Device ID"
-                placeholder="TRACKER-001"
-                value={form.gsmDeviceId}
-                onChange={e => update('gsmDeviceId', e.target.value)}
-              />
-              <Input
-                label="SIM-карта"
-                placeholder="+7 999 000-00-00"
-                value={form.gsmSimNumber}
-                onChange={e => update('gsmSimNumber', e.target.value)}
-              />
-              <Input
-                label="Протокол"
-                placeholder="GT06 / Teltonika / Wialon IPS"
-                value={form.gsmProtocol}
-                onChange={e => update('gsmProtocol', e.target.value)}
-              />
+          <CardContent>
+            <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-4 dark:border-cyan-900/60 dark:bg-cyan-950/30">
+              <p className="text-sm font-medium text-cyan-950 dark:text-cyan-100">
+                GSM-устройство привязывается после создания техники в разделе GSM.
+              </p>
+              <FieldHint>
+                Сохраните карточку, затем используйте действие «Привязать трекер». IMEI, Device ID, SIM-карта и протокол появятся здесь как проекция канонической GSM-привязки.
+              </FieldHint>
             </div>
-            <FieldHint>
-              На первом этапе шлюз принимает сырые пакеты. IMEI или Device ID нужны для автоматической привязки пакета к этой технике.
-            </FieldHint>
           </CardContent>
         </Card>
 

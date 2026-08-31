@@ -337,6 +337,41 @@ test('real server preserves trusted actor scope and passes create-role-archive l
         { id: 'SETTING-A', key: 'tenant_label', value: 'A', companyId: 'company-a', tenantId: 'company-a' },
         { id: 'SETTING-B', key: 'tenant_label', value: 'B-secret', companyId: 'company-b', tenantId: 'company-b' },
       ],
+      knowledge_base_modules: [
+        { id: 'KB-A', title: 'Company A training', section: 'manager_training', audience: 'all', isActive: true, quiz: [], companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'KB-B', title: 'Company B confidential training', section: 'manager_training', audience: 'all', isActive: true, quiz: [], companyId: 'company-b', tenantId: 'company-b' },
+        { id: 'KB-LEGACY', title: 'Legacy unscoped training', section: 'manager_training', audience: 'all', isActive: true, quiz: [] },
+      ],
+      service_works: [
+        { id: 'SW-A', name: 'Company A labour rate', normHours: 1, ratePerHour: 2500, isActive: true, companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'SW-B', name: 'Company B confidential labour rate', normHours: 2, ratePerHour: 9000, isActive: true, companyId: 'company-b', tenantId: 'company-b' },
+        { id: 'SW-LEGACY', name: 'Legacy unscoped work', normHours: 1, ratePerHour: 1, isActive: true },
+      ],
+      spare_parts: [
+        { id: 'PART-A', name: 'Company A part', article: 'A-1', unit: 'шт', defaultPrice: 1000, isActive: true, companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'PART-B', name: 'Company B confidential part', article: 'B-SECRET', unit: 'шт', defaultPrice: 99000, isActive: true, companyId: 'company-b', tenantId: 'company-b' },
+        { id: 'PART-LEGACY', name: 'Legacy unscoped part', article: 'LEGACY', unit: 'шт', defaultPrice: 1, isActive: true },
+      ],
+      service_route_norms: [
+        { id: 'ROUTE-A', from: 'A depot', to: 'A site', distanceKm: 10, companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'ROUTE-B', from: 'B confidential depot', to: 'B site', distanceKm: 20, companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      service_work_catalog: [
+        { id: 'SWC-A', name: 'Company A legacy work', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'SWC-B', name: 'Company B confidential legacy work', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      spare_parts_catalog: [
+        { id: 'SPC-A', name: 'Company A legacy part', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'SPC-B', name: 'Company B confidential legacy part', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      service_work_names: [
+        { id: 'SWN-A', name: 'Company A work name', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'SWN-B', name: 'Company B confidential work name', companyId: 'company-b', tenantId: 'company-b' },
+      ],
+      spare_part_names: [
+        { id: 'SPN-A', name: 'Company A part name', companyId: 'company-a', tenantId: 'company-a' },
+        { id: 'SPN-B', name: 'Company B confidential part name', companyId: 'company-b', tenantId: 'company-b' },
+      ],
       audit_logs: [
         { id: 'AUDIT-A', action: 'equipment.read', entityType: 'equipment', createdAt: '2026-08-24T00:00:00.000Z', companyId: 'company-a', tenantId: 'company-a' },
         { id: 'AUDIT-B', action: 'equipment.secret', entityType: 'equipment', createdAt: '2026-08-24T00:00:00.000Z', companyId: 'company-b', tenantId: 'company-b' },
@@ -380,6 +415,88 @@ test('real server preserves trusted actor scope and passes create-role-archive l
     assert.equal(companyACounterparties.status, 200, JSON.stringify(companyACounterparties.body));
     assert.deepEqual(companyACounterparties.body.map(item => item.id), ['CP-A']);
     assert.equal(companyACounterparties.body.some(item => item.id === 'CP-B'), false);
+
+    for (const [route, expectedIds, forbiddenPattern] of [
+      ['/api/knowledge_base_modules', ['KB-LEGACY', 'KB-A'], /KB-B|confidential training/i],
+      ['/api/service_works', ['SW-LEGACY', 'SW-A'], /SW-B|confidential labour/i],
+      ['/api/spare_parts', ['PART-LEGACY', 'PART-A'], /PART-B|B-SECRET/i],
+      ['/api/service_route_norms', ['ROUTE-A'], /ROUTE-B|confidential depot/i],
+      ['/api/service_work_catalog', ['SWC-A'], /SWC-B|confidential legacy work/i],
+      ['/api/spare_parts_catalog', ['SPC-A'], /SPC-B|confidential legacy part/i],
+    ]) {
+      const response = await api(server.baseUrl, 'GET', route, { token });
+      assert.equal(response.status, 200, `${route}: ${JSON.stringify(response.body)}`);
+      assert.deepEqual(
+        response.body.map(item => item.id).sort(),
+        [...expectedIds].sort(),
+        route,
+      );
+      assert.doesNotMatch(JSON.stringify(response.body), forbiddenPattern, route);
+    }
+
+    const createdTenantWork = await api(server.baseUrl, 'POST', '/api/service_works', {
+      token,
+      body: { name: 'Company A created work', normHours: 1.5, ratePerHour: 3100, isActive: true },
+    });
+    assert.equal(createdTenantWork.status, 201, JSON.stringify(createdTenantWork.body));
+    const persistedTenantWork = await api(
+      server.baseUrl,
+      'GET',
+      `/api/service_works/${createdTenantWork.body.id}`,
+      { token },
+    );
+    assert.equal(persistedTenantWork.status, 200, JSON.stringify(persistedTenantWork.body));
+    assert.deepEqual(persistedTenantWork.body.catalogOrigin, {
+      kind: 'tenant_entry',
+      logicalId: createdTenantWork.body.id,
+      tenantMutable: true,
+    });
+    assert.equal(Object.hasOwn(persistedTenantWork.body, 'companyId'), false);
+    assert.equal(Object.hasOwn(persistedTenantWork.body, 'tenantId'), false);
+    assert.equal(Object.hasOwn(persistedTenantWork.body, 'platformDefaultId'), false);
+
+    const createdTenantModule = await api(server.baseUrl, 'POST', '/api/knowledge_base_modules', {
+      token,
+      body: {
+        title: 'Company A created module',
+        section: 'manager_training',
+        audience: 'all',
+        isActive: true,
+        quiz: [],
+      },
+    });
+    assert.equal(createdTenantModule.status, 201, JSON.stringify(createdTenantModule.body));
+    const persistedTenantModule = await api(
+      server.baseUrl,
+      'GET',
+      `/api/knowledge_base_modules/${createdTenantModule.body.id}`,
+      { token },
+    );
+    assert.equal(persistedTenantModule.status, 200, JSON.stringify(persistedTenantModule.body));
+    assert.deepEqual(persistedTenantModule.body.catalogOrigin, {
+      kind: 'tenant_entry',
+      logicalId: createdTenantModule.body.id,
+      tenantMutable: true,
+    });
+    assert.equal(Object.hasOwn(persistedTenantModule.body, 'companyId'), false);
+    assert.equal(Object.hasOwn(persistedTenantModule.body, 'tenantId'), false);
+    assert.equal(Object.hasOwn(persistedTenantModule.body, 'platformDefaultId'), false);
+
+    const replacedRoutes = await api(server.baseUrl, 'PUT', '/api/service_route_norms', {
+      token,
+      body: [{ id: 'ROUTE-A-NEW', from: 'A depot', to: 'A new site', distanceKm: 12 }],
+    });
+    assert.equal(replacedRoutes.status, 200, JSON.stringify(replacedRoutes.body));
+    const companyARoutes = await api(server.baseUrl, 'GET', '/api/service_route_norms', { token });
+    assert.deepEqual(companyARoutes.body.map(item => item.id), ['ROUTE-A-NEW']);
+    assert.deepEqual(companyARoutes.body[0].catalogOrigin, {
+      kind: 'tenant_entry',
+      logicalId: 'ROUTE-A-NEW',
+      tenantMutable: true,
+    });
+    assert.equal(Object.hasOwn(companyARoutes.body[0], 'companyId'), false);
+    assert.equal(Object.hasOwn(companyARoutes.body[0], 'tenantId'), false);
+    assert.equal(Object.hasOwn(companyARoutes.body[0], 'platformDefaultId'), false);
 
     const foreignCounterparty = await api(server.baseUrl, 'GET', '/api/counterparties/CP-B', { token });
     assert.equal(foreignCounterparty.status, 404, JSON.stringify(foreignCounterparty.body));
@@ -630,6 +747,26 @@ test('real server preserves trusted actor scope and passes create-role-archive l
       token: companyBLogin.body.token,
     });
     assert.deepEqual(companyBCounterparties.body.map(item => item.id), ['CP-B']);
+    const companyBWorks = await api(server.baseUrl, 'GET', '/api/service_works', {
+      token: companyBLogin.body.token,
+    });
+    assert.deepEqual(
+      companyBWorks.body.map(item => item.id).sort(),
+      ['SW-LEGACY', 'SW-B'].sort(),
+    );
+    assert.deepEqual(
+      companyBWorks.body.find(item => item.id === 'SW-LEGACY').catalogOrigin,
+      {
+        kind: 'platform_default',
+        logicalId: 'SW-LEGACY',
+        tenantMutable: false,
+      },
+    );
+    assert.doesNotMatch(JSON.stringify(companyBWorks.body), /SW-A|Company A created work/);
+    const companyBRoutes = await api(server.baseUrl, 'GET', '/api/service_route_norms', {
+      token: companyBLogin.body.token,
+    });
+    assert.deepEqual(companyBRoutes.body.map(item => item.id), ['ROUTE-B']);
     const companyBContract = await api(server.baseUrl, 'POST', '/api/client_contracts', {
       token: companyBLogin.body.token,
       body: { clientId: 'C-B', status: 'active' },

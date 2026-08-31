@@ -128,6 +128,17 @@ function createApp(state = createState()) {
   app.use(express.json());
   const readData = name => state[name] || [];
   const writeData = (name, value) => { state[name] = value; };
+  let nextBatchError = null;
+  const writeDataBatch = entries => {
+    if (nextBatchError) {
+      const error = nextBatchError;
+      nextBatchError = null;
+      throw error;
+    }
+    const staged = structuredClone(state);
+    for (const entry of entries) staged[entry.name] = structuredClone(entry.value);
+    Object.assign(state, staged);
+  };
   const accessControl = createAccessControl({ readData });
   let counter = 0;
 
@@ -142,6 +153,7 @@ function createApp(state = createState()) {
           : null;
     if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     req.user = { userId: user.id, userName: user.name, userRole: user.role };
+    req.actorScope = { companyId: 'COMPANY-RENTAL', tenantId: 'COMPANY-RENTAL' };
     return next();
   }
 
@@ -161,6 +173,8 @@ function createApp(state = createState()) {
   apiRouter.use(registerRentalRoutes({
     readData,
     writeData,
+    writeDataBatch,
+    writeAuditDataBatch: writeDataBatch,
     requireAuth,
     requireRead,
     validateRentalPayload,
@@ -177,7 +191,16 @@ function createApp(state = createState()) {
     auditLog,
   }));
   app.use('/api', apiRouter);
-  return { app, state };
+  return {
+    app,
+    state,
+    failNextBatch() {
+      const error = new Error('injected rental extension atomic batch failure');
+      error.code = 'INJECTED_BATCH_FAILURE';
+      error.status = 503;
+      nextBatchError = error;
+    },
+  };
 }
 
 async function withServer(app, fn) {
@@ -233,6 +256,37 @@ test('rental extension without conflict applies and synchronizes classic and gan
     assert.equal(state.gantt_rentals.find(item => item.id === 'GR-1').extensionConfirmedByClient, true);
     assert.equal(state.rental_change_requests.length, 0);
   });
+});
+
+test('rental extension and semantic audit roll back together on batch failure', async () => {
+  const { app, state, failNextBatch } = createApp();
+  state.rentals = state.rentals.filter(item => item.id !== 'R-conflict');
+  state.gantt_rentals = state.gantt_rentals.filter(item => item.id !== 'GR-conflict');
+  const before = structuredClone({
+    rentals: state.rentals,
+    gantt_rentals: state.gantt_rentals,
+    equipment: state.equipment,
+    audit_logs: state.audit_logs,
+  });
+  failNextBatch();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'admin-token', {
+      newPlannedReturnDate: DATES.extensionEnd,
+      reason: 'Atomic rollback',
+      confirmedByClient: true,
+      invoiceSentToClient: true,
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, 'INJECTED_BATCH_FAILURE');
+  });
+
+  assert.deepEqual({
+    rentals: state.rentals,
+    gantt_rentals: state.gantt_rentals,
+    equipment: state.equipment,
+    audit_logs: state.audit_logs,
+  }, before);
 });
 
 test('rental extension uses Classic authority over stale and orphan Gantt rows', async () => {
@@ -440,6 +494,31 @@ test('rental extension detects future equipment conflict and creates approval re
     assert.equal(state.rental_change_requests.length, 1);
     assert.equal(state.rental_change_requests[0].field, 'plannedReturnDate');
   });
+});
+
+test('conflicting extension approval request and semantic audit roll back together', async () => {
+  const { app, state, failNextBatch } = createApp();
+  const before = structuredClone({
+    requests: state.rental_change_requests,
+    audit: state.audit_logs,
+  });
+  failNextBatch();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'admin-token', {
+      newPlannedReturnDate: DATES.extensionEnd,
+      reason: 'Conflict atomic rollback',
+      confirmedByClient: true,
+      invoiceSentToClient: true,
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, 'INJECTED_BATCH_FAILURE');
+  });
+
+  assert.deepEqual({
+    requests: state.rental_change_requests,
+    audit: state.audit_logs,
+  }, before);
 });
 
 test('rental extension requires write access and writes safe audit events', async () => {

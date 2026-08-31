@@ -420,7 +420,29 @@ test('equipment registry GSM fallback distinguishes missing data and known signa
     className: 'bg-muted text-muted-foreground',
     dotClassName: 'bg-slate-400',
   });
-  assert.equal(hasEquipmentGsmData({ id: 'EQ-online', gsmStatus: 'online' }), true);
-  assert.equal(getEquipmentGsmDisplay({ id: 'EQ-online', gsmStatus: 'online' }).label, 'Онлайн');
-  assert.equal(getEquipmentGsmDisplay({ id: 'EQ-location', gsmSignalStatus: 'location_only' }).label, 'Нет связи');
+  const freshSignalAt = new Date().toISOString();
+  assert.equal(hasEquipmentGsmData({ id: 'EQ-online', gsmStatus: 'online', gsmLastSeenAt: freshSignalAt }), true);
+  assert.equal(getEquipmentGsmDisplay({
+    id: 'EQ-online',
+    gsmBindingVerified: true,
+    gsmStatus: 'online',
+    gsmLastSeenAt: freshSignalAt,
+  }).label, 'Онлайн');
+  assert.equal(getEquipmentGsmDisplay({ id: 'EQ-location', gsmBindingVerified: true, gsmSignalStatus: 'location_only' }).label, 'Нет связи');
+  assert.equal(getEquipmentGsmDisplay({
+    id: 'EQ-orphan',
+    gsmDeviceRecordId: 'GDEV-DANGLING',
+    gsmStatus: 'online',
+    gsmLastSeenAt: freshSignalAt,
+  }).label, 'Непроверенные данные');
+  assert.equal(hasEquipmentGsmData({
+    id: 'EQ-retired',
+    gsmStatus: 'unknown',
+    gsmSignalStatus: 'unknown',
+  }), false);
+  assert.equal(getEquipmentGsmDisplay({
+    id: 'EQ-retired',
+    gsmStatus: 'unknown',
+    gsmSignalStatus: 'unknown',
+  }).label, 'Нет данных');
 });

@@ -41,8 +41,8 @@ export const financeService = {
   ): Promise<FinanceAccount> =>
     api.patch<FinanceAccount>(`/api/finance/accounts/${id}`, data),
   transferBetweenAccounts: (data: {
-    accountFrom: string;
-    accountTo: string;
+    accountFromId: string;
+    accountToId: string;
     amount: number;
     date: string;
     description?: string;

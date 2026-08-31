@@ -1,5 +1,8 @@
 const { createHash, randomUUID } = require('node:crypto');
 const {
+  assertSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+const {
   CANONICAL_COMPANIES_TABLE,
   CANONICAL_RECEIVABLES_TABLE,
   FINANCIAL_AUDIT_EVENTS_TABLE,
@@ -558,6 +561,7 @@ function createSqliteReadEvidenceBoundary(db, recordEvidence) {
     return Object.fromEntries(metadata.map((column, index) => [column.name, values[index]]));
   }
   function executeRead(statement, sql, method, args, mode) {
+    assertSqliteReadonlyStatement(statement, 'canonical_actual_eligibility_evidence_read');
     const metadata = statement.columns();
     statement.raw(true).safeIntegers(true);
     const value = statement[method](...args);
@@ -586,6 +590,17 @@ function createSqliteReadEvidenceBoundary(db, recordEvidence) {
                   mode,
                 );
               }
+              if (statementProperty === 'iterate') {
+                return () => {
+                  assertSqliteReadonlyStatement(
+                    statementTarget,
+                    'canonical_actual_eligibility_evidence_iterate',
+                  );
+                  const error = new Error('SQLite evidence reads do not permit uncaptured iteration.');
+                  error.code = 'SQLITE_READ_EVIDENCE_ITERATE_UNSUPPORTED';
+                  throw error;
+                };
+              }
               if (['expand', 'pluck', 'raw', 'safeIntegers'].includes(statementProperty)) {
                 return (enabled = true) => {
                   mode[statementProperty] = Boolean(enabled);
@@ -594,6 +609,12 @@ function createSqliteReadEvidenceBoundary(db, recordEvidence) {
                       if (candidate !== statementProperty) mode[candidate] = false;
                     }
                   }
+                  return statementProxy;
+                };
+              }
+              if (statementProperty === 'bind') {
+                return (...args) => {
+                  statementTarget.bind(...args);
                   return statementProxy;
                 };
               }
@@ -610,6 +631,7 @@ function createSqliteReadEvidenceBoundary(db, recordEvidence) {
           }
           const sql = `PRAGMA ${source}`;
           const statement = target.prepare(sql);
+          assertSqliteReadonlyStatement(statement, 'canonical_actual_eligibility_evidence_pragma');
           const metadata = statement.columns();
           statement.raw(true).safeIntegers(true);
           const rows = statement.all();

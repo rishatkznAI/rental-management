@@ -30,6 +30,12 @@ function asArray(value) {
   return Array.isArray(value) ? value.filter(item => item && typeof item === 'object') : [];
 }
 
+function asMapValues(value) {
+  if (Array.isArray(value)) return asArray(value);
+  if (!value || typeof value !== 'object') return [];
+  return Object.values(value).filter(item => item && typeof item === 'object' && !Array.isArray(item));
+}
+
 function text(value) {
   return String(value ?? '').trim();
 }
@@ -317,8 +323,10 @@ function buildDataIntegrityDiagnostics(collections = {}, options = {}) {
   const owners = asArray(collections.owners);
   const mechanics = asArray(collections.mechanics);
   const carriers = asArray(collections.delivery_carriers);
-  const botUsers = asArray(collections.bot_users);
-  const botSessions = asArray(collections.bot_sessions);
+  const botUsers = asMapValues(collections.bot_users);
+  // MAX pre-auth sessions are system-global and can contain credentials or
+  // one-time challenges. Tenant diagnostics never inspect or count them, even
+  // if an unsafe caller accidentally supplies the collection.
   const botActivity = asArray(collections.bot_activity);
   const workItems = asArray(collections.repair_work_items);
   const partItems = asArray(collections.repair_part_items);
@@ -486,11 +494,10 @@ function buildDataIntegrityDiagnostics(collections = {}, options = {}) {
   addIssue(domains.usersBot, summary, makeIssue('MEDIUM', 'duplicate_user_email', 'Duplicate user email', [...emailGroups.values()].filter(group => group.length > 1).flat(), { entity: 'user' }));
   addIssue(domains.usersBot, summary, makeIssue('MEDIUM', 'investor_without_owner_id', 'Investor user misses ownerId', users.filter(item => normalizeRole(item.role || item.userRole) === 'Инвестор' && !text(item.ownerId)), { entity: 'user' }));
   addIssue(domains.usersBot, summary, makeIssue('MEDIUM', 'mechanic_without_entity', 'Mechanic user has no mechanic entity', users.filter(item => isMechanicRole(item.role || item.userRole) && idOf(item) && !mechanicsById.has(idOf(item)) && !mechanics.some(mechanic => text(mechanic.userId) === idOf(item))), { entity: 'user', certainty: 'uncertain' }));
-  if (botUsers.length || botSessions.length || botActivity.length) {
+  if (botUsers.length || botActivity.length) {
     const userIds = new Set(users.map(idOf).filter(Boolean));
     addIssue(domains.usersBot, summary, makeIssue('LOW', 'bot_user_without_frontend_user', 'Bot user has no matching frontend user', botUsers.filter(item => text(item.userId) && !userIds.has(text(item.userId))), { entity: 'bot_user', certainty: 'uncertain' }));
     domains.usersBot.botUsers = botUsers.length;
-    domains.usersBot.botSessions = botSessions.length;
     domains.usersBot.botActivity = botActivity.length;
   }
 

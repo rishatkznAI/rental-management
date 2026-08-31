@@ -5,6 +5,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import {
+  createPlatformIdentityContext,
+  seedAuthority,
+  testActor,
+} from './platform-identity-fixtures.js';
+
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const express = serverRequire('express');
@@ -19,8 +25,30 @@ const {
   deterministicRoleProfileId,
 } = require('../server/lib/counterparty-role-profiles.js');
 const { getBuildInfo } = require('../server/lib/build-info.js');
-const { resolveReleaseEnv } = require('../server/scripts/start-with-release-type.cjs');
-const { TENANT_OWNED_ARRAY_COLLECTIONS } = require('../server/lib/tenant-data-boundary.js');
+const {
+  resolveReleaseEnv,
+  resolveServerEntry,
+} = require('../server/scripts/start-with-release-type.cjs');
+const {
+  TENANT_OWNED_ARRAY_COLLECTIONS,
+  createTenantDataBoundary,
+  runWithTenantActorScope,
+} = require('../server/lib/tenant-data-boundary.js');
+const { assertTenantRelationships } = require('../server/lib/tenant-relationship-guard.js');
+const { createNumberSequenceAllocator } = require('../server/lib/number-sequences.js');
+const { createBusinessNumberingService } = require('../server/lib/business-numbering.js');
+const {
+  EQUIPMENT_GSM_PROJECTION_FIELDS,
+  applyEquipmentGsmConfigurationProjection,
+} = require('../server/lib/gsm/trusted-device-scope.js');
+
+const SYSTEM_IMPORT_SCOPE = Object.freeze({
+  companyId: 'COMPANY-A',
+  tenantId: 'COMPANY-A',
+  membershipId: 'MEMBERSHIP-COMPANY-A',
+  principalId: 'U-admin',
+  source: 'system_import_test',
+});
 
 function createSystemApp(overrides = {}) {
   const app = express();
@@ -38,11 +66,18 @@ function createSystemApp(overrides = {}) {
     }
     return value;
   };
+  const writeData = overrides.writeData || (() => {});
   app.use(express.json());
   registerSystemRoutes(app, {
     readData,
-    writeData: overrides.writeData || (() => {}),
-    writeDataBatch: overrides.writeDataBatch,
+    writeData,
+    writeDataBatch: overrides.writeDataBatch || (entries => {
+      for (const entry of entries || []) writeData(entry.name, entry.value);
+    }),
+    preflightDataBatch: overrides.preflightDataBatch || (entries => ({
+      ok: true,
+      collections: (entries || []).map(entry => entry.name),
+    })),
     getSnapshot: overrides.getSnapshot || (() => ({})),
     saveSnapshot: overrides.saveSnapshot || (() => {}),
     botToken: 'token-present',
@@ -82,6 +117,7 @@ function createSystemApp(overrides = {}) {
     backfillGanttRentalLinks: overrides.backfillGanttRentalLinks,
     getBuildInfo: overrides.getBuildInfo || (() => ({ version: 'test' })),
     getAppDisabledConfig: overrides.getAppDisabledConfig,
+    getProductionValidationReadOnly: overrides.getProductionValidationReadOnly,
     getRoleAccessSummary: () => ({
       readableCollections: ['equipment', 'rentals'],
       writableCollections: ['equipment'],
@@ -101,6 +137,145 @@ function scopedMasterData(record) {
     ...record,
     companyId: 'COMPANY-A',
     tenantId: 'COMPANY-A',
+  };
+}
+
+function trustedGsmDevice(record = {}) {
+  const device = scopedMasterData({
+    id: 'GSM-A',
+    equipmentId: 'EQ-A',
+    imei: '860000000000001',
+    deviceId: 'TRACKER-A',
+    trackerId: 'TRACKER-A',
+    sim1: '+79990000001',
+    protocol: 'wialon_ips',
+    status: 'active',
+    bindingRevision: 1,
+    ...record,
+  });
+  return {
+    ...device,
+    bindingHistory: [{
+      revision: device.bindingRevision,
+      equipmentId: device.equipmentId,
+      companyId: device.companyId,
+      tenantId: device.tenantId,
+      imei: device.imei,
+      deviceId: device.deviceId,
+      linkedAt: '2026-08-26T10:00:00.000Z',
+      unlinkedAt: null,
+    }],
+  };
+}
+
+function equipmentWithGsmProjection(device, record = {}) {
+  return applyEquipmentGsmConfigurationProjection(scopedMasterData({
+    id: device.equipmentId,
+    serialNumber: 'BEFORE',
+    ...record,
+  }), device);
+}
+
+function gsmProjectionSnapshot(record) {
+  return Object.fromEntries(EQUIPMENT_GSM_PROJECTION_FIELDS
+    .filter(field => Object.prototype.hasOwnProperty.call(record, field))
+    .map(field => [field, structuredClone(record[field])]));
+}
+
+function createSystemImportBoundaryApp(initialCollections = {}, { withBusinessNumbering = false } = {}) {
+  const identity = createPlatformIdentityContext({
+    users: [{
+      id: SYSTEM_IMPORT_SCOPE.principalId,
+      name: 'Admin',
+      email: 'admin@example.test',
+      role: 'Администратор',
+      status: 'Активен',
+    }],
+  });
+  seedAuthority(identity, {
+    companyId: SYSTEM_IMPORT_SCOPE.companyId,
+    branches: [{ id: 'BRANCH-COMPANY-A', displayName: 'Head office', isHeadOffice: true }],
+    templateKey: 'TEMPLATE-COMPANY-A',
+    templateCapabilities: [],
+  });
+  identity.repository.createMembership({
+    id: SYSTEM_IMPORT_SCOPE.membershipId,
+    companyId: SYSTEM_IMPORT_SCOPE.companyId,
+    principalId: SYSTEM_IMPORT_SCOPE.principalId,
+    status: 'active',
+    roleTemplateKey: 'TEMPLATE-COMPANY-A',
+    roleTemplateVersion: 1,
+    companyWideBranchAuthority: true,
+    branchIds: [],
+    actorContext: testActor(),
+    reason: 'system-import-boundary-test',
+  });
+
+  const state = structuredClone({
+    users: identity.readUsers(),
+    ...initialCollections,
+  });
+  let persistedBatches = 0;
+  const readRawData = name => state[name] ?? null;
+  const writeRawData = (name, value) => {
+    state[name] = structuredClone(value);
+  };
+  const writeRawDataBatch = entries => {
+    const staged = structuredClone(state);
+    for (const entry of entries || []) staged[entry.name] = structuredClone(entry.value);
+    for (const key of Object.keys(state)) delete state[key];
+    Object.assign(state, staged);
+    persistedBatches += 1;
+  };
+  const boundary = createTenantDataBoundary({
+    db: identity.db,
+    readRawData,
+    writeRawData,
+    writeRawDataBatch,
+    assertRelationships: assertTenantRelationships,
+  });
+  const inScope = operation => runWithTenantActorScope(SYSTEM_IMPORT_SCOPE, operation);
+  const numbering = withBusinessNumbering
+    ? createBusinessNumberingService({
+        allocator: createNumberSequenceAllocator({
+          db: identity.db,
+          resolveScope: () => ({
+            scopeType: 'company',
+            scopeId: SYSTEM_IMPORT_SCOPE.companyId,
+          }),
+          nowIso: () => '2026-08-26T12:00:00.000Z',
+        }),
+        readData: name => inScope(() => boundary.readData(name)),
+        nowIso: () => '2026-08-26T12:00:00.000Z',
+      })
+    : null;
+  const prepareNumberedEntries = (entries, mode) => {
+    const candidates = mode === 'preview' ? structuredClone(entries) : entries;
+    if (numbering) {
+      numbering.preparePersistenceEntries(candidates, { mode });
+      numbering.preparePersistenceEntries(candidates, { mode });
+    }
+    return candidates;
+  };
+  const { app } = createSystemApp({
+    actorScope: SYSTEM_IMPORT_SCOPE,
+    readData: name => inScope(() => boundary.readData(name)),
+    preflightDataBatch: entries => inScope(() => boundary.preflightDataBatch(
+      prepareNumberedEntries(entries, 'preview'),
+    )),
+    writeDataBatch: entries => inScope(() => boundary.writeDataBatch(
+      prepareNumberedEntries(entries, 'persist'),
+    )),
+  });
+  return {
+    app,
+    state,
+    close: () => identity.close(),
+    persistedBatches: () => persistedBatches,
+    numberingRows: () => ({
+      sequences: Number(identity.db.prepare('SELECT COUNT(*) AS count FROM number_sequences').get()?.count || 0),
+      numbers: Number(identity.db.prepare('SELECT COUNT(*) AS count FROM business_numbers').get()?.count || 0),
+    }),
   };
 }
 
@@ -411,6 +586,23 @@ test('/health and /api/version expose RELEASE_TYPE before backend marker fallbac
   });
 });
 
+test('/api/version exposes production validation read-only state without leaking configuration', async () => {
+  const { app } = createSystemApp({
+    getAppDisabledConfig: () => ({ disabled: false }),
+    getProductionValidationReadOnly: () => true,
+  });
+
+  await withServer(app, async baseUrl => {
+    const version = await getJson(baseUrl, '/api/version');
+    assert.equal(version.status, 200);
+    assert.deepEqual(version.body.app, {
+      disabled: false,
+      validationReadOnly: true,
+    });
+    assert.equal(JSON.stringify(version.body).includes('PRODUCTION_SCOPE_REMEDIATION'), false);
+  });
+});
+
 test('/health and /api/version read backend marker releaseType when env metadata is absent', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rentCore-release-marker-'));
   const markerFile = path.join(tempDir, 'release-marker.json');
@@ -513,6 +705,22 @@ test('Railway start wrapper preserves explicit full-stack release type metadata'
   assert.equal(env.RAILWAY_RELEASE_TYPE, undefined);
 });
 
+test('Railway start wrapper isolates preliminary backup from the normal application entrypoint', () => {
+  assert.equal(resolveServerEntry({}), 'server.js');
+  assert.equal(
+    resolveServerEntry({ SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED: 'false' }),
+    'server.js',
+  );
+  assert.equal(
+    resolveServerEntry({ SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED: ' true' }),
+    'server.js',
+  );
+  assert.equal(
+    resolveServerEntry({ SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED: 'true' }),
+    'pre-compatibility-backup-server.js',
+  );
+});
+
 test('/api/admin/system-control-center is admin-only', async () => {
   const { app } = createSystemApp({
     requireAdmin: (_req, res) => res.status(403).json({ ok: false, error: 'Forbidden' }),
@@ -606,6 +814,72 @@ test('/api/sync rejects dangerous fields when legacy sync is explicitly enabled'
     if (previousEnabled === undefined) delete process.env.ENABLE_LEGACY_SYNC;
     else process.env.ENABLE_LEGACY_SYNC = previousEnabled;
   }
+});
+
+test('/api/sync preserves an unchanged server-owned GSM projection and rejects changes atomically', async () => {
+  const device = trustedGsmDevice();
+  const scopedEquipment = equipmentWithGsmProjection(device, {
+    gsmStatus: 'online',
+    gsmSignalStatus: 'online',
+    gsmLastSeenAt: '2026-08-26T11:59:00.000Z',
+    gsmLastLat: 55.7558,
+    gsmLastLng: 37.6173,
+    gsmMovementHistory: [{ at: '2026-08-26T11:59:00.000Z', lat: 55.7558, lng: 37.6173 }],
+  });
+  const { companyId: _companyId, tenantId: _tenantId, ...equipment } = scopedEquipment;
+  const store = createLegacySyncStore({ equipment: [equipment], gsm_devices: [device] });
+
+  await withLegacySyncEnabled(async () => {
+    await withServer(store.app, async (baseUrl) => {
+      const accepted = await postJson(baseUrl, '/api/sync', {
+        equipment: [{
+          ...structuredClone(equipment),
+          serialNumber: 'AFTER',
+          gsmMovementHistory: equipment.gsmMovementHistory.map(entry => ({
+            lng: entry.lng,
+            lat: entry.lat,
+            at: entry.at,
+          })),
+        }],
+      });
+      assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+      assert.equal(store.batches.length, 1);
+      assert.equal(store.collections.equipment[0].serialNumber, 'AFTER');
+      assert.deepEqual(
+        gsmProjectionSnapshot(store.collections.equipment[0]),
+        gsmProjectionSnapshot(equipment),
+      );
+
+      const beforeRejected = structuredClone(store.collections);
+      const rejected = await postJson(baseUrl, '/api/sync', {
+        equipment: [{
+          ...structuredClone(store.collections.equipment[0]),
+          gsmImei: '860000000000999',
+          gsmStatus: 'offline',
+        }],
+      });
+      assert.equal(rejected.status, 409, JSON.stringify(rejected.body));
+      assert.equal(rejected.body.code, 'GSM_EQUIPMENT_PROJECTION_WRITE_DENIED');
+      assert.match(rejected.body.error, /GSM-поля техники/);
+      assert.equal(store.batches.length, 1);
+      assert.deepEqual(store.collections, beforeRejected);
+
+      const nestedChangeRejected = await postJson(baseUrl, '/api/sync', {
+        equipment: [{
+          ...structuredClone(store.collections.equipment[0]),
+          gsmMovementHistory: store.collections.equipment[0].gsmMovementHistory.map(entry => ({
+            lng: entry.lng,
+            lat: entry.lat + 0.01,
+            at: entry.at,
+          })),
+        }],
+      });
+      assert.equal(nestedChangeRejected.status, 409, JSON.stringify(nestedChangeRejected.body));
+      assert.equal(nestedChangeRejected.body.code, 'GSM_EQUIPMENT_PROJECTION_WRITE_DENIED');
+      assert.equal(store.batches.length, 1);
+      assert.deepEqual(store.collections, beforeRejected);
+    });
+  });
 });
 
 test('/api/sync preserves server-owned opening receivable state by stable Client ID', async () => {
@@ -1612,6 +1886,92 @@ test('/api/admin/audit-logs returns filtered safe entries for admins only', asyn
   });
 });
 
+test('audit and backup APIs merge current and legacy tenant history without duplicates or cross-tenant rows', async t => {
+  const context = createSystemImportBoundaryApp({
+    audit_logs: [
+      {
+        id: 'AUD-CURRENT-A',
+        companyId: 'COMPANY-A',
+        tenantId: 'COMPANY-A',
+        createdAt: '2026-08-26T12:00:00.000Z',
+        action: 'equipment.update',
+        entityType: 'equipment',
+        description: 'current-a',
+      },
+      {
+        id: 'AUD-DUPLICATE',
+        companyId: 'COMPANY-A',
+        tenantId: 'COMPANY-A',
+        createdAt: '2026-08-26T11:00:00.000Z',
+        action: 'current.copy',
+        entityType: 'system',
+        description: 'current-copy-wins',
+      },
+      {
+        id: 'AUD-CURRENT-B',
+        companyId: 'COMPANY-B',
+        tenantId: 'COMPANY-B',
+        createdAt: '2026-08-26T12:30:00.000Z',
+        action: 'foreign.current',
+        entityType: 'system',
+      },
+    ],
+    audit_log: [
+      {
+        id: 'AUD-LEGACY-A',
+        companyId: 'COMPANY-A',
+        tenantId: 'COMPANY-A',
+        createdAt: '2026-08-26T10:00:00.000Z',
+        action: 'system.backup.download',
+        entityType: 'system',
+        description: 'legacy-a',
+        metadata: {
+          filename: 'legacy-a.zip',
+          size: 123,
+          collections: { equipment: 1 },
+          files: 2,
+        },
+      },
+      {
+        id: 'AUD-DUPLICATE',
+        companyId: 'COMPANY-A',
+        tenantId: 'COMPANY-A',
+        createdAt: '2026-08-26T09:00:00.000Z',
+        action: 'legacy.copy',
+        entityType: 'system',
+        description: 'legacy-copy-must-not-duplicate',
+      },
+      {
+        id: 'AUD-LEGACY-B',
+        companyId: 'COMPANY-B',
+        tenantId: 'COMPANY-B',
+        createdAt: '2026-08-26T09:30:00.000Z',
+        action: 'system.backup.download',
+        entityType: 'system',
+        metadata: { filename: 'foreign-b.zip' },
+      },
+    ],
+  });
+  t.after(() => context.close());
+
+  await withServer(context.app, async baseUrl => {
+    const auditResponse = await getJson(baseUrl, '/api/admin/audit-logs?limit=100');
+    assert.equal(auditResponse.status, 200);
+    assert.deepEqual(
+      auditResponse.body.logs.map(entry => entry.id),
+      ['AUD-CURRENT-A', 'AUD-DUPLICATE', 'AUD-LEGACY-A'],
+    );
+    assert.equal(auditResponse.body.logs.find(entry => entry.id === 'AUD-DUPLICATE').action, 'current.copy');
+    assert.doesNotMatch(JSON.stringify(auditResponse.body), /foreign|legacy-copy-must-not-duplicate/);
+
+    const backupResponse = await getJson(baseUrl, '/api/admin/backup/history');
+    assert.equal(backupResponse.status, 200);
+    assert.deepEqual(backupResponse.body.history.map(entry => entry.id), ['AUD-LEGACY-A']);
+    assert.equal(backupResponse.body.history[0].filename, 'legacy-a.zip');
+    assert.doesNotMatch(JSON.stringify(backupResponse.body), /foreign-b/);
+  });
+});
+
 test('/api/admin/audit-logs is admin-only', async () => {
   const { app } = createSystemApp({
     requireAdmin: (_req, res) => res.status(403).json({ ok: false, error: 'Forbidden' }),
@@ -2272,6 +2632,91 @@ test('/api/admin/media/archive-external-photos dry-run summarizes external URLs 
   });
 });
 
+test('/api/admin/media/archive-external-photos scans only tenant-writable media collections', async () => {
+  const reads = [];
+  const { app } = createSystemApp({
+    readData: name => {
+      reads.push(name);
+      if (name === 'bot_sessions') throw new Error('system collection must not be read');
+      if (name === 'shipping_photos') {
+        return [{ id: 'SP-tenant', photos: ['https://i.oneme.ru/i?r=tenant-photo'] }];
+      }
+      if (name === 'service_works') {
+        return [{ id: 'SW-tenant', photos: ['https://i.oneme.ru/i?r=tenant-catalog-photo'] }];
+      }
+      return [];
+    },
+    jsonCollections: ['shipping_photos', 'bot_sessions', 'service_works', 'unknown_collection'],
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await getJson(baseUrl, '/api/admin/media/archive-external-photos/dry-run');
+    assert.equal(response.status, 200);
+    assert.equal(response.body.summary.found, 1);
+    assert.equal(response.body.summary.collections.shipping_photos, 1);
+    assert.equal(response.body.summary.collections.service_works, undefined);
+    assert.deepEqual(reads, ['shipping_photos']);
+  });
+});
+
+test('/api/admin/media/archive-external-photos persists all changed collections in one batch', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'external-photo-batch-'));
+  const collections = {
+    shipping_photos: [{ id: 'SP-1', photos: ['https://i.oneme.ru/i?r=one'] }],
+    documents: [{ id: 'DOC-1', attachments: ['https://i.oneme.ru/i?r=two'] }],
+  };
+  const batches = [];
+  const { app } = createSystemApp({
+    readData: name => collections[name] || [],
+    writeData: () => { throw new Error('single collection persistence is forbidden'); },
+    writeDataBatch: entries => {
+      batches.push(structuredClone(entries));
+      for (const entry of entries) collections[entry.name] = entry.value;
+    },
+    jsonCollections: ['shipping_photos', 'documents'],
+    uploadRoot: path.join(tempDir, 'uploads'),
+    fetchImpl: async () => fakeFetchResponse({ contentType: 'image/jpeg', body: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }),
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/admin/media/archive-external-photos', { confirm: true });
+      assert.equal(response.status, 200);
+      assert.equal(batches.length, 1);
+      assert.deepEqual(batches[0].map(entry => entry.name).sort(), ['documents', 'shipping_photos']);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('/api/admin/media/archive-external-photos removes newly created files when atomic persistence fails', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'external-photo-rollback-'));
+  const uploadsDir = path.join(tempDir, 'uploads');
+  const { app } = createSystemApp({
+    readData: name => name === 'shipping_photos'
+      ? [{ id: 'SP-1', photos: ['https://i.oneme.ru/i?r=rollback'] }]
+      : [],
+    writeDataBatch: () => { throw new Error('simulated CAS conflict'); },
+    jsonCollections: ['shipping_photos'],
+    uploadRoot: uploadsDir,
+    fetchImpl: async () => fakeFetchResponse({ contentType: 'image/jpeg', body: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) }),
+  });
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const response = await postJson(baseUrl, '/api/admin/media/archive-external-photos', { confirm: true });
+      assert.equal(response.status, 500);
+      const files = fs.existsSync(uploadsDir)
+        ? fs.readdirSync(uploadsDir, { recursive: true }).filter(name => /\.[a-z0-9]+$/i.test(String(name)))
+        : [];
+      assert.deepEqual(files, []);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('/api/admin/media/archive-external-photos archives allowed images and backup includes local file', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'external-photo-archive-'));
   const uploadsDir = path.join(tempDir, 'uploads');
@@ -2483,6 +2928,372 @@ test('/api/admin/system-data/import dry-run reports counts unknown collections d
     assert.equal(response.body.strippedSensitiveFields, 1);
     assert.doesNotMatch(JSON.stringify(response.body), /incoming-password|existing-password/);
   });
+});
+
+test('/api/admin/system-data/import valid dry-run executes boundary preflight without writes and matches apply plan', async t => {
+  const context = createSystemImportBoundaryApp({
+    equipment: [scopedMasterData({ id: 'EQ-A', serialNumber: 'BEFORE' })],
+  });
+  t.after(context.close);
+  const payloadCollections = {
+    equipment: [{ id: 'EQ-A', serialNumber: 'AFTER' }],
+  };
+
+  await withServer(context.app, async baseUrl => {
+    const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', {
+      collections: payloadCollections,
+    });
+    assert.equal(dryRun.status, 200);
+    assert.deepEqual(dryRun.body.plannedImports, { equipment: 1 });
+    assert.equal(context.persistedBatches(), 0);
+    assert.equal(context.state.equipment[0].serialNumber, 'BEFORE');
+
+    const applied = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: payloadCollections,
+    });
+    assert.equal(applied.status, 200);
+    assert.deepEqual(applied.body.imported, dryRun.body.plannedImports);
+    assert.equal(context.persistedBatches(), 1);
+    assert.equal(context.state.equipment[0].serialNumber, 'AFTER');
+  });
+});
+
+test('/api/admin/system-data/import preserves an unchanged server-owned GSM projection', async t => {
+  const device = trustedGsmDevice();
+  const equipment = equipmentWithGsmProjection(device, {
+    gsmStatus: 'online',
+    gsmSignalStatus: 'online',
+    gsmLastSeenAt: '2026-08-26T11:59:00.000Z',
+    gsmLastLat: 55.7558,
+    gsmLastLng: 37.6173,
+    gsmMovementHistory: [{ at: '2026-08-26T11:59:00.000Z', lat: 55.7558, lng: 37.6173 }],
+  });
+  const projectionBefore = gsmProjectionSnapshot(equipment);
+  const context = createSystemImportBoundaryApp({
+    equipment: [equipment],
+    gsm_devices: [device],
+  });
+  t.after(context.close);
+
+  await withServer(context.app, async baseUrl => {
+    const incoming = {
+      ...structuredClone(equipment),
+      serialNumber: 'AFTER',
+      gsmMovementHistory: equipment.gsmMovementHistory.map(entry => ({
+        lng: entry.lng,
+        lat: entry.lat,
+        at: entry.at,
+      })),
+    };
+    const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', {
+      collections: { equipment: [incoming] },
+    });
+    assert.equal(dryRun.status, 200, JSON.stringify(dryRun.body));
+    assert.deepEqual(dryRun.body.plannedImports, { equipment: 1 });
+    assert.equal(context.persistedBatches(), 0);
+
+    const applied = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections: { equipment: [incoming] },
+    });
+    assert.equal(applied.status, 200, JSON.stringify(applied.body));
+    assert.equal(context.persistedBatches(), 1);
+    assert.equal(context.state.equipment[0].serialNumber, 'AFTER');
+    assert.deepEqual(gsmProjectionSnapshot(context.state.equipment[0]), projectionBefore);
+    assert.deepEqual(context.state.gsm_devices, [device]);
+  });
+});
+
+test('/api/admin/system-data/import rejects changes to an existing server-owned GSM projection', async t => {
+  const device = trustedGsmDevice();
+  const equipment = equipmentWithGsmProjection(device, {
+    gsmStatus: 'online',
+    gsmLastLat: 55.7558,
+    gsmMovementHistory: [{ at: '2026-08-26T11:59:00.000Z', lat: 55.7558, lng: 37.6173 }],
+  });
+  const context = createSystemImportBoundaryApp({
+    equipment: [equipment],
+    gsm_devices: [device],
+  });
+  t.after(context.close);
+  const before = structuredClone(context.state);
+  const collections = {
+    equipment: [{
+      ...structuredClone(equipment),
+      gsmImei: '860000000000999',
+      gsmStatus: 'offline',
+      gsmMovementHistory: [{ lng: 37.6173, lat: 55.7658, at: '2026-08-26T11:59:00.000Z' }],
+    }],
+  };
+
+  await withServer(context.app, async baseUrl => {
+    const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', { collections });
+    const applied = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections,
+    });
+
+    for (const response of [dryRun, applied]) {
+      assert.equal(response.status, 409, JSON.stringify(response.body));
+      assert.equal(response.body.code, 'GSM_EQUIPMENT_PROJECTION_WRITE_DENIED');
+      assert.equal(response.body.errorCode, 'GSM_EQUIPMENT_PROJECTION_WRITE_DENIED');
+      assert.deepEqual(response.body.details.changedFields, ['gsmImei', 'gsmMovementHistory', 'gsmStatus']);
+    }
+  });
+  assert.equal(context.persistedBatches(), 0);
+  assert.deepEqual(context.state, before);
+});
+
+test('/api/admin/system-data/import cannot inject a non-neutral GSM projection without a trusted device parent', async t => {
+  const untrustedDevice = trustedGsmDevice({
+    id: 'GSM-NOT-PERSISTED',
+    equipmentId: 'EQ-NEW',
+    imei: '860000000000777',
+    deviceId: 'TRACKER-NOT-PERSISTED',
+    trackerId: 'TRACKER-NOT-PERSISTED',
+  });
+  const injectedEquipment = equipmentWithGsmProjection(untrustedDevice, {
+    gsmStatus: 'online',
+    gsmLastSeenAt: '2026-08-26T12:00:00.000Z',
+  });
+  const context = createSystemImportBoundaryApp({
+    equipment: [],
+    gsm_devices: [],
+  });
+  t.after(context.close);
+  const before = structuredClone(context.state);
+  const collections = { equipment: [injectedEquipment] };
+
+  await withServer(context.app, async baseUrl => {
+    const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', { collections });
+    const applied = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections,
+    });
+
+    for (const response of [dryRun, applied]) {
+      assert.equal(response.status, 409, JSON.stringify(response.body));
+      assert.equal(response.body.code, 'GSM_EQUIPMENT_PROJECTION_WRITE_DENIED');
+      assert.equal(response.body.errorCode, 'GSM_EQUIPMENT_PROJECTION_WRITE_DENIED');
+      assert.ok(response.body.details.changedFields.includes('gsmDeviceRecordId'));
+      assert.ok(response.body.details.changedFields.includes('gsmImei'));
+      assert.ok(response.body.details.changedFields.includes('gsmStatus'));
+    }
+  });
+  assert.equal(context.persistedBatches(), 0);
+  assert.deepEqual(context.state, before);
+});
+
+test('/api/admin/system-data/import dry-run and apply share business-number immutability validation without sequence writes', async t => {
+  const baseCollections = {
+    counterparties: [scopedMasterData({
+      id: 'CP-1', legalName: 'ООО Клиент', shortName: 'ООО Клиент', status: 'active', roles: ['customer'],
+    })],
+    clients: [scopedMasterData({ id: 'C-1', counterpartyId: 'CP-1', company: 'ООО Клиент' })],
+    rentals: [scopedMasterData({
+      id: 'R-NUMBERED', number: 'RNT-26-000001', clientId: 'C-1', counterpartyId: 'CP-1',
+    })],
+    documents: [scopedMasterData({
+      id: 'D-NUMBERED',
+      type: 'rental_contract',
+      documentType: 'rental_contract',
+      contractId: 'CC-1',
+      clientId: 'C-1',
+      counterpartyId: 'CP-1',
+      number: 'CTR-26-000001',
+      documentNumber: 'CTR-26-000001',
+    })],
+    client_contracts: [
+      scopedMasterData({ id: 'CC-1', number: 'CTR-26-000001', clientId: 'C-1', counterpartyId: 'CP-1' }),
+      scopedMasterData({ id: 'CC-2', number: 'CTR-26-000002', clientId: 'C-1', counterpartyId: 'CP-1' }),
+    ],
+  };
+  const scenarios = [
+    {
+      name: 'assigned number mutation',
+      collections: {
+        rentals: [{
+          id: 'R-NUMBERED',
+          number: 'RNT-26-999999',
+          clientId: 'C-1',
+          counterpartyId: 'CP-1',
+        }],
+      },
+      code: 'BUSINESS_NUMBER_IMMUTABLE',
+    },
+    {
+      name: 'numbered document type mutation',
+      collections: {
+        documents: [{
+          id: 'D-NUMBERED',
+          type: 'invoice',
+          documentType: 'invoice',
+          contractId: 'CC-1',
+          clientId: 'C-1',
+          counterpartyId: 'CP-1',
+          number: 'CTR-26-000001',
+        }],
+      },
+      code: 'BUSINESS_DOCUMENT_TYPE_IMMUTABLE',
+    },
+    {
+      name: 'numbered document owner mutation',
+      collections: {
+        documents: [{
+          id: 'D-NUMBERED',
+          type: 'rental_contract',
+          documentType: 'rental_contract',
+          contractId: 'CC-2',
+          clientId: 'C-1',
+          counterpartyId: 'CP-1',
+          number: 'CTR-26-000001',
+        }],
+      },
+      code: 'BUSINESS_DOCUMENT_OWNER_IMMUTABLE',
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const context = createSystemImportBoundaryApp(baseCollections, { withBusinessNumbering: true });
+      const before = structuredClone(context.state);
+      try {
+        await withServer(context.app, async baseUrl => {
+          const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', {
+            collections: scenario.collections,
+          });
+          const applied = await postJson(baseUrl, '/api/admin/system-data/import', {
+            confirm: true,
+            collections: scenario.collections,
+          });
+          assert.equal(dryRun.status, 409, JSON.stringify(dryRun.body));
+          assert.equal(applied.status, dryRun.status);
+          assert.equal(dryRun.body.code, scenario.code);
+          assert.equal(applied.body.code, scenario.code);
+          assert.equal(dryRun.body.errorCode, scenario.code);
+          assert.equal(applied.body.errorCode, scenario.code);
+        });
+        assert.equal(context.persistedBatches(), 0);
+        assert.deepEqual(context.numberingRows(), { sequences: 0, numbers: 0 });
+        assert.deepEqual(context.state, before);
+      } finally {
+        context.close();
+      }
+    });
+  }
+});
+
+test('/api/admin/system-data/import dry-run and apply preserve exact boundary failures without mutation', async t => {
+  const baseCollections = {
+    payroll_periods: [scopedMasterData({ id: 'PERIOD-A', status: 'draft' })],
+    payroll_audit_events: [scopedMasterData({
+      id: 'PAY-AUDIT-A',
+      payrollPeriodId: 'PERIOD-A',
+      action: 'period.calculate',
+    })],
+  };
+  const scenarios = [
+    {
+      name: 'missing payroll audit parent',
+      collections: {
+        payroll_audit_events: [
+          { id: 'PAY-AUDIT-A', payrollPeriodId: 'PERIOD-A', action: 'period.calculate' },
+          { id: 'PAY-AUDIT-MISSING', payrollPeriodId: 'PERIOD-MISSING', action: 'period.approved' },
+        ],
+      },
+      code: 'DERIVED_SCOPE_PARENT_UNAVAILABLE',
+    },
+    {
+      name: 'payroll audit rewrite',
+      collections: {
+        payroll_audit_events: [
+          { id: 'PAY-AUDIT-A', payrollPeriodId: 'PERIOD-A', action: 'forged.rewrite' },
+        ],
+      },
+      code: 'TENANT_APPEND_ONLY_COLLECTION_MUTATION',
+    },
+    {
+      name: 'derived user relation',
+      collections: {
+        payroll_profiles: [{ id: 'PROFILE-A', userId: 'U-MISSING', baseSalary: 1000 }],
+      },
+      code: 'DERIVED_SCOPE_PARENT_UNAVAILABLE',
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const context = createSystemImportBoundaryApp(baseCollections);
+      const before = structuredClone(context.state);
+      try {
+        await withServer(context.app, async baseUrl => {
+          const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', {
+            collections: scenario.collections,
+          });
+          const applied = await postJson(baseUrl, '/api/admin/system-data/import', {
+            confirm: true,
+            collections: scenario.collections,
+          });
+          assert.equal(dryRun.status, 409);
+          assert.equal(applied.status, dryRun.status);
+          assert.equal(dryRun.body.code, scenario.code);
+          assert.equal(applied.body.code, dryRun.body.code);
+          assert.equal(dryRun.body.errorCode, scenario.code);
+          assert.equal(applied.body.errorCode, scenario.code);
+        });
+        assert.equal(context.persistedBatches(), 0);
+        assert.deepEqual(context.state, before);
+      } finally {
+        context.close();
+      }
+    });
+  }
+});
+
+test('/api/admin/system-data/import rejects malformed reserved audit root identically in dry-run and apply', async t => {
+  const context = createSystemImportBoundaryApp({
+    equipment: [scopedMasterData({ id: 'EQ-A', serialNumber: 'BEFORE' })],
+    audit_logs: { corrupt: true },
+  });
+  t.after(context.close);
+  const before = structuredClone(context.state);
+  const collections = { equipment: [{ id: 'EQ-A', serialNumber: 'AFTER' }] };
+
+  await withServer(context.app, async baseUrl => {
+    const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', { collections });
+    const applied = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections,
+    });
+    assert.equal(dryRun.status, 409);
+    assert.equal(applied.status, 409);
+    assert.equal(dryRun.body.code, 'AUDIT_HISTORY_SHAPE_INVALID');
+    assert.equal(applied.body.code, dryRun.body.code);
+  });
+  assert.equal(context.persistedBatches(), 0);
+  assert.deepEqual(context.state, before);
+});
+
+test('/api/admin/system-data/import preserves malformed stored collection root errors', async t => {
+  const context = createSystemImportBoundaryApp({ equipment: { corrupt: true } });
+  t.after(context.close);
+  const before = structuredClone(context.state);
+  const collections = { equipment: [{ id: 'EQ-A', serialNumber: 'AFTER' }] };
+
+  await withServer(context.app, async baseUrl => {
+    const dryRun = await postJson(baseUrl, '/api/admin/system-data/import/dry-run', { collections });
+    const applied = await postJson(baseUrl, '/api/admin/system-data/import', {
+      confirm: true,
+      collections,
+    });
+    assert.equal(dryRun.status, 409);
+    assert.equal(applied.status, dryRun.status);
+    assert.equal(dryRun.body.code, 'COLLECTION_STORED_SHAPE_INVALID');
+    assert.equal(applied.body.code, dryRun.body.code);
+  });
+  assert.equal(context.persistedBatches(), 0);
+  assert.deepEqual(context.state, before);
 });
 
 test('/api/admin/system-data/import rejects credential-directory restore and preserves existing user secrets', async () => {

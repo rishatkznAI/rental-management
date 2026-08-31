@@ -21,13 +21,14 @@ const IMPORTANT_COLLECTIONS = new Set([
 ]);
 
 function parseArgs(argv) {
-  const args = { db: process.env.DB_PATH || 'server/data/app.sqlite', json: false, top: 20 };
+  const args = { db: '', json: false, top: 20 };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--db') args.db = argv[++index] || args.db;
+    if (arg === '--db') args.db = argv[++index] || '';
     else if (arg === '--json') args.json = true;
     else if (arg === '--top') args.top = Number(argv[++index]) || args.top;
     else if (arg === '--help' || arg === '-h') args.help = true;
+    else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
 }
@@ -188,8 +189,9 @@ if (args.help) {
   process.exit(0);
 }
 
-const dbPath = path.resolve(rootDir, args.db);
 try {
+  if (!args.db) throw new Error('Refusing diagnostics without an explicit --db path.');
+  const dbPath = path.resolve(rootDir, args.db);
   if (!fs.existsSync(dbPath)) throw new Error(`SQLite database not found: ${dbPath}`);
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {

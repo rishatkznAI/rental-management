@@ -30,13 +30,25 @@ const {
   ensureNumberSequenceSchema,
 } = require('./lib/number-sequences');
 const {
+  ensureRequestIdempotencySchema,
+} = require('./lib/request-idempotency');
+const {
   assertClientInnListUnique,
   assertClientInnWriteAllowed,
   buildClientInnDuplicateReport,
   getClientInnNormalized,
   normalizeClientInnFields,
 } = require('./lib/client-inn');
-const { isProductionScopeWriteFreezeEnabled } = require('./lib/feature-flags');
+const {
+  isProductionScopeWriteFreezeEnabled,
+} = require('./lib/feature-flags');
+const {
+  assertProductionValidationReadOnlyEnvironment,
+  assertProductionValidationWriteAllowed,
+  isProductionValidationSmokeLoginWriteScopeActive,
+  requested: isProductionValidationReadOnlyRequested,
+} = require('./lib/production-validation-read-only');
+const { ALL_APP_DATA_COLLECTIONS } = require('./lib/app-data-scope-registry');
 
 const DEFAULT_DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = process.env.DB_PATH
@@ -44,106 +56,180 @@ const DB_PATH = process.env.DB_PATH
   : path.join(DEFAULT_DATA_DIR, 'app.sqlite');
 const DATA_DIR = path.dirname(DB_PATH);
 
-const JSON_COLLECTIONS = [
-  // IMPORTANT: app_data records are schemaless JSON and older rows may not have newly
-  // introduced fields. Keep readers/writers backward compatible.
-  'equipment',
-  'equipment_finance',
-  'equipment_downtimes',
-  'rentals',
-  'gantt_rentals',
-  'rental_change_requests',
-  'service',
-  'warranty_claims',
-  'counterparties',
-  'counterparty_role_assignments',
-  'supplier_profiles',
-  'contractor_profiles',
-  'clients',
-  'client_objects',
-  'client_contracts',
-  'inline_relation_idempotency',
-  'rental_create_idempotency',
-  'knowledge_base_modules',
-  'knowledge_base_progress',
-  'app_settings',
-  'gsm_devices',
-  'gsm_packets',
-  'gsm_commands',
-  'documents',
-  'mechanic_documents',
-  'payments',
-  'payment_allocations',
-  'debt_collection_plans',
-  'debt_collection_actions',
-  'receivable_payment_plans',
-  'finance_accounts',
-  'finance_operations',
-  'company_expenses',
-  'leasing_contracts',
-  'leasing_payment_schedule',
-  'payroll_profiles',
-  'payroll_periods',
-  'payroll_records',
-  'payroll_adjustments',
-  'payroll_audit_events',
-  'crm_deals',
-  'crm_activities',
-  'deliveries',
-  'delivery_carriers',
-  'users',
-  'shipping_photos',
-  'equipment_operation_sessions',
-  'owners',
-  'mechanics',
-  'service_works',
-  'spare_parts',
-  'service_route_norms',
-  'service_field_trips',
-  'repair_work_items',
-  'repair_part_items',
-  'service_audit_log',
-  'service_work_catalog',
-  'spare_parts_catalog',
-  'service_work_names',
-  'spare_part_names',
-  'planner_items',
-  'service_vehicles',
-  'vehicle_trips',
-  'bot_users',
-  'bot_sessions',
-  'bot_activity',
-  'manager_activity',
-  'bot_notifications',
-  'audit_log',
-  'audit_logs',
-  'snapshot',
-];
+// IMPORTANT: app_data records are schemaless JSON and older rows may not have newly
+// introduced fields. The scope registry is the single authoritative inventory.
+const JSON_COLLECTIONS = [...ALL_APP_DATA_COLLECTIONS];
 
 let dbInstance = null;
 
 function assertProductionWriteAllowed(operation = 'database write', env = process.env) {
-  if (!isProductionScopeWriteFreezeEnabled(env)) return true;
-  const error = new Error(`Blocked ${operation}: production scope remediation write freeze is active.`);
-  error.code = 'PRODUCTION_SCOPE_WRITE_FREEZE_ACTIVE';
-  throw error;
+  if (isProductionScopeWriteFreezeEnabled(env)) {
+    const error = new Error(`Blocked ${operation}: production scope remediation write freeze is active.`);
+    error.code = 'PRODUCTION_SCOPE_WRITE_FREEZE_ACTIVE';
+    throw error;
+  }
+  return assertProductionValidationWriteAllowed(operation, env);
+}
+
+function openExactProductionValidationDatabase(dbPath, DatabaseConstructor = Database) {
+  let validationDbFd = null;
+  let db = null;
+  try {
+    const stat = fs.lstatSync(dbPath);
+    if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(dbPath) !== dbPath) {
+      const error = new Error('Validation read-only mode requires the exact non-symlink production database.');
+      error.code = 'VALIDATION_PRODUCTION_DATABASE_IDENTITY_MISMATCH';
+      throw error;
+    }
+    validationDbFd = fs.openSync(
+      dbPath,
+      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0),
+    );
+    const fdStat = fs.fstatSync(validationDbFd);
+    if (!fdStat.isFile() || fdStat.dev !== stat.dev || fdStat.ino !== stat.ino) {
+      const error = new Error('Validation read-only mode requires a stable production database identity.');
+      error.code = 'VALIDATION_PRODUCTION_DATABASE_IDENTITY_MISMATCH';
+      throw error;
+    }
+
+    db = new DatabaseConstructor(dbPath, { fileMustExist: true });
+    const after = fs.lstatSync(dbPath);
+    const main = db.pragma('database_list').find(row => row.name === 'main');
+    const stableIdentity = after.isFile()
+      && !after.isSymbolicLink()
+      && after.dev === stat.dev
+      && after.ino === stat.ino
+      && fs.realpathSync(dbPath) === dbPath
+      && path.resolve(String(main?.file || '')) === dbPath;
+    if (!stableIdentity) {
+      const error = new Error('Production database identity changed while validation opened SQLite.');
+      error.code = 'VALIDATION_PRODUCTION_DATABASE_IDENTITY_CHANGED';
+      throw error;
+    }
+    return db;
+  } catch (cause) {
+    db?.close();
+    if (cause?.code?.startsWith?.('VALIDATION_PRODUCTION_DATABASE_')) throw cause;
+    const error = new Error('Validation read-only mode requires the exact non-symlink production database.');
+    error.code = 'VALIDATION_PRODUCTION_DATABASE_IDENTITY_MISMATCH';
+    error.cause = cause;
+    throw error;
+  } finally {
+    if (validationDbFd !== null) fs.closeSync(validationDbFd);
+  }
+}
+
+function executeProductionValidationSmokeLoginWriteTransaction(db, operation, env = process.env) {
+  if (!isProductionValidationReadOnlyRequested(env)) {
+    const error = new Error('Production validation smoke-login transaction requires validation mode.');
+    error.code = 'PRODUCTION_VALIDATION_TRANSACTION_MODE_REQUIRED';
+    throw error;
+  }
+  assertProductionValidationReadOnlyEnvironment(env);
+  if (!isProductionValidationSmokeLoginWriteScopeActive()) {
+    const error = new Error('Production validation smoke-login transaction requires its exact technical scope.');
+    error.code = 'PRODUCTION_VALIDATION_TRANSACTION_SCOPE_REQUIRED';
+    throw error;
+  }
+  if (!db || typeof db.transaction !== 'function' || typeof operation !== 'function') {
+    throw new TypeError('Production validation smoke-login transaction requires SQLite and an operation.');
+  }
+  if (db.inTransaction) {
+    const error = new Error('Production validation smoke-login transaction must own the top-level transaction.');
+    error.code = 'PRODUCTION_VALIDATION_TRANSACTION_ALREADY_ACTIVE';
+    throw error;
+  }
+  if (Number(db.pragma('query_only', { simple: true })) !== 1) {
+    const error = new Error('Production validation SQLite must be query-only before a smoke login.');
+    error.code = 'PRODUCTION_VALIDATION_QUERY_ONLY_REQUIRED';
+    throw error;
+  }
+
+  let originalError = null;
+  try {
+    db.pragma('query_only = OFF');
+    const transaction = db.transaction(() => {
+      const result = operation();
+      if (result && typeof result.then === 'function') {
+        const error = new Error('Production validation smoke-login persistence must be synchronous.');
+        error.code = 'PRODUCTION_VALIDATION_ASYNC_WRITE_FORBIDDEN';
+        throw error;
+      }
+      return result;
+    });
+    return transaction.immediate();
+  } catch (error) {
+    originalError = error;
+    throw error;
+  } finally {
+    try {
+      db.pragma('query_only = ON');
+      if (Number(db.pragma('query_only', { simple: true })) !== 1) {
+        throw new Error('SQLite did not restore query-only mode.');
+      }
+    } catch (cause) {
+      const error = new Error('Failed to restore production validation SQLite query-only mode.');
+      error.code = 'PRODUCTION_VALIDATION_QUERY_ONLY_RESTORE_FAILED';
+      error.cause = cause;
+      if (originalError) error.originalError = originalError;
+      throw error;
+    }
+  }
 }
 
 function ensureDb() {
-  if (dbInstance) return dbInstance;
-
+  // DB_PATH is captured when this module is loaded. Validate that exact resolved
+  // path rather than a mutable later process.env value before SQLite is touched.
+  const startupEnvironment = { ...process.env, DB_PATH };
+  const validationReadOnlyEnabled = assertProductionValidationReadOnlyEnvironment(startupEnvironment);
+  if (dbInstance) {
+    if (
+      validationReadOnlyEnabled
+      && !isProductionValidationSmokeLoginWriteScopeActive()
+      && Number(dbInstance.pragma('query_only', { simple: true })) !== 1
+    ) {
+      const error = new Error('Production validation SQLite escaped query-only mode.');
+      error.code = 'PRODUCTION_VALIDATION_QUERY_ONLY_REQUIRED';
+      throw error;
+    }
+    return dbInstance;
+  }
   const writeFreezeEnabled = isProductionScopeWriteFreezeEnabled();
-  if (writeFreezeEnabled && !fs.existsSync(DB_PATH)) {
-    const error = new Error('Production database must already exist when the remediation write freeze is active.');
-    error.code = 'FROZEN_PRODUCTION_DATABASE_MISSING';
+  const schemaMutationSuppressed = writeFreezeEnabled || validationReadOnlyEnabled;
+  if (schemaMutationSuppressed && !fs.existsSync(DB_PATH)) {
+    const error = new Error(
+      validationReadOnlyEnabled
+        ? 'Production database must already exist during validation read-only mode.'
+        : 'Production database must already exist when the remediation write freeze is active.',
+    );
+    error.code = validationReadOnlyEnabled
+      ? 'VALIDATION_PRODUCTION_DATABASE_MISSING'
+      : 'FROZEN_PRODUCTION_DATABASE_MISSING';
     throw error;
   }
-  if (!writeFreezeEnabled) fs.mkdirSync(DATA_DIR, { recursive: true });
-  const db = new Database(DB_PATH, writeFreezeEnabled ? { fileMustExist: true } : undefined);
-  if (writeFreezeEnabled) {
-    db.pragma('foreign_keys = ON');
-    dbInstance = db;
-    return db;
+  if (validationReadOnlyEnabled) {
+    const db = openExactProductionValidationDatabase(DB_PATH);
+    try {
+      db.pragma('foreign_keys = ON');
+      db.pragma('query_only = ON');
+      dbInstance = db;
+      return db;
+    } catch (error) {
+      db?.close();
+      throw error;
+    }
+  }
+  if (!schemaMutationSuppressed) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const db = new Database(DB_PATH, schemaMutationSuppressed ? { fileMustExist: true } : undefined);
+  if (schemaMutationSuppressed) {
+    try {
+      db.pragma('foreign_keys = ON');
+      dbInstance = db;
+      return db;
+    } catch (error) {
+      db.close();
+      throw error;
+    }
   }
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
@@ -178,6 +264,7 @@ function ensureDb() {
   ensureActualSourceEligibilityDryRunSchema(db);
   ensureCanonicalActualPostingSchema(db);
   ensureNumberSequenceSchema(db);
+  ensureRequestIdempotencySchema(db);
   syncClientInnIndex({ throwOnDuplicates: false });
   return db;
 }
@@ -201,8 +288,40 @@ function getData(name) {
   if (!row) return null;
   try {
     return JSON.parse(row.json);
-  } catch {
-    return null;
+  } catch (cause) {
+    const error = new Error(`Collection ${name} contains invalid JSON.`);
+    error.code = 'APP_DATA_INVALID_JSON';
+    error.collection = name;
+    error.cause = cause;
+    throw error;
+  }
+}
+
+function appDataValueFingerprint(value) {
+  return JSON.stringify(value ?? null);
+}
+
+function assertExpectedAppDataValues(db, entries) {
+  const read = db.prepare('SELECT json FROM app_data WHERE name = ?');
+  for (const entry of entries) {
+    const row = read.get(entry.name);
+    let current = null;
+    if (row) {
+      try {
+        current = JSON.parse(row.json);
+      } catch {
+        const error = new Error(`Collection ${entry.name} contains invalid JSON.`);
+        error.code = 'APP_DATA_COMPARE_AND_SWAP_INVALID_JSON';
+        throw error;
+      }
+    }
+    if (appDataValueFingerprint(current) !== entry.expectedFingerprint) {
+      const error = new Error(`Collection ${entry.name} changed after it was read; retry the operation.`);
+      error.code = 'APP_DATA_CONCURRENT_MODIFICATION';
+      error.status = 409;
+      error.collection = entry.name;
+      throw error;
+    }
   }
 }
 
@@ -292,20 +411,17 @@ function setData(name, value) {
       }
     }
     if (shouldSyncShadowIndex) {
-      try {
-        const result = syncSqlShadowIndexForCollection(db, name, nextValue);
-        const errors = result?.errors || [];
-        for (const entry of errors) {
-          console.error(`[sql-shadow] failed to sync ${name} id=${entry.id || '(missing)'}: ${entry.error}`);
-        }
-        if (name === 'gantt_rentals' && errors.length > 0) {
-          const error = new Error(`Gantt SQL shadow sync failed: ${errors[0].error}`);
-          error.code = 'GANTT_SQL_SHADOW_SYNC_FAILED';
-          throw error;
-        }
-      } catch (error) {
-        if (name === 'gantt_rentals') throw error;
-        console.error(`[sql-shadow] failed to sync ${name}: ${error?.message || error}`);
+      const result = syncSqlShadowIndexForCollection(db, name, nextValue);
+      const errors = result?.errors || [];
+      if (errors.length > 0) {
+        const label = name === 'gantt_rentals' ? 'Gantt' : 'Document';
+        const error = new Error(`${label} SQL shadow sync failed: ${errors[0].error}`);
+        error.code = name === 'gantt_rentals'
+          ? 'GANTT_SQL_SHADOW_SYNC_FAILED'
+          : 'DOCUMENT_SQL_SHADOW_SYNC_FAILED';
+        error.collection = name;
+        error.details = { failedRecordIds: errors.map(entry => entry.id).filter(Boolean) };
+        throw error;
       }
     }
   });
@@ -329,28 +445,54 @@ function setDataBatch(entries) {
   tx(normalizedEntries);
 }
 
-function migrateJsonFilesToDb() {
-  assertProductionWriteAllowed('legacy JSON migration');
-  const db = ensureDb();
-  const hasRows = db.prepare('SELECT COUNT(*) AS count FROM app_data').get().count > 0;
-  if (hasRows) return;
-
-  for (const collection of JSON_COLLECTIONS) {
-    const legacy = readLegacyJson(collection);
-    if (legacy !== null) {
-      setData(collection, legacy);
+function setDataBatchCompareAndSwap(entries) {
+  assertProductionWriteAllowed('collection compare-and-swap batch write');
+  const normalizedEntries = Array.isArray(entries)
+    ? entries.map(entry => ({
+      name: String(entry?.name || '').trim(),
+      value: entry?.value,
+      expectedFingerprint: entry?.expectedFingerprint,
+    }))
+    : [];
+  if (normalizedEntries.length === 0) return;
+  for (const entry of normalizedEntries) {
+    if (!entry.name) throw new Error('Collection name is required for compare-and-swap write');
+    if (typeof entry.expectedFingerprint !== 'string') {
+      const error = new Error(`Expected collection fingerprint is required: ${entry.name}.`);
+      error.code = 'APP_DATA_EXPECTED_FINGERPRINT_REQUIRED';
+      throw error;
     }
   }
+
+  const db = ensureDb();
+  const tx = db.transaction((rows) => {
+    // BEGIN IMMEDIATE is acquired before the locked reread. All expected values
+    // are checked before the first mutation, so a stale tenant view can neither
+    // overwrite a peer tenant nor leave a partial multi-collection write.
+    assertExpectedAppDataValues(db, rows);
+    for (const entry of rows) setData(entry.name, entry.value);
+  });
+  tx.immediate(normalizedEntries);
 }
 
-function cloneCollectionIfMissing(targetName, sourceName, mapItem = value => value) {
-  const target = getData(targetName);
-  if (Array.isArray(target) && target.length > 0) return;
+function setDataCompareAndSwap(name, value, expectedFingerprint) {
+  return setDataBatchCompareAndSwap([{ name, value, expectedFingerprint }]);
+}
 
-  const source = getData(sourceName);
-  if (!Array.isArray(source) || source.length === 0) return;
+function migrateJsonFilesToDb() {
+  const error = new Error(
+    'Raw legacy JSON import is disabled. Use the backed-up, manifest-driven, tenant-scoped remediation runner.',
+  );
+  error.code = 'AUDITED_MAINTENANCE_RUNNER_REQUIRED';
+  throw error;
+}
 
-  setData(targetName, source.map(mapItem));
+function cloneCollectionIfMissing() {
+  const error = new Error(
+    'Raw collection cloning is disabled. Use a trusted tenant boundary or the audited remediation runner.',
+  );
+  error.code = 'AUDITED_MAINTENANCE_RUNNER_REQUIRED';
+  throw error;
 }
 
 function saveSession(token, value, expiresAt) {
@@ -371,13 +513,13 @@ function getSession(token) {
   const row = db.prepare('SELECT json, expires_at FROM app_sessions WHERE token = ?').get(token);
   if (!row) return null;
   if (Date.now() > row.expires_at) {
-    deleteSession(token);
+    if (!isProductionValidationReadOnlyRequested()) deleteSession(token);
     return null;
   }
   try {
     return JSON.parse(row.json);
   } catch {
-    deleteSession(token);
+    if (!isProductionValidationReadOnlyRequested()) deleteSession(token);
     return null;
   }
 }
@@ -422,21 +564,10 @@ function cleanupExpiredSessions(now = Date.now()) {
   db.prepare('DELETE FROM app_sessions WHERE expires_at <= ?').run(now);
 }
 
-function resetAppData(collections = JSON_COLLECTIONS) {
-  assertProductionWriteAllowed('application data reset');
-  const db = ensureDb();
-  const names = Array.isArray(collections) && collections.length > 0
-    ? [...new Set(collections.map(name => String(name || '').trim()).filter(Boolean))]
-    : JSON_COLLECTIONS;
-  const deleteData = db.prepare('DELETE FROM app_data WHERE name = ?');
-  const tx = db.transaction((collectionNames) => {
-    for (const name of collectionNames) deleteData.run(name);
-    db.prepare('DELETE FROM app_sessions').run();
-    if (collectionNames.includes('clients')) {
-      db.prepare('DELETE FROM client_inn_index').run();
-    }
-  });
-  tx(names);
+function resetAppData() {
+  const error = new Error('Raw application reset is disabled; use the audited clean-reset runner.');
+  error.code = 'AUDITED_MAINTENANCE_RUNNER_REQUIRED';
+  throw error;
 }
 
 async function createSqliteBackup(targetPath) {
@@ -453,6 +584,7 @@ function countActiveSessions(now = Date.now()) {
 }
 
 module.exports = {
+  appDataValueFingerprint,
   assertProductionWriteAllowed,
   DB_PATH,
   cloneCollectionIfMissing,
@@ -462,13 +594,17 @@ module.exports = {
   deleteSession,
   deleteSessionsForUserIds,
   ensureDb,
+  executeProductionValidationSmokeLoginWriteTransaction,
   getData,
   getSession,
   JSON_COLLECTIONS,
   setData,
+  setDataCompareAndSwap,
   migrateJsonFilesToDb,
+  openExactProductionValidationDatabase,
   resetAppData,
   saveSession,
   syncClientInnIndex,
   setDataBatch,
+  setDataBatchCompareAndSwap,
 };

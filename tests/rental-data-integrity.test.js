@@ -10,12 +10,14 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const express = serverRequire('express');
+const Database = serverRequire('better-sqlite3');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { registerRentalChangeRequestRoutes } = require('../server/routes/rental-change-requests.js');
 const { registerRentalRoutes } = require('../server/routes/rentals.js');
 const { validateRentalPayload } = require('../server/lib/rental-validation.js');
 const { canonicalizeRentalPatch } = require('../server/lib/rental-data-integrity.js');
+const { createRequestIdempotencyService } = require('../server/lib/request-idempotency.js');
 
 const NOW = '2026-05-15T09:00:00.000Z';
 
@@ -82,6 +84,18 @@ function createApp(state = createState(), options = {}) {
     for (const [name, value] of pending) state[name] = value;
   };
   const accessControl = createAccessControl({ readData });
+  const idempotencyDb = new Database(':memory:');
+  idempotencyDb.exec(`
+    CREATE TABLE app_data (
+      name TEXT PRIMARY KEY,
+      json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  const requestIdempotency = createRequestIdempotencyService({
+    db: idempotencyDb,
+    nowIso: () => NOW,
+  });
   let idCounter = 0;
 
   function requireAuth(req, res, next) {
@@ -89,6 +103,10 @@ function createApp(state = createState(), options = {}) {
     const actor = ACTORS[token];
     if (!actor) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     req.user = actor;
+    req.actorScope = {
+      companyId: 'COMPANY-A',
+      tenantId: 'COMPANY-A',
+    };
     return next();
   }
 
@@ -108,6 +126,7 @@ function createApp(state = createState(), options = {}) {
     accessControl,
     auditLog: () => {},
     nowIso: () => NOW,
+    requestIdempotency,
   }));
   app.use('/api', registerRentalChangeRequestRoutes({
     readData,
@@ -120,7 +139,7 @@ function createApp(state = createState(), options = {}) {
     idPrefixes: { rental_change_requests: 'RCR' },
     accessControl,
   }));
-  return { app, state };
+  return { app, state, idempotencyDb };
 }
 
 async function withServer(app, fn) {
@@ -377,19 +396,19 @@ test('parallel overlapping creation commits exactly one rental and one lifecycle
   });
 });
 
-test('rental idempotency key is bound to the creating user', async () => {
-  const { app, state } = createApp();
+test('rental idempotency namespace is tenant-bound and replays for another authorized tenant actor', async () => {
+  const { app, state, idempotencyDb } = createApp();
   const headers = { 'Idempotency-Key': 'rental-actor-0001' };
   await withServer(app, async baseUrl => {
     const created = await request(baseUrl, 'POST', '/api/rentals', rentalPayload(), 'admin-token', headers);
     const otherActor = await request(baseUrl, 'POST', '/api/rentals', rentalPayload(), 'office-token', headers);
 
     assert.equal(created.status, 201);
-    assert.equal(otherActor.status, 409);
-    assert.equal(otherActor.body.code, 'IDEMPOTENCY_KEY_REUSED');
+    assert.equal(otherActor.status, 200);
+    assert.equal(otherActor.body.id, created.body.id);
     assert.equal(state.rentals.length, 1);
     assert.equal(state.gantt_rentals.length, 1);
-    assert.equal(state.rental_create_idempotency.length, 1);
+    assert.equal(idempotencyDb.prepare('SELECT COUNT(*) AS count FROM request_idempotency').get().count, 1);
   });
 });
 
@@ -459,7 +478,7 @@ test('manual rental total remains authoritative and money is persisted canonical
 });
 
 test('daily-rate create derives canonical total before fingerprint and exact lifecycle persistence', async () => {
-  const { app, state } = createApp();
+  const { app, state, idempotencyDb } = createApp();
   const headers = { 'Idempotency-Key': 'canonical-daily-rate-0001' };
   await withServer(app, async baseUrl => {
     const first = await request(baseUrl, 'POST', '/api/rentals', rentalPayload({
@@ -489,7 +508,7 @@ test('daily-rate create derives canonical total before fingerprint and exact lif
     assert.equal(state.rentals.length, 1);
     assert.equal(state.gantt_rentals.length, 1);
     assert.equal(state.equipment[0].history.length, 1);
-    assert.equal(state.rental_create_idempotency.length, 1);
+    assert.equal(idempotencyDb.prepare('SELECT COUNT(*) AS count FROM request_idempotency').get().count, 1);
     assert.equal(state.rentals[0].pricingMode, 'daily_rate');
     assert.equal(state.rentals[0].dailyRate, 2468);
     assert.equal(state.rentals[0].rate, '2468 ₽/день');
@@ -893,7 +912,7 @@ test('update batch failure leaves rental, planner and approval decision unchange
 test('batch failure rolls back rental, planner row and equipment transition', async () => {
   const state = createState();
   const before = structuredClone(state);
-  const { app } = createApp(state, { failBatch: true });
+  const { app, idempotencyDb } = createApp(state, { failBatch: true });
   await withServer(app, async baseUrl => {
     const response = await request(
       baseUrl,
@@ -908,7 +927,7 @@ test('batch failure rolls back rental, planner row and equipment transition', as
     assert.deepEqual(state.rentals, before.rentals);
     assert.deepEqual(state.gantt_rentals, before.gantt_rentals);
     assert.deepEqual(state.equipment, before.equipment);
-    assert.equal(state.rental_create_idempotency, undefined);
+    assert.equal(idempotencyDb.prepare('SELECT COUNT(*) AS count FROM request_idempotency').get().count, 0);
   });
 });
 

@@ -3,7 +3,7 @@ function registerLeasingRoutes(router, deps) {
     requireAuth,
     requireRead,
     readData,
-    writeData,
+    writeDataBatch,
     accessControl,
     generateId,
     idPrefixes,
@@ -78,11 +78,20 @@ function registerLeasingRoutes(router, deps) {
     return contracts.map(item => decorateLeasingContract(item, rows, today));
   }
 
-  function replaceContractSchedule(contract, schedule) {
-    if (!Array.isArray(schedule)) return;
-    const otherRows = scheduleRows().filter(row => row.leasingContractId !== contract.id);
+  function nextContractSchedule(contract, schedule, currentRows = scheduleRows()) {
+    if (!Array.isArray(schedule)) return currentRows;
+    const otherRows = currentRows.filter(row => row.leasingContractId !== contract.id);
     const normalizedRows = schedule.map((row, index) => normalizeLeasingPaymentScheduleRow(row, contract, index));
-    writeData(SCHEDULE, [...otherRows, ...normalizedRows]);
+    return [...otherRows, ...normalizedRows];
+  }
+
+  function persistContractAndSchedule(contracts, contract, schedule) {
+    const currentSchedule = scheduleRows();
+    const nextSchedule = nextContractSchedule(contract, schedule, currentSchedule);
+    const entries = [{ name: CONTRACTS, value: contracts }];
+    if (Array.isArray(schedule)) entries.push({ name: SCHEDULE, value: nextSchedule });
+    writeDataBatch(entries);
+    return nextSchedule;
   }
 
   router.get('/leasing-contracts', ...readMiddlewares, (req, res) => {
@@ -117,12 +126,15 @@ function registerLeasingRoutes(router, deps) {
         null,
         { nowIso: now },
       );
-      contracts.push(contract);
-      writeData(CONTRACTS, contracts);
-      replaceContractSchedule(contract, req.body?.schedule);
-      res.status(201).json(decorateLeasingContract(contract, scheduleRows()));
+      const nextContracts = [...contracts, contract];
+      const nextSchedule = persistContractAndSchedule(nextContracts, contract, req.body?.schedule);
+      res.status(201).json(decorateLeasingContract(contract, nextSchedule));
     } catch (error) {
-      res.status(400).json({ ok: false, error: error.message });
+      res.status(error?.status || 400).json({
+        ok: false,
+        ...(error?.code ? { code: error.code } : {}),
+        error: error.message,
+      });
     }
   });
 
@@ -134,12 +146,15 @@ function registerLeasingRoutes(router, deps) {
     try {
       const now = nowIso();
       const next = normalizeLeasingContract({ ...contracts[index], ...req.body, id: contracts[index].id }, contracts[index], { nowIso: now });
-      contracts[index] = next;
-      writeData(CONTRACTS, contracts);
-      replaceContractSchedule(next, req.body?.schedule);
-      res.json(decorateLeasingContract(next, scheduleRows()));
+      const nextContracts = contracts.map((item, itemIndex) => itemIndex === index ? next : item);
+      const nextSchedule = persistContractAndSchedule(nextContracts, next, req.body?.schedule);
+      res.json(decorateLeasingContract(next, nextSchedule));
     } catch (error) {
-      res.status(400).json({ ok: false, error: error.message });
+      res.status(error?.status || 400).json({
+        ok: false,
+        ...(error?.code ? { code: error.code } : {}),
+        error: error.message,
+      });
     }
   });
 
@@ -148,10 +163,21 @@ function registerLeasingRoutes(router, deps) {
     const index = contracts.findIndex(item => item.id === req.params.id);
     if (index === -1) return res.status(404).json({ ok: false, error: 'Not found' });
     if (!canDelete(req, res, contracts[index])) return;
-    contracts.splice(index, 1);
-    writeData(CONTRACTS, contracts);
-    writeData(SCHEDULE, scheduleRows().filter(row => row.leasingContractId !== req.params.id));
-    res.json({ ok: true });
+    try {
+      const nextContracts = contracts.filter((_item, itemIndex) => itemIndex !== index);
+      const nextSchedule = scheduleRows().filter(row => row.leasingContractId !== req.params.id);
+      writeDataBatch([
+        { name: CONTRACTS, value: nextContracts },
+        { name: SCHEDULE, value: nextSchedule },
+      ]);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(error?.status || 400).json({
+        ok: false,
+        ...(error?.code ? { code: error.code } : {}),
+        error: error.message,
+      });
+    }
   });
 }
 

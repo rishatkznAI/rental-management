@@ -35,15 +35,23 @@ type SendGsmCommandPayload = {
 };
 
 type LinkGsmDevicePayload = {
-  equipmentId?: string;
-  model?: string;
-  inventoryNumber?: string;
-  imei: string;
+  equipmentId: string;
+  imei?: string;
+  deviceId?: string;
   deviceType?: string;
   protocol?: string;
+  ingressMode: 'http_token' | 'tcp_device_credential';
   sim1?: string;
   oldServer?: string;
   targetServer?: string;
+  ingressSecret?: string;
+};
+
+type RetiredGsmDevice = Omit<GsmGatewayDevice, 'status'> & {
+  status: GsmGatewayDevice['status'] | 'retired';
+  retiredAt?: string | null;
+  retiredBy?: string | null;
+  retiredReason?: string | null;
 };
 
 export type GsmDashboardResponse = {
@@ -122,16 +130,22 @@ export const gsmGatewayService = {
   getDevice: (imei: string): Promise<GsmGatewayDevice> =>
     api.get<GsmGatewayDevice>(`/api/gsm/devices/${encodeURIComponent(imei)}`),
 
-  getEquipmentTelemetry: (equipmentId: string): Promise<{ equipmentId: string; devices: GsmGatewayDevice[]; packets: GsmGatewayPacket[] }> =>
+  getEquipmentTelemetry: (equipmentId: string): Promise<{ equipmentId: string; devices: GsmGatewayDevice[]; packets: GsmGatewayPacket[]; historyPackets: GsmGatewayPacket[] }> =>
     api.get(`/api/gsm/equipment/${encodeURIComponent(equipmentId)}`),
 
   linkDevice: (payload: LinkGsmDevicePayload): Promise<{ ok: boolean; device: GsmGatewayDevice; equipment: unknown }> =>
     api.post('/api/gsm/devices/link', payload),
 
+  retireDevice: (id: string, reason?: string): Promise<{ ok: boolean; retired: boolean; device: RetiredGsmDevice }> =>
+    api.post(`/api/gsm/devices/${encodeURIComponent(id)}/retire`, { reason }),
+
+  rotateDeviceIdentity: (id: string, payload: { imei?: string | null; deviceId?: string | null }): Promise<{ ok: boolean; rotated: boolean; device: GsmGatewayDevice }> =>
+    api.patch(`/api/gsm/devices/${encodeURIComponent(id)}/identity`, payload),
+
   getRoute: (params: { equipmentId: string; dateFrom: string; dateTo: string }): Promise<GsmGatewayRoutePoint[]> =>
     api.get<GsmGatewayRoutePoint[]>(`/api/gsm/route${buildQuery(params)}`),
 
-  searchBindings: (params: { search?: string; limit?: number } = {}): Promise<GsmBindingSearchResponse> =>
+  searchBindings: (params: { search?: string; equipmentId?: string; limit?: number } = {}): Promise<GsmBindingSearchResponse> =>
     api.get<GsmBindingSearchResponse>(`/api/gsm/bindings${buildQuery(params)}`),
 
   getCommands: (params?: PacketQuery): Promise<GsmGatewayCommand[]> =>

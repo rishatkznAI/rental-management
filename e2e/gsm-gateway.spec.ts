@@ -1,8 +1,52 @@
 import { expect, test } from '@playwright/test';
-import type { Page } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import net from 'node:net';
 import { loginAsAdmin, navigateInApp } from './helpers/auth';
 import { createEquipment, withAdminApi } from './helpers/api';
+
+let gsmIdentitySequence = 0;
+
+function nextGsmIdentity() {
+  const numericSuffix = String(Date.now() * 100 + gsmIdentitySequence++)
+    .slice(-13)
+    .padStart(13, '0');
+  return {
+    imei: `86${numericSuffix}`,
+    deviceId: `E2E-GSM-${numericSuffix}`,
+    ingressSecret: `e2e-device-${numericSuffix}`,
+  };
+}
+
+async function provisionGsmDevice(
+  api: APIRequestContext,
+  equipmentId: string,
+  identity: { imei?: string; deviceId?: string; ingressSecret: string },
+  options: { protocol?: string; sim1?: string } = {},
+) {
+  const response = await api.post('/api/gsm/devices/link', {
+    data: {
+      equipmentId,
+      imei: identity.imei,
+      deviceId: identity.deviceId,
+      protocol: options.protocol || 'fallback-text',
+      ingressMode: 'tcp_device_credential',
+      ingressSecret: identity.ingressSecret,
+      sim1: options.sim1,
+    },
+  });
+  if (!response.ok()) {
+    throw new Error(`Failed to provision GSM device: ${response.status()} ${await response.text()}`);
+  }
+  const result = (await response.json()) as {
+    ok: boolean;
+    device: { id: string; equipmentId: string; imei?: string | null; deviceId?: string | null };
+  };
+  expect(result.ok).toBeTruthy();
+  expect(result.device.equipmentId).toBe(equipmentId);
+  if (identity.imei) expect(result.device.imei).toBe(identity.imei);
+  if (identity.deviceId) expect(result.device.deviceId).toBe(identity.deviceId);
+  return result.device;
+}
 
 function sendTcpPacket(payload: string, port = 5023) {
   const deadline = Date.now() + 8_000;
@@ -69,32 +113,26 @@ test('GSM page shows gateway status, latest packets and packet details', async (
   });
 
   const suffix = `gsm-open-${Date.now()}`;
+  const identity = nextGsmIdentity();
   const equipment = await withAdminApi(async (api) => {
     const equipment = await createEquipment(api, suffix);
-    const patch = await api.patch(`/api/equipment/${equipment.id}`, {
-      data: {
-        gsmImei: '866123456789012',
-        gsmDeviceId: '866123456789012',
-        gsmProtocol: 'fallback-text',
-      },
-    });
-    expect(patch.ok()).toBeTruthy();
+    await provisionGsmDevice(api, equipment.id, identity);
     return equipment;
   });
 
   await loginAsAdmin(page);
-  await sendTcpPacket('IMEI:866123456789012 LAT:55.796 LNG:49.108 SPEED:0');
+  await sendTcpPacket(`IMEI:${identity.imei} ingressSecret=${identity.ingressSecret} LAT:55.796 LNG:49.108 SPEED:0`);
   requests.length = 0;
   apiErrors.length = 0;
   consoleErrors.length = 0;
 
   await navigateInApp(page, '/gsm');
   await expect(page.getByRole('heading', { name: /Геозоны, уведомления и маршруты техники/ })).toBeVisible();
-  await expect(page.getByText('GPRS-шлюз')).toBeVisible();
-  await expect(page.getByText('Последние входящие пакеты')).toBeVisible();
+  await expect(page.getByText('GSM TCP-шлюз', { exact: true })).toBeVisible();
+  await expect(page.getByText('Последние пакеты · raw-журнал', { exact: true })).toBeVisible();
 
   await page.getByRole('tab', { name: 'Последние пакеты' }).click();
-  await expect(page.getByText('866123456789012').first()).toBeVisible();
+  await expect(page.getByText(identity.imei).first()).toBeVisible();
   await expect(page.getByText('55.79600, 49.10800').first()).toBeVisible();
 
   await page.getByRole('tab', { name: 'Карта и геозоны' }).click();
@@ -115,6 +153,13 @@ test('GSM page shows gateway status, latest packets and packet details', async (
   await page.getByRole('button', { name: 'Детали' }).first().click();
   await expect(page.getByRole('heading', { name: 'Детали пакета' })).toBeVisible();
   await expect(page.getByText('rawHex').last()).toBeVisible();
+  await expect(page.getByText(identity.ingressSecret, { exact: false })).toHaveCount(0);
+
+  await withAdminApi(async (api) => {
+    const diagnostics = await api.get('/api/gsm/diagnostics');
+    expect(diagnostics.ok()).toBeTruthy();
+    expect(await diagnostics.text()).not.toContain(identity.ingressSecret);
+  });
 
   await expect.poll(() => requests.some(item => item.method === 'GET' && item.path.startsWith('/api/gsm/dashboard'))).toBeTruthy();
   await expect.poll(() => requests.some(item => item.method === 'GET' && item.path.startsWith('/api/gsm/packets?') && item.path.includes('paginated=true'))).toBeTruthy();
@@ -135,31 +180,16 @@ test('GSM page keeps light theme readable across packets, warning and map', asyn
     if (message.type() === 'error') consoleErrors.push(message.text());
   });
 
-  const trackerId = '990999260517062';
-  await withAdminApi(async (api) => {
-    const equipmentRes = await api.get('/api/equipment');
-    expect(equipmentRes.ok()).toBeTruthy();
-    const equipment = (await equipmentRes.json()) as Array<{ id: string; inventoryNumber?: string; serialNumber?: string }>;
-    const existing = equipment.find(item => item.inventoryNumber === '001' && item.serialNumber === '03311273');
-    const target = existing || await createEquipment(api, `gsm-light-${Date.now()}`);
-    const patch = await api.patch(`/api/equipment/${target.id}`, {
-      data: {
-        manufacturer: 'Mantall',
-        model: 'XE160WCT',
-        inventoryNumber: '001',
-        serialNumber: '03311273',
-        gsmImei: trackerId,
-        gsmDeviceId: trackerId,
-        gsmProtocol: 'fallback-text',
-      },
-    });
-    expect(patch.ok()).toBeTruthy();
+  const identity = nextGsmIdentity();
+  const target = await withAdminApi(async (api) => {
+    const target = await createEquipment(api, `gsm-light-${Date.now()}`);
+    await provisionGsmDevice(api, target.id, identity);
     return target;
   });
 
   await page.addInitScript(() => window.localStorage.setItem('theme', 'light'));
   await loginAsAdmin(page);
-  await sendTcpPacket(`IMEI:${trackerId} LAT:0.223456 LNG:0.754321 SPEED:0`);
+  await sendTcpPacket(`IMEI:${identity.imei} ingressSecret=${identity.ingressSecret} LAT:0.223456 LNG:0.754321 SPEED:0`);
 
   await navigateInApp(page, '/gsm');
   await expect(page.locator('html')).not.toHaveClass(/dark/);
@@ -177,13 +207,13 @@ test('GSM page keeps light theme readable across packets, warning and map', asyn
   expect(badLightThemeContainers).toBe(0);
 
   await page.getByRole('tab', { name: 'Последние пакеты' }).click();
-  await expect(page.getByText(trackerId).first()).toBeVisible();
-  await expect(page.getByText('Mantall XE160WCT · INV 001 · SN 03311273').first()).toBeVisible();
+  await expect(page.getByText(identity.imei).first()).toBeVisible();
+  await expect(page.getByText(`${target.manufacturer} ${target.model} · INV ${target.inventoryNumber} · ${target.serialNumber}`).first()).toBeVisible();
   await expect(page.getByText('Координаты выглядят тестовыми или некорректными').first()).toBeVisible();
 
   await page.getByRole('tab', { name: 'Карта и геозоны' }).click();
   await expect(page.getByRole('heading', { name: 'Карта расположения техники' })).toBeVisible();
-  await expect(page.getByText('Mantall XE160WCT').first()).toBeVisible();
+  await expect(page.getByText(`${target.manufacturer} ${target.model}`).first()).toBeVisible();
   await expect(page.getByText('Координаты выглядят тестовыми или некорректными').first()).toBeVisible();
   await expectRenderedGsmMap(page);
 
@@ -199,19 +229,15 @@ test('GSM page keeps light theme readable across packets, warning and map', asyn
   expect(consoleErrors).toEqual([]);
 });
 
-test('equipment card shows GSM block with editable IMEI data', async ({ page }) => {
+test('equipment card shows canonical GSM projection without generic identity inputs', async ({ page }) => {
   const suffix = `gsm-${Date.now()}`;
+  const identity = nextGsmIdentity();
   const equipment = await withAdminApi(async (api) => {
     const created = await createEquipment(api, suffix);
-    const patch = await api.patch(`/api/equipment/${created.id}`, {
-      data: {
-        gsmImei: '866123456789012',
-        gsmDeviceId: 'TRACKER-E2E',
-        gsmProtocol: 'fallback-text',
-        gsmSimNumber: '+79990000000',
-      },
+    await provisionGsmDevice(api, created.id, identity, {
+      protocol: 'fallback-text',
+      sim1: '+79990000000',
     });
-    expect(patch.ok()).toBeTruthy();
     return created;
   });
 
@@ -219,6 +245,12 @@ test('equipment card shows GSM block with editable IMEI data', async ({ page }) 
   await navigateInApp(page, `/equipment/${equipment.id}`);
   await expect(page.getByRole('heading', { name: 'GSM / Трекер' })).toBeVisible();
   await expect(page.getByText('IMEI')).toBeVisible();
-  await expect(page.getByText('866123456789012')).toBeVisible();
-  await expect(page.getByText('TRACKER-E2E')).toBeVisible();
+  await expect(page.getByText(identity.imei)).toBeVisible();
+  await expect(page.getByText('+79990000000')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Редактировать', exact: true }).first().click();
+  const dialog = page.getByRole('dialog', { name: 'Редактировать технику' });
+  await expect(dialog.getByText('Настройка GSM выполняется через каноническую привязку устройства.')).toBeVisible();
+  await expect(dialog.getByPlaceholder('866123456789012')).toHaveCount(0);
+  await expect(dialog.getByPlaceholder('TRACKER-001')).toHaveCount(0);
 });

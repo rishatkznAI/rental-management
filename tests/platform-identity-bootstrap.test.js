@@ -266,6 +266,25 @@ test('bootstrap validation blocks role inference, invalid mappings, unresolved u
   }
 });
 
+test('inactive or pending membership does not resolve an eligible active user', () => {
+  const context = createPlatformIdentityContext();
+  try {
+    for (const status of ['pending', 'inactive', 'revoked']) {
+      const config = validConfig(context);
+      config.memberships[0].status = status;
+      config.approval.configChecksum = calculateBootstrapChecksum(context.db, config);
+      const validation = validateBootstrapConfig(context.db, config);
+      assert.equal(
+        validation.blockers.some(blocker => blocker.code === 'ACTIVE_USER_UNRESOLVED'),
+        true,
+        status,
+      );
+    }
+  } finally {
+    context.close();
+  }
+});
+
 test('bootstrap apply requires explicit confirmation and exact checksum', () => {
   const context = createPlatformIdentityContext();
   try {

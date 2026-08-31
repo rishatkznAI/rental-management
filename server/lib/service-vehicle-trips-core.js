@@ -68,6 +68,9 @@ function normalizeVehicleTripPayload(body, {
 } = {}) {
   const vehicleId = normalizeTripText(body.vehicleId ?? previous?.vehicleId);
   if (!vehicleId) throw tripError('vehicleId обязателен');
+  if (previous && vehicleId !== normalizeTripText(previous.vehicleId)) {
+    throw tripError('Нельзя перенести путевой лист на другую машину через редактирование.', 409);
+  }
   if (!findServiceVehicle(vehicleId, vehicles)) throw tripError('Служебная машина не найдена', 404);
 
   const status = normalizeTripText(body.status ?? previous?.status ?? 'draft') || 'draft';
@@ -154,6 +157,17 @@ function applyVehicleMileageFromTrip(vehicles = [], trip, nowIso = () => new Dat
   return next;
 }
 
+function buildVehicleTripPersistenceEntries({ trips, vehicles, trip, nowIso = () => new Date().toISOString() } = {}) {
+  if (!Array.isArray(trips) || !Array.isArray(vehicles) || !trip || typeof trip !== 'object') {
+    throw new TypeError('Vehicle-trip persistence requires staged trips, vehicles, and a trip.');
+  }
+  const nextVehicles = applyVehicleMileageFromTrip(vehicles, trip, nowIso);
+  return [
+    { name: 'vehicle_trips', value: trips },
+    { name: 'service_vehicles', value: nextVehicles },
+  ];
+}
+
 module.exports = {
   VEHICLE_TRIP_STATUSES,
   normalizeTripText,
@@ -165,4 +179,5 @@ module.exports = {
   assertTripSheetNumberUnique,
   normalizeVehicleTripPayload,
   applyVehicleMileageFromTrip,
+  buildVehicleTripPersistenceEntries,
 };

@@ -489,7 +489,7 @@ function createCliDatabase(dbPath, data) {
   db.close();
 }
 
-test('mapping CLI is dry-run first, detects races, backs up before atomic write, and empty/already-canonical runs are safe', () => {
+test('mapping CLI is read-only and blocks raw apply without mutation', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'warranty-factory-mapping-'));
   const dbPath = path.join(tempDir, 'app.sqlite');
   const manifestPath = path.join(tempDir, 'mapping.json');
@@ -515,43 +515,12 @@ test('mapping CLI is dry-run first, detects races, backs up before atomic write,
       mappings: [{ claimId: 'W-map', factoryCounterpartyId: 'CP-S1' }],
     }));
     const applied = run('--apply');
-    assert.equal(applied.status, 0, applied.stderr);
-    const result = JSON.parse(applied.stdout);
-    assert.ok(fs.existsSync(result.backupPath));
-    const backup = new Database(result.backupPath, { readonly: true });
-    assert.equal(JSON.parse(backup.prepare('SELECT json FROM app_data WHERE name = ?').get('warranty_claims').json)[0].factoryCounterpartyId, undefined);
-    backup.close();
+    assert.notEqual(applied.status, 0);
+    assert.match(applied.stderr, /AUDITED_MAINTENANCE_RUNNER_REQUIRED/);
     verify = new Database(dbPath, { readonly: true });
-    assert.equal(JSON.parse(verify.prepare('SELECT json FROM app_data WHERE name = ?').get('warranty_claims').json)[0].factoryCounterpartyId, 'CP-S1');
+    assert.equal(JSON.parse(verify.prepare('SELECT json FROM app_data WHERE name = ?').get('warranty_claims').json)[0].factoryCounterpartyId, undefined);
     verify.close();
-
-    const repeatDryRun = run('--dry-run');
-    assert.equal(repeatDryRun.status, 0, repeatDryRun.stderr);
-    fs.writeFileSync(manifestPath, JSON.stringify({
-      sourceFingerprint: JSON.parse(repeatDryRun.stdout).sourceFingerprint,
-      mappings: [{ claimId: 'W-map', factoryCounterpartyId: 'CP-S1' }],
-    }));
-    const repeated = run('--apply');
-    assert.equal(repeated.status, 0, repeated.stderr);
-    assert.equal(JSON.parse(repeated.stdout).wrote, false);
-    assert.equal(fs.readdirSync(path.join(tempDir, 'backups')).length, 1);
-
-    const emptyManifest = { mappings: [] };
-    fs.writeFileSync(manifestPath, JSON.stringify(emptyManifest));
-    assert.equal(run('--dry-run').status, 0);
-
-    const racePreview = JSON.parse(run('--dry-run').stdout);
-    const mutate = new Database(dbPath);
-    mutate.prepare('UPDATE app_data SET updated_at = ?, json = ? WHERE name = ?')
-      .run('race', JSON.stringify([...data.collections.counterparties, { id: 'CP-race' }]), 'counterparties');
-    mutate.close();
-    fs.writeFileSync(manifestPath, JSON.stringify({
-      sourceFingerprint: racePreview.sourceFingerprint,
-      mappings: [],
-    }));
-    const raced = run('--apply');
-    assert.notEqual(raced.status, 0);
-    assert.match(raced.stderr, /WARRANTY_FACTORY_MAPPING_PRECONDITION_CHANGED/);
+    assert.equal(fs.existsSync(path.join(tempDir, 'backups')), false);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

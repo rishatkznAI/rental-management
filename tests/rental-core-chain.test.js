@@ -16,6 +16,7 @@ const { validateRentalPayload } = require('../server/lib/rental-validation.js');
 const { buildFinanceReport } = require('../server/lib/finance-core.js');
 const { createNumberSequenceAllocator } = require('../server/lib/number-sequences.js');
 const { createBusinessNumberingService } = require('../server/lib/business-numbering.js');
+const { createRequestIdempotencyService } = require('../server/lib/request-idempotency.js');
 
 function createState() {
   return {
@@ -82,6 +83,7 @@ function createState() {
     service: [],
     documents: [],
     payments: [],
+    audit_logs: [],
   };
 }
 
@@ -90,20 +92,47 @@ function createApp(state = createState(), options = {}) {
   app.use(express.json());
   const apiRouter = express.Router();
   const readData = name => state[name] || [];
-  const writeData = (name, value) => { state[name] = value; };
+  let businessNumbering = null;
+  let persistCanonicalDataBatch = null;
+  const writeData = (name, value) => {
+    persistCanonicalDataBatch.immediate([{ name, value }]);
+  };
   const writeDataBatch = entries => {
-    if (options.failBatch) throw new Error('Injected delivery batch failure');
-    for (const entry of entries || []) state[entry.name] = entry.value;
+    persistCanonicalDataBatch.immediate(entries);
   };
   const accessControl = createAccessControl({ readData });
   const numberingDb = new Database(':memory:');
-  const businessNumbering = createBusinessNumberingService({
+  numberingDb.exec(`
+    CREATE TABLE app_data (
+      name TEXT PRIMARY KEY,
+      json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  businessNumbering = createBusinessNumberingService({
     allocator: createNumberSequenceAllocator({
       db: numberingDb,
       scope: { scopeType: 'company', scopeId: 'SKYTECH' },
       nowIso: () => '2026-05-01T09:00:00.000Z',
     }),
     readData,
+    nowIso: () => '2026-05-01T09:00:00.000Z',
+  });
+  const upsertAppData = numberingDb.prepare(`
+    INSERT INTO app_data (name, json)
+    VALUES (?, ?)
+    ON CONFLICT(name) DO UPDATE SET json = excluded.json
+  `);
+  persistCanonicalDataBatch = numberingDb.transaction(entries => {
+    businessNumbering.preparePersistenceEntries(entries);
+    if (options.failBatch) throw new Error('Injected delivery batch failure');
+    for (const entry of entries || []) {
+      upsertAppData.run(entry.name, JSON.stringify(entry.value));
+      state[entry.name] = entry.value;
+    }
+  });
+  const requestIdempotency = createRequestIdempotencyService({
+    db: numberingDb,
     nowIso: () => '2026-05-01T09:00:00.000Z',
   });
   let idCounter = 0;
@@ -117,6 +146,10 @@ function createApp(state = createState(), options = {}) {
         : null;
     if (!actor) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     req.user = actor;
+    req.actorScope = {
+      companyId: 'COMPANY-A',
+      tenantId: 'COMPANY-A',
+    };
     return next();
   }
 
@@ -124,6 +157,7 @@ function createApp(state = createState(), options = {}) {
     readData,
     writeData,
     writeDataBatch,
+    writeAuditDataBatch: writeDataBatch,
     requireAuth,
     requireRead: () => (_req, _res, next) => next(),
     requireWrite: () => (_req, _res, next) => next(),
@@ -141,12 +175,13 @@ function createApp(state = createState(), options = {}) {
     saveBotUsers: () => {},
     nowIso: () => '2026-05-01T09:00:00.000Z',
     businessNumbering,
+    requestIdempotency,
   };
 
   apiRouter.use(registerRentalRoutes(deps));
   registerDeliveryRoutes(apiRouter, deps);
   app.use('/api', apiRouter);
-  return { app, state };
+  return { app, state, numberingDb };
 }
 
 async function withServer(app, fn) {
@@ -162,11 +197,16 @@ async function withServer(app, fn) {
 }
 
 async function request(baseUrl, method, path, body, extraHeaders = {}) {
+  request.sequence = Number(request.sequence || 0) + 1;
+  const automaticIdempotencyHeader = method === 'POST' && path === '/api/deliveries'
+    ? { 'Idempotency-Key': `rental-core-delivery-${request.sequence}` }
+    : {};
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       authorization: 'Bearer admin-token',
       'content-type': 'application/json',
+      ...automaticIdempotencyHeader,
       ...extraHeaders,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -220,6 +260,20 @@ test('creating a client rental creates a linked planner row with stable ids', as
   });
 });
 
+test('unkeyed rental route rolls back number reservations and app_data on downstream batch failure', async () => {
+  const { app, state, numberingDb } = createApp(createState(), { failBatch: true });
+
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/rentals', rentalPayload());
+    assert.equal(response.status, 500, JSON.stringify(response.body));
+    assert.equal(state.rentals.length, 0);
+    assert.equal(state.gantt_rentals.length, 0);
+    assert.equal(numberingDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 0);
+    assert.equal(numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 0);
+    assert.equal(numberingDb.prepare('SELECT COUNT(*) AS count FROM app_data').get().count, 0);
+  });
+});
+
 test('three Rental creates receive sequential numbers and reject client number mutation', async () => {
   const { app } = createApp();
 
@@ -252,7 +306,7 @@ test('three Rental creates receive sequential numbers and reject client number m
 });
 
 test('concurrent exact rental creates replay one idempotent result without duplicating lifecycle state', async () => {
-  const { app, state } = createApp();
+  const { app, state, numberingDb } = createApp();
   const headers = { 'Idempotency-Key': 'rental-retry-0001' };
 
   await withServer(app, async baseUrl => {
@@ -263,20 +317,21 @@ test('concurrent exact rental creates replay one idempotent result without dupli
     const first = responses.find(response => response.status === 201);
     const replay = responses.find(response => response.status === 200);
 
-    assert.ok(first);
-    assert.ok(replay);
+    assert.ok(first, JSON.stringify(responses.map(({ status, body }) => ({ status, body }))));
+    assert.ok(replay, JSON.stringify(responses.map(({ status, body }) => ({ status, body }))));
     assert.equal(replay.body.id, first.body.id);
     assert.equal(replay.headers.get('idempotency-replayed'), 'true');
     assert.equal(state.rentals.length, 1);
     assert.equal(state.gantt_rentals.length, 1);
     assert.equal(state.equipment[0].history.length, 1);
-    assert.equal(state.rental_create_idempotency.length, 1);
-    assert.equal(state.rental_create_idempotency[0].rentalId, first.body.id);
+    const receipts = numberingDb.prepare('SELECT * FROM request_idempotency').all();
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].result_id, first.body.id);
   });
 });
 
 test('rental create rejects a changed payload under the same idempotency key', async () => {
-  const { app, state } = createApp();
+  const { app, state, numberingDb } = createApp();
   const headers = { 'Idempotency-Key': 'rental-retry-0002' };
 
   await withServer(app, async baseUrl => {
@@ -290,7 +345,7 @@ test('rental create rejects a changed payload under the same idempotency key', a
     assert.equal(mismatched.body.code, 'IDEMPOTENCY_KEY_REUSED');
     assert.equal(state.rentals.length, 1);
     assert.equal(state.gantt_rentals.length, 1);
-    assert.equal(state.rental_create_idempotency.length, 1);
+    assert.equal(numberingDb.prepare('SELECT COUNT(*) AS count FROM request_idempotency').get().count, 1);
   });
 });
 

@@ -2,6 +2,10 @@
 
 const crypto = require('crypto');
 const path = require('path');
+const {
+  assertDisposableFixtureDatabase,
+  parseAppDataValue,
+} = require('../lib/maintenance-script-safety');
 
 const STRONG_HASH_PREFIX = 'h2:scrypt:';
 const SCRYPT_KEY_LENGTH = 64;
@@ -63,7 +67,7 @@ function assertDemoSeedAllowed({ env = process.env, dbPath = env.DB_PATH } = {})
     throw new Error('Refused: environment name is not clearly demo.');
   }
 
-  const resolved = path.resolve(String(dbPath || ''));
+  const resolved = assertDisposableFixtureDatabase({ dbPath, env, kind: 'demo' });
   const base = path.basename(resolved).toLowerCase();
   if (!base.includes('demo') || base === 'app.sqlite') {
     throw new Error('Refused: DB_PATH must point to a clearly named demo database.');
@@ -110,17 +114,25 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function replaceDemoRecords(collectionName, fixtures, predicate = demoRecordId) {
-  const { getData, setData } = require('../db');
-  const current = asArray(getData(collectionName));
+function planDemoRecords(collectionName, fixtures, predicate = demoRecordId) {
+  const { appDataValueFingerprint, ensureDb } = require('../db');
+  const row = ensureDb().prepare('SELECT json FROM app_data WHERE name = ?').get(collectionName);
+  const stored = parseAppDataValue(row, collectionName, { expected: 'array', missing: [] });
+  const current = asArray(stored);
   const kept = current.filter(item => !predicate(item));
   const next = [...kept, ...fixtures];
-  setData(collectionName, next);
   return {
-    collection: collectionName,
-    removed: current.length - kept.length,
-    upserted: fixtures.length,
-    total: next.length,
+    entry: {
+      name: collectionName,
+      value: next,
+      expectedFingerprint: appDataValueFingerprint(row ? stored : null),
+    },
+    result: {
+      collection: collectionName,
+      removed: current.length - kept.length,
+      upserted: fixtures.length,
+      total: next.length,
+    },
   };
 }
 
@@ -697,12 +709,12 @@ function buildDemoData({ now = new Date(), env = process.env } = {}) {
       { id: 'DEMO-MECHANIC-001', userId: 'DEMO-USER-SERVICE', name: 'Demo Service Mechanic', role: 'Механик', status: 'active', fixtureTag: DEMO_PREFIX },
     ],
     service_works: [
-      { id: 'DEMO-WORK-001', name: 'DEMO диагностика', normHours: 1.5, ratePerHour: 2500, isActive: true, fixtureTag: DEMO_PREFIX },
+      { id: 'DEMO-WORK-001', ...DEMO_SCOPE, name: 'DEMO диагностика', normHours: 1.5, ratePerHour: 2500, isActive: true, fixtureTag: DEMO_PREFIX },
     ],
     spare_parts: [
-      { id: 'DEMO-PART-001', name: 'DEMO датчик наклона', article: 'DEMO-PART-001', unit: 'шт', defaultPrice: 8200, isActive: true, fixtureTag: DEMO_PREFIX },
-      { id: 'DEMO-PART-002', name: 'DEMO гидравлический фильтр', article: 'DEMO-PART-002', unit: 'шт', defaultPrice: 3100, isActive: true, fixtureTag: DEMO_PREFIX },
-      { id: 'DEMO-PART-003', name: 'DEMO комплект уплотнений', article: 'DEMO-PART-003', unit: 'шт', defaultPrice: 5400, isActive: true, fixtureTag: DEMO_PREFIX },
+      { id: 'DEMO-PART-001', ...DEMO_SCOPE, name: 'DEMO датчик наклона', article: 'DEMO-PART-001', unit: 'шт', defaultPrice: 8200, isActive: true, fixtureTag: DEMO_PREFIX },
+      { id: 'DEMO-PART-002', ...DEMO_SCOPE, name: 'DEMO гидравлический фильтр', article: 'DEMO-PART-002', unit: 'шт', defaultPrice: 3100, isActive: true, fixtureTag: DEMO_PREFIX },
+      { id: 'DEMO-PART-003', ...DEMO_SCOPE, name: 'DEMO комплект уплотнений', article: 'DEMO-PART-003', unit: 'шт', defaultPrice: 5400, isActive: true, fixtureTag: DEMO_PREFIX },
     ],
   };
 }
@@ -783,11 +795,13 @@ function ensureDemoAuthority() {
 }
 
 function seedDemoData({ logger = console, env = process.env, now = new Date() } = {}) {
-  const { DB_PATH } = require('../db');
+  const { DB_PATH, setDataBatchCompareAndSwap } = require('../db');
   assertDemoSeedAllowed({ env, dbPath: DB_PATH });
 
   const data = buildDemoData({ now, env });
-  const results = Object.entries(data).map(([collection, fixtures]) => replaceDemoRecords(collection, fixtures));
+  const plans = Object.entries(data).map(([collection, fixtures]) => planDemoRecords(collection, fixtures));
+  setDataBatchCompareAndSwap(plans.map(plan => plan.entry));
+  const results = plans.map(plan => plan.result);
   ensureDemoAuthority();
 
   logger.log(`[demo] Seeded demo records: collections=${results.length}`);
@@ -801,9 +815,6 @@ function seedDemoData({ logger = console, env = process.env, now = new Date() } 
 }
 
 if (require.main === module) {
-  process.env.DB_PATH ||= path.join(__dirname, '..', 'data', 'demo.sqlite');
-  process.env.DEMO_ENV ||= 'true';
-  process.env.DEMO_MODE ||= 'true';
   try {
     const result = seedDemoData({ logger: console });
     if (process.argv.includes('--json')) {
@@ -822,5 +833,6 @@ module.exports = {
   DEMO_USER_EMAILS,
   assertDemoSeedAllowed,
   buildDemoData,
+  planDemoRecords,
   seedDemoData,
 };

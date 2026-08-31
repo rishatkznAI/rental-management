@@ -1,3 +1,7 @@
+const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+
 const CONTRACT_HAS_HISTORY_CODE = 'CONTRACT_HAS_HISTORY';
 const CONTRACT_ARCHIVED_CODE = 'CLIENT_CONTRACT_ARCHIVED';
 const CONTRACT_DELETE_CONTEXT_REQUIRED_CODE = 'CLIENT_CONTRACT_DELETE_CONTEXT_REQUIRED';
@@ -128,7 +132,7 @@ function quoteSqlIdentifier(value) {
 
 function findSqlClientContractHistoryLinks(contractId, db) {
   if (!db || typeof db.prepare !== 'function') return [];
-  const tables = db.prepare(`
+  const tables = prepareSqliteReadonlyStatement(db, `
     SELECT name
     FROM sqlite_master
     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
@@ -137,14 +141,14 @@ function findSqlClientContractHistoryLinks(contractId, db) {
   const links = [];
   for (const { name } of tables) {
     const tableName = quoteSqlIdentifier(name);
-    const referenceColumns = db.prepare(`PRAGMA table_info(${tableName})`).all()
+    const referenceColumns = prepareSqliteReadonlyStatement(db, `PRAGMA table_info(${tableName})`).all()
       .map(column => String(column?.name || ''))
       .filter(column => DIRECT_REFERENCE_FIELDS.has(column.toLowerCase()));
     if (referenceColumns.length === 0) continue;
     const where = referenceColumns
       .map(column => `${quoteSqlIdentifier(column)} = ?`)
       .join(' OR ');
-    const row = db.prepare(`SELECT COUNT(*) AS count FROM ${tableName} WHERE ${where}`)
+    const row = prepareSqliteReadonlyStatement(db, `SELECT COUNT(*) AS count FROM ${tableName} WHERE ${where}`)
       .get(...referenceColumns.map(() => text(contractId)));
     const count = Number(row?.count) || 0;
     if (count > 0) links.push({ collection: name, count, source: 'sql' });

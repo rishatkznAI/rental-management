@@ -53,6 +53,7 @@ function recordNumber(collection, record) {
 
 function setRecordNumber(collection, record, number) {
   record.number = number;
+  if (collection === 'client_contracts' && !text(record.title)) record.title = number;
   if (collection === 'documents') record.documentNumber = number;
   if (collection === 'vehicle_trips') record.sheetNumber = number;
   return record;
@@ -74,7 +75,7 @@ function createBusinessNumberingService({
     throw businessNumberingError('NUMBERING_READ_DATA_REQUIRED', 'Business numbering requires readData.', 500);
   }
 
-  function allocateRecord(collection, record, entityType, year = undefined) {
+  function allocateRecord(collection, record, entityType, year = undefined, activeAllocator = allocator) {
     const entityId = text(record?.id);
     if (!entityId) {
       throw businessNumberingError(
@@ -84,7 +85,7 @@ function createBusinessNumberingService({
         { collection },
       );
     }
-    const allocation = allocator.allocate({ entityType, entityId, year });
+    const allocation = activeAllocator.allocate({ entityType, entityId, year });
     return setRecordNumber(collection, record, allocation.number);
   }
 
@@ -136,7 +137,7 @@ function createBusinessNumberingService({
     return setRecordNumber('documents', record, ownerNumber);
   }
 
-  function assignNewRecord(collection, record, entries = []) {
+  function assignNewRecord(collection, record, entries = [], activeAllocator = allocator) {
     if (collection === 'gantt_rentals') {
       const rentalId = text(record?.rentalId || record?.sourceRentalId || record?.originalRentalId);
       const rental = resolveOwnerRecord(entries, 'rentals', rentalId);
@@ -152,14 +153,20 @@ function createBusinessNumberingService({
       }
       const entityType = DOCUMENT_ENTITY_TYPES[documentType];
       if (!entityType) return record;
-      return allocateRecord(collection, record, entityType, documentSequenceYear(record, nowIso()));
+      return allocateRecord(
+        collection,
+        record,
+        entityType,
+        documentSequenceYear(record, nowIso()),
+        activeAllocator,
+      );
     }
 
     const entityType = COLLECTION_ENTITY_TYPES[collection];
     if (!entityType) return record;
     // Operational entities use the actual server-side creation year. Payload dates and
     // client-provided createdAt values are intentionally ignored here.
-    return allocateRecord(collection, record, entityType, yearFromIso(nowIso()));
+    return allocateRecord(collection, record, entityType, yearFromIso(nowIso()), activeAllocator);
   }
 
   function preserveOrRejectExistingNumber(collection, previous, next) {
@@ -214,7 +221,7 @@ function createBusinessNumberingService({
     return setRecordNumber(collection, next, previousNumber);
   }
 
-  function prepareCollectionEntry(entry, allEntries) {
+  function prepareCollectionEntry(entry, allEntries, activeAllocator) {
     const collection = text(entry?.name);
     if (!Array.isArray(entry?.value)) return entry;
     if (
@@ -233,19 +240,36 @@ function createBusinessNumberingService({
       if (!entityId || !record || typeof record !== 'object') continue;
       const previous = previousById.get(entityId);
       if (previous) preserveOrRejectExistingNumber(collection, previous, record);
-      else assignNewRecord(collection, record, allEntries);
+      else assignNewRecord(collection, record, allEntries, activeAllocator);
     }
     return entry;
   }
 
-  function preparePersistenceEntries(entries = []) {
+  function preparePersistenceEntries(entries = [], { mode = 'persist' } = {}) {
+    if (mode !== 'persist' && mode !== 'preview') {
+      throw businessNumberingError(
+        'BUSINESS_NUMBERING_MODE_INVALID',
+        'Business numbering mode must be persist or preview.',
+        500,
+      );
+    }
+    if (mode === 'preview' && typeof allocator.createPreviewAllocator !== 'function') {
+      throw businessNumberingError(
+        'NUMBERING_PREVIEW_ALLOCATOR_REQUIRED',
+        'Write-free business numbering preview is unavailable.',
+        500,
+      );
+    }
+    const activeAllocator = mode === 'preview'
+      ? allocator.createPreviewAllocator()
+      : allocator;
     const normalized = Array.isArray(entries) ? entries : [];
     const ordered = [
       ...normalized.filter(entry => entry?.name !== 'documents' && entry?.name !== 'gantt_rentals'),
       ...normalized.filter(entry => entry?.name === 'gantt_rentals'),
       ...normalized.filter(entry => entry?.name === 'documents'),
     ];
-    ordered.forEach(entry => prepareCollectionEntry(entry, normalized));
+    ordered.forEach(entry => prepareCollectionEntry(entry, normalized, activeAllocator));
     return normalized;
   }
 

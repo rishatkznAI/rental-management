@@ -13,9 +13,11 @@ const express = serverRequire('express');
 const { buildZipArchive } = require('../server/lib/zip-store.js');
 const { inspectStoredZipArchive } = require('../server/lib/full-backup-validation.js');
 const {
+  DELETED_COLLECTIONS,
   ISOLATED_CONFIRMATION,
   PRODUCTION_CONFIRMATION,
   PURGE_CONFIRMATION,
+  RETAINED_COLLECTIONS,
   applyReset,
   assertProductionConservation,
   buildResetPlan,
@@ -24,14 +26,27 @@ const {
   retentionSnapshot,
 } = require('../server/lib/skytech-clean-production-reset.js');
 const {
+  ALL_APP_DATA_COLLECTIONS,
+  PLATFORM_DEFAULT_TENANT_OVERLAY_COLLECTIONS,
+} = require('../server/lib/app-data-scope-registry.js');
+const {
   backupTimestamp,
   registerSkytechCleanResetRoutes,
   safeBackupPath,
   safeQuarantinePath,
 } = require('../server/routes/skytech-clean-reset.js');
 const {
+  registerPreCompatibilityBackupRoute,
+} = require('../server/routes/pre-compatibility-backup.js');
+const {
   assertEnvironmentGuard,
 } = require('../server/scripts/skytech-clean-production-reset.js');
+const {
+  assertPreCompatibilityBackupEnvironment,
+} = require('../server/lib/pre-compatibility-backup.js');
+const {
+  openVerifiedReadOnlyDatabase,
+} = require('../server/pre-compatibility-backup-server.js');
 
 const PRODUCTION_CONSERVATION = Object.freeze({
   appDisabled: true,
@@ -162,6 +177,18 @@ async function withHttpServer(app, run) {
     await new Promise(resolve => server.close(resolve));
   }
 }
+
+test('clean reset assigns one explicit disposition to every registry collection', () => {
+  const retained = Object.keys(RETAINED_COLLECTIONS);
+  const deleted = [...DELETED_COLLECTIONS];
+  const dispositions = [...retained, ...deleted];
+  assert.equal(dispositions.length, ALL_APP_DATA_COLLECTIONS.length);
+  assert.equal(new Set(dispositions).size, dispositions.length);
+  assert.deepEqual([...dispositions].sort(), [...ALL_APP_DATA_COLLECTIONS].sort());
+  for (const catalogue of PLATFORM_DEFAULT_TENANT_OVERLAY_COLLECTIONS) {
+    assert.ok(RETAINED_COLLECTIONS[catalogue], catalogue);
+  }
+});
 
 test('dry-run is read-only and reports exact deletion, retention and file impact', () => {
   const fixture = createFixture();
@@ -555,6 +582,167 @@ test('production conservation guard requires app, bot and GSM writers all disabl
   assert.doesNotThrow(() => assertProductionConservation(PRODUCTION_CONSERVATION));
 });
 
+test('pre-compatibility backup startup gate requires exact freeze, target, runtime and backup-only secrets', () => {
+  const expectedEnvironment = {
+    projectId: 'project',
+    environmentId: 'environment',
+    serviceId: 'service',
+    volumeName: 'volume',
+    volumeMountPath: '/data',
+    sourceDbPath: '/data/app.sqlite',
+  };
+  const env = {
+    NODE_ENV: 'production',
+    RAILWAY_PROJECT_ID: 'project',
+    RAILWAY_ENVIRONMENT_ID: 'environment',
+    RAILWAY_SERVICE_ID: 'service',
+    RAILWAY_VOLUME_NAME: 'volume',
+    RAILWAY_VOLUME_MOUNT_PATH: '/data',
+    RAILWAY_REPLICA_ID: 'replica',
+    RAILWAY_DEPLOYMENT_ID: 'deployment',
+    RAILWAY_GIT_COMMIT_SHA: 'a'.repeat(40),
+    PRODUCTION_SCOPE_REMEDIATION_ENABLED: 'true',
+    PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE: 'true',
+    PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY: 'false',
+    PRODUCTION_SCOPE_REMEDIATION_VALIDATION_READ_ONLY: 'false',
+    PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES: '',
+    PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODE: '',
+    PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET: '',
+    APP_DISABLED: 'true',
+    BOT_DISABLED: 'true',
+    GSM_DISABLED: 'true',
+    GSM_ENABLED: 'false',
+    SKYTECH_CLEAN_RESET_ENABLED: 'false',
+    SKYTECH_CLEAN_RESET_TOKEN: '',
+    SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED: 'true',
+    SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA: 'a'.repeat(40),
+    SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN: 'b'.repeat(32),
+    ADMIN_RESET_PASSWORD: '',
+  };
+  const options = { dbPath: '/data/app.sqlite', expectedEnvironment };
+  assert.throws(
+    () => assertPreCompatibilityBackupEnvironment({}, options),
+    error => error?.code === 'PRE_COMPATIBILITY_BACKUP_CONSERVATION_REQUIRED',
+  );
+  assert.equal(assertPreCompatibilityBackupEnvironment(env, options), true);
+
+  const unsafe = [
+    ['NODE_ENV', 'staging'],
+    ['RAILWAY_PROJECT_ID', 'other'],
+    ['RAILWAY_ENVIRONMENT_ID', 'other'],
+    ['RAILWAY_SERVICE_ID', 'other'],
+    ['RAILWAY_VOLUME_NAME', 'other'],
+    ['RAILWAY_VOLUME_MOUNT_PATH', '/tmp'],
+    ['RAILWAY_REPLICA_ID', ''],
+    ['RAILWAY_REPLICA_ID', ' replica'],
+    ['RAILWAY_DEPLOYMENT_ID', ''],
+    ['RAILWAY_DEPLOYMENT_ID', 'deployment '],
+    ['RAILWAY_GIT_COMMIT_SHA', 'A'.repeat(40)],
+    ['RAILWAY_GIT_COMMIT_SHA', ` ${'a'.repeat(40)}`],
+    ['SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA', 'b'.repeat(40)],
+    ['SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA', 'A'.repeat(40)],
+    ['PRODUCTION_SCOPE_REMEDIATION_ENABLED', 'false'],
+    ['PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE', 'false'],
+    ['PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY', 'true'],
+    ['PRODUCTION_SCOPE_REMEDIATION_VALIDATION_READ_ONLY', 'true'],
+    ['PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES', ' '],
+    ['PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODE', 'verify'],
+    ['PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET', ' '],
+    ['APP_DISABLED', 'false'],
+    ['BOT_DISABLED', 'false'],
+    ['GSM_DISABLED', 'false'],
+    ['GSM_ENABLED', 'true'],
+    ['SKYTECH_CLEAN_RESET_ENABLED', 'true'],
+    ['SKYTECH_CLEAN_RESET_TOKEN', ' '],
+    ['SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN', 'short'],
+    ['SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN', `${'b'.repeat(32)}\n`],
+    ['ADMIN_RESET_PASSWORD', ' '],
+  ];
+  for (const [key, value] of unsafe) {
+    assert.throws(
+      () => assertPreCompatibilityBackupEnvironment({ ...env, [key]: value }, options),
+      error => error?.code === 'PRE_COMPATIBILITY_BACKUP_CONSERVATION_REQUIRED',
+      key,
+    );
+  }
+  assert.throws(
+    () => assertPreCompatibilityBackupEnvironment(env, { ...options, dbPath: '/tmp/app.sqlite' }),
+    error => error?.code === 'PRE_COMPATIBILITY_BACKUP_CONSERVATION_REQUIRED',
+  );
+});
+
+test('isolated preliminary runtime opens the exact source query-only and can create a coherent SQLite backup', async () => {
+  const fixture = createFixture();
+  const exactDbPath = fs.realpathSync(fixture.dbPath);
+  const expectedRows = fixture.db.prepare('SELECT name, json FROM app_data ORDER BY name').all();
+  fixture.db.close();
+  const expectedEnvironment = {
+    projectId: 'project',
+    environmentId: 'environment',
+    serviceId: 'service',
+    volumeName: 'volume',
+    volumeMountPath: path.dirname(exactDbPath),
+    sourceDbPath: exactDbPath,
+  };
+  const env = {
+    NODE_ENV: 'production',
+    DB_PATH: exactDbPath,
+    RAILWAY_PROJECT_ID: 'project',
+    RAILWAY_ENVIRONMENT_ID: 'environment',
+    RAILWAY_SERVICE_ID: 'service',
+    RAILWAY_VOLUME_NAME: 'volume',
+    RAILWAY_VOLUME_MOUNT_PATH: path.dirname(exactDbPath),
+    RAILWAY_REPLICA_ID: 'replica',
+    RAILWAY_DEPLOYMENT_ID: 'deployment',
+    RAILWAY_GIT_COMMIT_SHA: 'a'.repeat(40),
+    PRODUCTION_SCOPE_REMEDIATION_ENABLED: 'true',
+    PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE: 'true',
+    PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY: 'false',
+    PRODUCTION_SCOPE_REMEDIATION_VALIDATION_READ_ONLY: 'false',
+    PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES: '',
+    PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODE: '',
+    PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET: '',
+    APP_DISABLED: 'true',
+    BOT_DISABLED: 'true',
+    GSM_DISABLED: 'true',
+    GSM_ENABLED: 'false',
+    SKYTECH_CLEAN_RESET_ENABLED: 'false',
+    SKYTECH_CLEAN_RESET_TOKEN: '',
+    SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED: 'true',
+    SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA: 'a'.repeat(40),
+    SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN: 'b'.repeat(32),
+    ADMIN_RESET_PASSWORD: '',
+  };
+  let source;
+  try {
+    source = openVerifiedReadOnlyDatabase({
+      dbPath: exactDbPath,
+      expectedEnvironment,
+      env,
+    });
+    assert.equal(source.db.pragma('query_only', { simple: true }), 1);
+    assert.throws(
+      () => source.db.prepare("UPDATE app_data SET json = '[]' WHERE name = 'users'").run(),
+      /readonly|read-only/i,
+    );
+    const backupPath = path.join(fixture.root, 'isolated-backup.sqlite');
+    await source.db.backup(backupPath);
+    const backup = new Database(backupPath, { readonly: true, fileMustExist: true });
+    try {
+      assert.equal(backup.pragma('quick_check', { simple: true }), 'ok');
+      assert.deepEqual(
+        backup.prepare('SELECT name, json FROM app_data ORDER BY name').all(),
+        expectedRows,
+      );
+    } finally {
+      backup.close();
+    }
+  } finally {
+    source?.close();
+    cleanupFixture(fixture);
+  }
+});
+
 test('operations route is hidden by default and requires its temporary secret for guarded apply', async () => {
   const fixture = createFixture();
   const previousEnabled = process.env.SKYTECH_CLEAN_RESET_ENABLED;
@@ -647,6 +835,167 @@ test('operations route is hidden by default and requires its temporary secret fo
   }
 });
 
+test('pre-compatibility credential is isolated from reset routes and requires a nonce', async () => {
+  const fixture = createFixture();
+  const token = 'unit-test-pre-compatibility-backup-token-over-32-characters';
+  const environmentKeys = [
+    'NODE_ENV',
+    'RAILWAY_PROJECT_ID',
+    'RAILWAY_ENVIRONMENT_ID',
+    'RAILWAY_SERVICE_ID',
+    'RAILWAY_VOLUME_NAME',
+    'RAILWAY_VOLUME_MOUNT_PATH',
+    'RAILWAY_REPLICA_ID',
+    'RAILWAY_DEPLOYMENT_ID',
+    'RAILWAY_GIT_COMMIT_SHA',
+    'PRODUCTION_SCOPE_REMEDIATION_ENABLED',
+    'PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE',
+    'PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY',
+    'PRODUCTION_SCOPE_REMEDIATION_VALIDATION_READ_ONLY',
+    'PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES',
+    'PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODE',
+    'PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET',
+    'SKYTECH_CLEAN_RESET_ENABLED',
+    'SKYTECH_CLEAN_RESET_TOKEN',
+    'SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED',
+    'SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA',
+    'SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN',
+    'ADMIN_RESET_PASSWORD',
+    'APP_DISABLED',
+    'BOT_DISABLED',
+    'GSM_DISABLED',
+    'GSM_ENABLED',
+  ];
+  const previous = Object.fromEntries(environmentKeys.map(key => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, {
+      NODE_ENV: 'production',
+      RAILWAY_PROJECT_ID: 'test-project',
+      RAILWAY_ENVIRONMENT_ID: 'test-environment',
+      RAILWAY_SERVICE_ID: 'test-service',
+      RAILWAY_VOLUME_NAME: 'test-volume',
+      RAILWAY_VOLUME_MOUNT_PATH: path.dirname(fs.realpathSync(fixture.dbPath)),
+      RAILWAY_REPLICA_ID: 'test-replica',
+      RAILWAY_DEPLOYMENT_ID: 'test-deployment',
+      RAILWAY_GIT_COMMIT_SHA: 'a'.repeat(40),
+      PRODUCTION_SCOPE_REMEDIATION_ENABLED: 'true',
+      PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE: 'true',
+      PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY: 'false',
+      PRODUCTION_SCOPE_REMEDIATION_VALIDATION_READ_ONLY: 'false',
+      PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES: '',
+      PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODE: '',
+      PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET: '',
+      SKYTECH_CLEAN_RESET_ENABLED: 'false',
+      SKYTECH_CLEAN_RESET_TOKEN: '',
+      SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED: 'true',
+      SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA: 'a'.repeat(40),
+      SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN: token,
+      ADMIN_RESET_PASSWORD: '',
+      APP_DISABLED: 'true',
+      BOT_DISABLED: 'true',
+      GSM_DISABLED: 'true',
+      GSM_ENABLED: 'false',
+    });
+
+    const app = express();
+    const router = express.Router();
+    app.use(express.json());
+    const exactFixtureDbPath = fs.realpathSync(fixture.dbPath);
+    let isolatedBackupRuntime = true;
+    registerPreCompatibilityBackupRoute(router, {
+      dbPath: exactFixtureDbPath,
+      ensureDb: () => fixture.db,
+      readData: name => {
+        const row = fixture.db.prepare('SELECT json FROM app_data WHERE name = ?').get(name);
+        return row ? JSON.parse(row.json) : [];
+      },
+      createSqliteBackup: async target => fixture.db.backup(target),
+      buildInfo: () => ({ commit: 'unit-test' }),
+      expectedEnvironment: {
+        projectId: 'test-project',
+        environmentId: 'test-environment',
+        serviceId: 'test-service',
+        volumeName: 'test-volume',
+        volumeMountPath: path.dirname(exactFixtureDbPath),
+        sourceDbPath: exactFixtureDbPath,
+      },
+      isBackupOnlyRuntime: () => isolatedBackupRuntime,
+      env: process.env,
+    });
+    app.use('/api', router);
+
+    await withHttpServer(app, async baseUrl => {
+      const dedicatedPath = `${baseUrl}/api/admin/skytech-pre-compatibility-backup`;
+      let response = await fetch(dedicatedPath, {
+        method: 'POST',
+        headers: { 'X-Skytech-Reset-Token': token },
+      });
+      assert.equal(response.status, 403);
+
+      for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) {
+        response = await fetch(dedicatedPath, {
+          method,
+          headers: { 'X-Skytech-Pre-Compatibility-Backup-Token': token },
+        });
+        assert.equal(response.status, 404, method);
+      }
+
+      for (const [method, suffix] of [
+        ['GET', 'dry-run'],
+        ['POST', 'apply'],
+        ['GET', 'verify'],
+        ['POST', 'purge-quarantine'],
+      ]) {
+        response = await fetch(`${baseUrl}/api/admin/skytech-clean-reset/${suffix}`, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Skytech-Pre-Compatibility-Backup-Token': token,
+          },
+          body: method === 'POST' ? JSON.stringify({ confirmation: 'anything' }) : undefined,
+        });
+        assert.equal(response.status, 404, `${method} ${suffix}`);
+      }
+
+      isolatedBackupRuntime = false;
+      response = await fetch(dedicatedPath, {
+        method: 'POST',
+        headers: { 'X-Skytech-Pre-Compatibility-Backup-Token': token },
+      });
+      assert.equal(response.status, 404, 'the full application runtime cannot expose the preliminary route');
+      isolatedBackupRuntime = true;
+
+      process.env.SKYTECH_CLEAN_RESET_ENABLED = 'true';
+      process.env.SKYTECH_CLEAN_RESET_TOKEN = token;
+      response = await fetch(dedicatedPath, {
+        method: 'POST',
+        headers: { 'X-Skytech-Pre-Compatibility-Backup-Token': token },
+      });
+      assert.equal(response.status, 404, 'preliminary and destructive surfaces must not coexist');
+      process.env.SKYTECH_CLEAN_RESET_ENABLED = 'false';
+      process.env.SKYTECH_CLEAN_RESET_TOKEN = '';
+
+      response = await fetch(dedicatedPath, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Skytech-Pre-Compatibility-Backup-Token': token,
+        },
+        body: JSON.stringify({ mode: 'apply', confirmation: PRODUCTION_CONFIRMATION }),
+      });
+      const body = await response.json();
+      assert.equal(response.status, 403);
+      assert.equal(body.ok, false);
+    });
+  } finally {
+    for (const key of environmentKeys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+    cleanupFixture(fixture);
+  }
+});
+
 test('backup route rejects and does not publish a corrupt SQLite snapshot', async () => {
   const fixture = createFixture();
   const previousEnabled = process.env.SKYTECH_CLEAN_RESET_ENABLED;
@@ -692,4 +1041,24 @@ test('backup route rejects and does not publish a corrupt SQLite snapshot', asyn
     else process.env.SKYTECH_CLEAN_RESET_TOKEN = previousToken;
     cleanupFixture(fixture);
   }
+});
+
+test('preliminary workflow remains backup-only under the current pinned safety contract', () => {
+  const workflow = fs.readFileSync(
+    new URL('../.github/workflows/skytech-clean-production-reset.yml', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(workflow, /expected_deployed_sha:[\s\S]*required: true/);
+  assert.match(workflow, /environment: production/);
+  assert.match(workflow, /PRODUCTION_API_ORIGIN: https:\/\/rental-management-production-35bc\.up\.railway\.app/);
+  assert.match(workflow, /test "\$PRODUCTION_API_ORIGIN" = "https:\/\/rental-management-production-35bc\.up\.railway\.app"/);
+  assert.match(workflow, /npm install --global @railway\/cli@5\.45\.0/);
+  assert.match(workflow, /X-Skytech-Pre-Compatibility-Backup-Nonce/);
+  assert.match(workflow, /--header "@\$protected_headers"/);
+  assert.match(workflow, /\/api\/admin\/skytech-pre-compatibility-backup/);
+  assert.match(workflow, /skytech-clean-reset-backup\.zip\.gpg/);
+  assert.match(workflow, /--decrypt --output/);
+  assert.doesNotMatch(workflow, /inputs\.mode|X-Skytech-Reset-Token/);
+  assert.doesNotMatch(workflow, /\/api\/admin\/skytech-clean-reset\/(?:dry-run|apply|verify|purge-quarantine)/);
 });

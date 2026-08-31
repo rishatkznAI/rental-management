@@ -11,7 +11,7 @@ const financeCore = require('../server/lib/finance-core.js');
 const receivablesCore = require('../server/lib/receivables-core.js');
 
 function createApp() {
-  let idCounter = 0;
+  const idCounters = new Map();
   const audits = [];
   let nextBatchError = null;
   const state = {
@@ -67,6 +67,7 @@ function createApp() {
     const user = users[token];
     if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     req.user = user;
+    req.actorScope = { companyId: 'COMPANY-FINANCE', tenantId: 'COMPANY-FINANCE' };
     next();
   };
   const requireRead = collection => (req, res, next) => {
@@ -91,7 +92,11 @@ function createApp() {
     writeData,
     writeDataBatch,
     accessControl,
-    generateId: prefix => `${prefix}-${++idCounter}`,
+    generateId: prefix => {
+      const next = (idCounters.get(prefix) || 0) + 1;
+      idCounters.set(prefix, next);
+      return `${prefix}-${next}`;
+    },
     idPrefixes: { finance_accounts: 'FA', finance_operations: 'FO', debt_collection_actions: 'DCA', receivable_payment_plans: 'RPP' },
     nowIso: () => '2026-05-09T12:00:00.000Z',
     auditLog: (_req, event) => audits.push(event),
@@ -293,6 +298,7 @@ test('opening AR rejects ambiguous or overflowing money and rolls balance back w
 
 test('finance operations API creates lists updates and archives manual operations', async () => {
   const { app, state } = createApp();
+  state.finance_accounts = [{ id: 'FA-MANUAL', name: 'Касса', status: 'active', balance: 0 }];
   await withServer(app, async (baseUrl) => {
     const created = await request(baseUrl, 'POST', '/api/finance/operations', 'office', {
       type: 'expense',
@@ -301,12 +307,14 @@ test('finance operations API creates lists updates and archives manual operation
       category: 'Транспорт',
       description: 'Такси до объекта',
       counterparty: 'Водитель',
-      account: 'Касса',
+      accountId: 'FA-MANUAL',
       relatedEntityType: 'rental',
       relatedEntityId: 'R-1',
     });
     assert.equal(created.response.status, 201);
     assert.equal(created.json.id, 'FO-1');
+    assert.equal(created.json.accountId, 'FA-MANUAL');
+    assert.equal(created.json.account, 'Касса');
     assert.equal(state.finance_operations.length, 1);
 
     const list = await request(baseUrl, 'GET', '/api/finance/operations?from=2026-05-01&to=2026-05-31', 'office');
@@ -366,16 +374,20 @@ test('finance accounts API creates lists updates and transfers balances', async 
     assert.equal(updated.json.balance, 55000);
 
     const transfer = await request(baseUrl, 'POST', '/api/finance/accounts/transfer', 'office', {
-      accountFrom: 'FA-2',
-      accountTo: 'FA-1',
+      accountFromId: bank.json.id,
+      accountToId: cash.json.id,
       amount: 25000,
       date: '2026-05-10',
       comment: 'Пополнение кассы',
     });
-    assert.equal(transfer.response.status, 201);
+    assert.equal(transfer.response.status, 201, JSON.stringify(transfer.json));
     assert.equal(transfer.json.from.balance, 75000);
     assert.equal(transfer.json.to.balance, 80000);
     assert.equal(transfer.json.operation.type, 'transfer');
+    assert.equal(transfer.json.operation.accountFromId, bank.json.id);
+    assert.equal(transfer.json.operation.accountToId, cash.json.id);
+    assert.equal(transfer.json.operation.accountFrom, 'Расчётный счёт');
+    assert.equal(transfer.json.operation.accountTo, 'Касса');
     assert.equal(state.finance_operations.length, 1);
 
     const list = await request(baseUrl, 'GET', '/api/finance/accounts', 'office');
@@ -414,8 +426,8 @@ test('finance accounts API validates balance transfer target and RBAC', async ()
       actualAt: '2026-05-09',
     });
     const same = await request(baseUrl, 'POST', '/api/finance/accounts/transfer', 'office', {
-      accountFrom: 'FA-1',
-      accountTo: 'FA-1',
+      accountFromId: 'FA-1',
+      accountToId: 'FA-1',
       amount: 100,
       date: '2026-05-10',
     });
@@ -425,7 +437,8 @@ test('finance accounts API validates balance transfer target and RBAC', async ()
 });
 
 test('finance operations API validates amount and transfer accounts', async () => {
-  const { app } = createApp();
+  const { app, state } = createApp();
+  state.finance_accounts = [{ id: 'FA-1', name: 'Касса', status: 'active', balance: 0 }];
   await withServer(app, async (baseUrl) => {
     const zero = await request(baseUrl, 'POST', '/api/finance/operations', 'office', {
       type: 'income',
@@ -435,16 +448,55 @@ test('finance operations API validates amount and transfer accounts', async () =
     });
     assert.equal(zero.response.status, 400);
 
+    const displayOnly = await request(baseUrl, 'POST', '/api/finance/operations', 'office', {
+      type: 'expense',
+      date: '2026-05-09',
+      amount: 1000,
+      category: 'Прочее',
+      account: 'Касса',
+    });
+    assert.equal(displayOnly.response.status, 400);
+    assert.match(displayOnly.json.error, /stable ID/);
+    assert.deepEqual(state.finance_operations, []);
+
     const sameAccount = await request(baseUrl, 'POST', '/api/finance/operations', 'office', {
       type: 'transfer',
       date: '2026-05-09',
       amount: 1000,
       category: 'Перевод',
-      accountFrom: 'Касса',
-      accountTo: 'Касса',
+      accountFromId: 'FA-1',
+      accountToId: 'FA-1',
     });
     assert.equal(sameAccount.response.status, 400);
     assert.match(sameAccount.json.error, /тот же счёт/);
+  });
+});
+
+test('finance transfer batch failure leaves both accounts and operation history unchanged', async () => {
+  const { app, state, audits, failNextBatch } = createApp();
+  state.finance_accounts = [
+    { id: 'FA-FROM', name: 'Касса', type: 'cash', balance: 5000, actualAt: '2026-05-09', status: 'active' },
+    { id: 'FA-TO', name: 'Банк', type: 'bank_account', balance: 1000, actualAt: '2026-05-09', status: 'active' },
+  ];
+  const before = {
+    accounts: structuredClone(state.finance_accounts),
+    operations: structuredClone(state.finance_operations),
+    audits: structuredClone(audits),
+  };
+
+  await withServer(app, async (baseUrl) => {
+    failNextBatch();
+    const response = await request(baseUrl, 'POST', '/api/finance/accounts/transfer', 'office', {
+      accountFromId: 'FA-FROM',
+      accountToId: 'FA-TO',
+      amount: 750,
+      date: '2026-05-10',
+    });
+
+    assert.equal(response.response.status, 500);
+    assert.deepEqual(state.finance_accounts, before.accounts);
+    assert.deepEqual(state.finance_operations, before.operations);
+    assert.deepEqual(audits, before.audits);
   });
 });
 
@@ -528,6 +580,41 @@ test('payment allocation preview is read-only and apply caps allocations by paym
     assert.equal(applied.response.status, 201);
     assert.equal(applied.json.allocations.reduce((sum, item) => sum + item.amount, 0), 120000);
     assert.equal(state.payment_allocations.reduce((sum, item) => sum + item.amount, 0), 120000);
+    assert.equal(state.gantt_rentals[0].paymentStatus, 'paid');
+    assert.equal(state.gantt_rentals[1].paymentStatus, 'partial');
+  });
+});
+
+test('allocation projection batch failure leaves allocations and gantt payment status unchanged', async () => {
+  const { app, state, audits, failNextBatch } = createApp();
+  state.counterparties = [{ id: 'CP-1', legalName: 'Клиент', shortName: 'Клиент', roles: ['customer'], status: 'active' }];
+  state.clients = [{ id: 'C-1', counterpartyId: 'CP-1', company: 'Клиент' }];
+  state.rentals = [{ id: 'R-1', clientId: 'C-1', counterpartyId: 'CP-1' }];
+  state.gantt_rentals = [{
+    id: 'GR-1',
+    rentalId: 'R-1',
+    clientId: 'C-1',
+    counterpartyId: 'CP-1',
+    amount: 1000,
+    paymentStatus: 'unpaid',
+  }];
+  state.payments = [{ id: 'P-1', clientId: 'C-1', counterpartyId: 'CP-1', amount: 1000, paidAmount: 1000, status: 'paid' }];
+  const before = {
+    allocations: structuredClone(state.payment_allocations),
+    gantt: structuredClone(state.gantt_rentals),
+    audits: structuredClone(audits),
+  };
+
+  await withServer(app, async (baseUrl) => {
+    failNextBatch();
+    const response = await request(baseUrl, 'POST', '/api/finance/payments/P-1/apply-allocation-preview', 'office', {
+      allocations: [{ rentalId: 'GR-1', clientId: 'C-1', amount: 1000 }],
+    });
+
+    assert.equal(response.response.status, 500);
+    assert.deepEqual(state.payment_allocations, before.allocations);
+    assert.deepEqual(state.gantt_rentals, before.gantt);
+    assert.deepEqual(audits, before.audits);
   });
 });
 

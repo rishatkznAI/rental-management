@@ -4,6 +4,7 @@ const {
   decorateArWorkflowRecord,
   resolveArWorkflowIdentity,
 } = require('../lib/ar-debtor-workflow');
+const { AUDIT_COLLECTION, createAuditEntry } = require('../lib/security-audit');
 
 const COLLECTION = 'debt_collection_plans';
 
@@ -139,15 +140,15 @@ function filterPlans(plans, req, accessControl) {
   return plans.filter(plan => accessControl.canAccessEntity(COLLECTION, plan, req.user));
 }
 
-function auditPlanChange(auditLog, req, action, previous, next, metadata = null) {
-  auditLog?.(req, {
+function planAuditEntry(req, action, previous, next, metadata, { generateId, nowIso }) {
+  return createAuditEntry(req, {
     action,
     entityType: COLLECTION,
     entityId: next?.id || previous?.id,
     before: previous ? pickSafePlanFields(previous) : null,
     after: next ? pickSafePlanFields(next) : null,
     metadata,
-  });
+  }, { generateId, nowIso });
 }
 
 function publicPlan(plan, readData) {
@@ -167,13 +168,12 @@ function publicPlan(plan, readData) {
 function registerDebtCollectionPlanRoutes(deps) {
   const {
     readData,
-    writeData,
+    writeAuditDataBatch,
     requireAuth,
     requireRead,
     requireWrite,
     canReadCollection,
     accessControl,
-    auditLog,
     generateId,
     idPrefixes = {},
     nowIso = () => new Date().toISOString(),
@@ -182,10 +182,37 @@ function registerDebtCollectionPlanRoutes(deps) {
   const router = express.Router();
   const idPrefix = idPrefixes[COLLECTION] || 'DCP';
 
+  function persistPlansWithAudit(req, plans, events) {
+    if (typeof writeAuditDataBatch !== 'function') {
+      const error = new Error('Atomic debt-plan audit persistence is unavailable.');
+      error.status = 500;
+      throw error;
+    }
+    const currentAudit = Array.isArray(readData(AUDIT_COLLECTION)) ? readData(AUDIT_COLLECTION) : null;
+    if (!currentAudit) {
+      const error = new Error('Stored audit history is malformed; refusing to overwrite it.');
+      error.code = 'AUDIT_HISTORY_SHAPE_INVALID';
+      error.status = 409;
+      throw error;
+    }
+    const auditEntries = events.map(event => planAuditEntry(
+      req,
+      event.action,
+      event.previous,
+      event.next,
+      event.metadata || null,
+      { generateId, nowIso },
+    ));
+    writeAuditDataBatch([
+      { name: COLLECTION, value: plans },
+      { name: AUDIT_COLLECTION, value: [...currentAudit, ...auditEntries] },
+    ]);
+  }
+
   router.get('/debt-collection-plans', requireAuth, requireRead(COLLECTION), (req, res) => {
     try {
       accessControl.assertCanReadCollection(COLLECTION, req.user);
-      const plans = Array.isArray(readData(COLLECTION)) ? readData(COLLECTION) : [];
+      const plans = Array.isArray(readData(COLLECTION)) ? [...readData(COLLECTION)] : [];
       const scoped = accessControl.sanitizeCollectionForRead(
         COLLECTION,
         filterPlans(plans, req, accessControl),
@@ -206,7 +233,7 @@ function registerDebtCollectionPlanRoutes(deps) {
   router.get('/clients/:id/debt-collection-plan', requireAuth, requireRead(COLLECTION), (req, res) => {
     try {
       accessControl.assertCanReadCollection(COLLECTION, req.user);
-      const plans = Array.isArray(readData(COLLECTION)) ? readData(COLLECTION) : [];
+      const plans = Array.isArray(readData(COLLECTION)) ? [...readData(COLLECTION)] : [];
       const scoped = filterPlans(plans, req, accessControl);
       const requestedIdentity = resolveArWorkflowIdentity(COLLECTION, {
         clientId: normalizeText(req.params.id),
@@ -238,11 +265,12 @@ function registerDebtCollectionPlanRoutes(deps) {
   router.post('/debt-collection-plans', requireAuth, requireWrite(COLLECTION), (req, res) => {
     try {
       accessControl.assertCanCreateCollection(COLLECTION, req.user, req.body);
-      const plans = Array.isArray(readData(COLLECTION)) ? readData(COLLECTION) : [];
+      const plans = Array.isArray(readData(COLLECTION)) ? [...readData(COLLECTION)] : [];
       const next = normalizePlan(req.body, { req, readData, generateId, idPrefix, nowIso });
       plans.push(next);
-      writeData(COLLECTION, plans);
-      auditPlanChange(auditLog, req, `${COLLECTION}.create`, null, next);
+      persistPlansWithAudit(req, plans, [
+        { action: `${COLLECTION}.create`, previous: null, next },
+      ]);
       return res.status(201).json(publicPlan(next, readData));
     } catch (error) {
       return accessError(res, error);
@@ -251,27 +279,25 @@ function registerDebtCollectionPlanRoutes(deps) {
 
   router.patch('/debt-collection-plans/:id', requireAuth, requireWrite(COLLECTION), (req, res) => {
     try {
-      const plans = Array.isArray(readData(COLLECTION)) ? readData(COLLECTION) : [];
+      const plans = Array.isArray(readData(COLLECTION)) ? [...readData(COLLECTION)] : [];
       const index = plans.findIndex(item => normalizeText(item?.id) === normalizeText(req.params.id));
       if (index < 0) return res.status(404).json({ ok: false, error: 'План взыскания не найден' });
       const previous = plans[index];
       accessControl.assertCanUpdateEntity(COLLECTION, previous, req.user);
       const next = normalizePlan(req.body, { previous, req, readData, generateId, idPrefix, nowIso });
       plans[index] = next;
-      writeData(COLLECTION, plans);
-      auditPlanChange(auditLog, req, `${COLLECTION}.update`, previous, next);
+      const auditEvents = [{ action: `${COLLECTION}.update`, previous, next }];
       if (previous.status !== next.status) {
-        auditPlanChange(
-          auditLog,
-          req,
-          next.status === 'closed' ? `${COLLECTION}.close` : `${COLLECTION}.status_change`,
+        auditEvents.push({
+          action: next.status === 'closed' ? `${COLLECTION}.close` : `${COLLECTION}.status_change`,
           previous,
           next,
-        );
+        });
       }
       if (normalizeText(previous.comment) !== normalizeText(next.comment)) {
-        auditPlanChange(auditLog, req, `${COLLECTION}.comment`, previous, next);
+        auditEvents.push({ action: `${COLLECTION}.comment`, previous, next });
       }
+      persistPlansWithAudit(req, plans, auditEvents);
       return res.json(publicPlan(next, readData));
     } catch (error) {
       return accessError(res, error);

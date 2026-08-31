@@ -28,6 +28,7 @@ function runSeed(dbPath, extraEnv = {}) {
       NODE_ENV: 'test',
       DEMO_ENV: 'true',
       ALLOW_DEMO_SEED: 'true',
+      DEMO_DATABASE_DISPOSABLE: 'true',
       DEMO_DEFAULT_PASSWORD: 'unit-test-demo-password',
       ...extraEnv,
     },
@@ -91,15 +92,15 @@ test('demo seed requires explicit demo seed permission', () => {
     /DEMO_ENV=true or ALLOW_DEMO_SEED=true/,
   );
   assert.equal(
-    assertDemoSeedAllowed({ env: { NODE_ENV: 'test', ALLOW_DEMO_SEED: 'true', APP_ENV: 'demo' }, dbPath: '/tmp/demo.sqlite' }),
+    assertDemoSeedAllowed({ env: { NODE_ENV: 'test', ALLOW_DEMO_SEED: 'true', APP_ENV: 'demo', DEMO_DATABASE_DISPOSABLE: 'true' }, dbPath: '/tmp/demo.sqlite' }),
     true,
   );
 });
 
 test('demo seed refuses non-demo database paths', () => {
   assert.throws(
-    () => assertDemoSeedAllowed({ env: { DEMO_ENV: 'true', NODE_ENV: 'test' }, dbPath: '/data/app.sqlite' }),
-    /clearly named demo database/,
+    () => assertDemoSeedAllowed({ env: { DEMO_ENV: 'true', NODE_ENV: 'test', DEMO_DATABASE_DISPOSABLE: 'true' }, dbPath: '/data/app.sqlite' }),
+    /clearly named demo database|refuse app\.sqlite/,
   );
 });
 
@@ -119,6 +120,8 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
   const equipment = readCollection(dbPath, 'equipment');
   const rentals = readCollection(dbPath, 'rentals');
   const service = readCollection(dbPath, 'service');
+  const serviceWorks = readCollection(dbPath, 'service_works');
+  const spareParts = readCollection(dbPath, 'spare_parts');
   const deliveries = readCollection(dbPath, 'deliveries');
   const deliveryCarriers = readCollection(dbPath, 'delivery_carriers');
 
@@ -144,6 +147,8 @@ test('demo seed creates only DEMO-prefixed records and demo users', () => withDe
     clients,
     clientObjects,
     clientContracts,
+    serviceWorks,
+    spareParts,
   ]) {
     assert.ok(collection.every(item => (
       item.companyId === DEMO_COMPANY_ID && item.tenantId === DEMO_COMPANY_ID

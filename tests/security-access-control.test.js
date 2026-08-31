@@ -203,6 +203,118 @@ test('investor sees only own equipment and linked rentals', () => {
   assert.equal(access.canMutateEntity('rentals', state.rentals[0], investor), false);
 });
 
+test('equipment GSM projection is exposed only after canonical binding proof', () => {
+  const equipment = {
+    id: 'token:canonical-equipment-id',
+    companyId: 'COMPANY-A',
+    tenantId: 'COMPANY-A',
+    ownerId: 'OW-1',
+    inventoryNumber: 'INV-1',
+    gsmDeviceRecordId: 'GDEV-1',
+    gsmImei: '860000000000001',
+    gsmDeviceId: 'DEVICE-CANONICAL-TRACKER',
+    gsmTrackerId: 'DEVICE-CANONICAL-TRACKER',
+    gsmSimNumber: '+79990000000',
+    gsmStatus: 'online',
+    gsmLastSeenAt: '2026-08-30T10:00:00.000Z',
+    gsmLastLat: 55.7,
+    gsmLastLng: 49.1,
+    nested: { gsmRawPayload: 'restricted', visible: true },
+    gsmPassword: 'legacy-device-password',
+    gsmPasswordConfigured: true,
+    gsmToken: 'legacy-device-token',
+    gsmDiagnostics: { secretMaterial: 'nested-device-secret', voltage: 12.4 },
+  };
+  const investor = { userId: 'U-investor', userRole: 'Инвестор', ownerId: 'OW-1' };
+  const technicalAuditor = { userId: 'U-auditor', userRole: 'Технический аудитор' };
+  const warrantyMechanic = { userId: 'U-warranty', userRole: 'Механик по гарантии' };
+  const rentalManager = { userId: 'U-manager', userRole: 'Менеджер по аренде' };
+  const unverifiedAccess = createAccess({ equipment: [equipment], gsm_devices: [] });
+
+  for (const user of [investor, technicalAuditor, warrantyMechanic]) {
+    const safe = unverifiedAccess.sanitizeEntityForRead('equipment', equipment, user);
+    assert.equal(Object.keys(safe).some(key => /^gsm/i.test(key)), false, user.userRole);
+    assert.equal(safe.nested.gsmRawPayload, undefined, user.userRole);
+    assert.equal(safe.nested.visible, true, user.userRole);
+  }
+  const unverified = unverifiedAccess.sanitizeEntityForRead('equipment', equipment, rentalManager);
+  assert.equal(unverified.id, equipment.id);
+  assert.equal(unverified.gsmBindingVerified, false);
+  assert.equal(unverified.gsmTelemetryVerified, false);
+  for (const field of ['gsmDeviceRecordId', 'gsmImei', 'gsmDeviceId', 'gsmTrackerId', 'gsmPassword', 'gsmToken']) {
+    assert.equal(unverified[field], undefined, field);
+  }
+
+  const device = {
+    id: equipment.gsmDeviceRecordId,
+    equipmentId: equipment.id,
+    companyId: equipment.companyId,
+    tenantId: equipment.tenantId,
+    imei: equipment.gsmImei,
+    deviceId: equipment.gsmDeviceId,
+    trackerId: equipment.gsmTrackerId,
+    sim1: equipment.gsmSimNumber,
+    status: 'active',
+    bindingRevision: 1,
+    bindingHistory: [{
+      revision: 1,
+      equipmentId: equipment.id,
+      companyId: equipment.companyId,
+      tenantId: equipment.tenantId,
+      imei: equipment.gsmImei,
+      deviceId: equipment.gsmDeviceId,
+      trackerId: equipment.gsmTrackerId,
+      identities: [equipment.gsmImei, equipment.gsmDeviceId],
+      linkedAt: '2026-08-30T10:00:00.000Z',
+      unlinkedAt: null,
+    }],
+  };
+  const verifiedAccess = createAccess({ equipment: [equipment], gsm_devices: [device], gsm_packets: [] });
+  const verified = verifiedAccess.sanitizeEntityForRead('equipment', equipment, rentalManager);
+  assert.equal(verified.id, equipment.id);
+  assert.equal(verified.gsmBindingVerified, true);
+  assert.equal(verified.gsmImei, equipment.gsmImei);
+  assert.equal(verified.gsmDeviceId, equipment.gsmDeviceId);
+  assert.equal(verified.gsmTrackerId, equipment.gsmTrackerId);
+  assert.equal(verified.gsmPassword, undefined);
+  assert.equal(verified.gsmToken, undefined);
+});
+
+test('unverified legacy GSM projection cannot cross the equipment DTO trust boundary', () => {
+  const equipment = {
+    id: 'EQ-LEGACY',
+    gsmImei: 'password=UNVERIFIED-LEGACY-SECRET',
+    gsmDeviceId: 'token=UNVERIFIED-DEVICE',
+    gsmDeviceRecordId: 'MISSING',
+  };
+  const access = createAccess({ equipment: [equipment], gsm_devices: [] });
+
+  for (const userRole of ['Администратор', 'Менеджер по аренде']) {
+    const safe = access.sanitizeEntityForRead('equipment', equipment, { userRole });
+    assert.equal(safe.id, equipment.id);
+    assert.equal(safe.gsmBindingVerified, false);
+    assert.equal(safe.gsmImei, undefined);
+    assert.equal(safe.gsmDeviceId, undefined);
+    assert.equal(safe.gsmDeviceRecordId, undefined);
+    assert.doesNotMatch(JSON.stringify(safe), /UNVERIFIED-(?:LEGACY-SECRET|DEVICE)/);
+  }
+});
+
+test('generic equipment mutations reject every gsm-prefixed projection alias', () => {
+  const access = createAccess({});
+  const admin = { userId: 'U-admin', userRole: 'Администратор' };
+
+  for (const patch of [
+    { gsmCreatedAt: '2099-01-01T00:00:00.000Z' },
+    { gsmUndocumentedLegacyAlias: 'forged' },
+  ]) {
+    assert.throws(
+      () => access.sanitizeUpdateInput('equipment', patch, admin, { id: 'EQ-1' }),
+      /общий PATCH/,
+    );
+  }
+});
+
 test('mechanic sees and mutates only assigned service tickets', () => {
   const state = {
     mechanics: [{ id: 'M-1', name: 'Петров Иван Сергеевич', status: 'active' }],

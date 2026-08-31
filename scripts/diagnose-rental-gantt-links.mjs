@@ -4,7 +4,24 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const Database = require('../server/node_modules/better-sqlite3');
 
-const dbPath = path.resolve(process.env.DB_PATH || 'server/data/app.sqlite');
+function parseArgs(argv) {
+  const args = { db: '' };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--db') args.db = argv[++index] || '';
+    else if (argument === '--help' || argument === '-h') args.help = true;
+    else throw new Error(`Unknown argument: ${argument}`);
+  }
+  return args;
+}
+
+const args = parseArgs(process.argv.slice(2));
+if (args.help) {
+  console.log('Usage: node scripts/diagnose-rental-gantt-links.mjs --db /explicit/path/app.sqlite');
+  process.exit(0);
+}
+if (!args.db) throw new Error('Refusing diagnostics without an explicit --db path.');
+const dbPath = path.resolve(args.db);
 const db = new Database(dbPath, { readonly: true, fileMustExist: true });
 
 function readCollection(name) {
@@ -12,9 +29,12 @@ function readCollection(name) {
   if (!row) return [];
   try {
     const parsed = JSON.parse(row.json);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+    if (!Array.isArray(parsed)) throw new Error(`Collection ${name} must contain an array.`);
+    return parsed;
+  } catch (error) {
+    const failure = new Error(`Collection ${name} is invalid: ${error.message}`);
+    failure.code = 'RENTAL_GANTT_DIAGNOSTIC_INVALID_COLLECTION';
+    throw failure;
   }
 }
 
@@ -106,3 +126,5 @@ console.log(JSON.stringify({
   duplicate_equipment_date_client_groups: duplicatesByShape.length,
   smoke_e2e_like_gantt_rentals: smokeLike.length,
 }, null, 2));
+
+db.close();

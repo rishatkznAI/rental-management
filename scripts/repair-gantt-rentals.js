@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -8,25 +7,35 @@ const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const Database = serverRequire('better-sqlite3');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('../server/lib/sqlite-readonly-statement.js');
+const {
   buildBrokenGanttRentalsRepairPlan,
   buildDryRunOperations,
-  applyRepairPlan,
 } = require('../server/lib/gantt-rental-repair-diagnostics.js');
+const {
+  assertAuditedMaintenanceApplyUnavailable,
+  parseAppDataValue,
+  resolveExplicitDatabasePath,
+} = require('../server/lib/maintenance-script-safety.js');
 
 const COLLECTIONS = ['equipment', 'rentals', 'gantt_rentals', 'documents', 'payments', 'deliveries', 'service', 'audit_logs'];
 
 function parseArgs(argv) {
   const args = {
-    db: path.resolve(process.cwd(), 'server/data/app.sqlite'),
+    db: '',
     dryRun: false,
     apply: false,
     json: false,
   };
-  for (const arg of argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
     if (arg === '--dry-run') args.dryRun = true;
     else if (arg === '--apply') args.apply = true;
     else if (arg === '--json') args.json = true;
-    else if (arg.startsWith('--db=')) args.db = path.resolve(arg.slice('--db='.length));
+    else if (arg === '--db') args.db = argv[++index] || '';
+    else if (arg.startsWith('--db=')) args.db = arg.slice('--db='.length);
+    else throw new Error(`Unknown argument: ${arg}`);
   }
   if (!args.apply) args.dryRun = true;
   return args;
@@ -35,57 +44,15 @@ function parseArgs(argv) {
 function readCollections(dbPath) {
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    const rows = db.prepare(`SELECT name, json FROM app_data WHERE name IN (${COLLECTIONS.map(() => '?').join(',')})`).all(...COLLECTIONS);
+    const rows = prepareSqliteReadonlyStatement(db, `SELECT name, json FROM app_data WHERE name IN (${COLLECTIONS.map(() => '?').join(',')})`).all(...COLLECTIONS);
     const collections = Object.fromEntries(COLLECTIONS.map(name => [name, []]));
     for (const row of rows) {
-      try {
-        collections[row.name] = row.json ? JSON.parse(row.json) : [];
-      } catch {
-        collections[row.name] = [];
-      }
+      collections[row.name] = parseAppDataValue(row, row.name, { expected: 'array', missing: [] });
     }
     return collections;
   } finally {
     db.close();
   }
-}
-
-function writeCollection(db, name, value) {
-  db.prepare(`
-    INSERT INTO app_data (name, json, updated_at)
-    VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(name) DO UPDATE SET json = excluded.json, updated_at = CURRENT_TIMESTAMP
-  `).run(name, JSON.stringify(value));
-}
-
-function createBackup(dbPath) {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupPath = `${dbPath}.backup-${stamp}`;
-  fs.copyFileSync(dbPath, backupPath);
-  return backupPath;
-}
-
-function softArchiveCandidates(ganttRentals, plan, auditLogs) {
-  const archiveIds = new Set(plan.groups.A.map(row => row.ganttId));
-  const archivedAt = new Date().toISOString();
-  const next = ganttRentals.map(row => {
-    if (!archiveIds.has(String(row?.id || ''))) return row;
-    auditLogs.push({
-      id: `AUDIT-GANTT-ARCHIVE-${row.id}-${Date.now()}`,
-      date: archivedAt,
-      action: 'gantt_rentals.soft_archive_orphan',
-      entityType: 'gantt_rentals',
-      entityId: row.id,
-      description: 'Soft archived orphan planner row after backup; no rental, payment, document, delivery or service records changed.',
-    });
-    return {
-      ...row,
-      archived: true,
-      archivedAt,
-      archiveReason: 'orphan_gantt_without_rental',
-    };
-  });
-  return next;
 }
 
 function printSummary(payload) {
@@ -104,16 +71,10 @@ function printSummary(payload) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (!fs.existsSync(args.db)) {
-    console.error(`DB not found: ${args.db}`);
-    process.exit(2);
-  }
-  if (args.apply && args.dryRun) {
-    console.error('Choose either --dry-run or --apply.');
-    process.exit(2);
-  }
+  const dbPath = resolveExplicitDatabasePath(args.db);
+  assertAuditedMaintenanceApplyUnavailable(args.apply, 'gantt-rentals repair');
 
-  const collections = readCollections(args.db);
+  const collections = readCollections(dbPath);
   const plan = buildBrokenGanttRentalsRepairPlan(collections);
   const dryRun = buildDryRunOperations(plan);
   const summary = {
@@ -130,28 +91,6 @@ function main() {
     summary,
     plannedActions,
   };
-
-  if (args.apply) {
-    const backupPath = createBackup(args.db);
-    const result = applyRepairPlan(collections, plan, {
-      apply: true,
-      backupVerified: true,
-      confirm: true,
-    });
-    const auditLogs = Array.isArray(collections.audit_logs) ? [...collections.audit_logs] : [];
-    const nextGanttRentals = softArchiveCandidates(result.collections.gantt_rentals, plan, auditLogs);
-    const db = new Database(args.db, { fileMustExist: true });
-    try {
-      db.transaction(() => {
-        writeCollection(db, 'gantt_rentals', nextGanttRentals);
-        writeCollection(db, 'audit_logs', auditLogs);
-      })();
-    } finally {
-      db.close();
-    }
-    payload.productionDataChanged = true;
-    payload.backupPath = backupPath;
-  }
 
   if (args.json) console.log(JSON.stringify(payload, null, 2));
   else printSummary(payload);

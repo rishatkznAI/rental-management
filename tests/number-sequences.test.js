@@ -221,6 +221,7 @@ test('ClientContract and VehicleTrip own contract and trip-ticket numbers', t =>
   numbering.preparePersistenceEntries(entries);
 
   assert.equal(contract.number, 'CTR-26-000001');
+  assert.equal(contract.title, contract.number);
   assert.equal(contractDocument.number, contract.number);
   assert.equal(trip.number, 'PL-26-000001');
   assert.equal(trip.sheetNumber, trip.number);
@@ -230,6 +231,84 @@ test('ClientContract and VehicleTrip own contract and trip-ticket numbers', t =>
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM business_numbers WHERE entity_type = 'CLIENT_CONTRACT'").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM business_numbers WHERE entity_type = 'VEHICLE_TRIP'").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM business_numbers WHERE entity_type IN ('RENTAL_CONTRACT', 'TRIP_TICKET')").get().count, 0);
+});
+
+test('numbering preview runs the allocation and ownership path without reserving SQL state', t => {
+  const { db } = tempDatabase(t);
+  const state = {
+    rentals: [],
+    gantt_rentals: [],
+    client_contracts: [],
+    documents: [],
+  };
+  const numbering = businessNumbering(db, state);
+  const previewEntries = [
+    { name: 'rentals', value: [{ id: 'R-PREVIEW' }, { id: 'R-PREVIEW-2' }] },
+    { name: 'gantt_rentals', value: [{ id: 'GR-PREVIEW', rentalId: 'R-PREVIEW' }] },
+    { name: 'client_contracts', value: [{ id: 'CC-PREVIEW' }] },
+    { name: 'documents', value: [{ id: 'D-PREVIEW', type: 'rental_contract', contractId: 'CC-PREVIEW' }] },
+  ];
+
+  numbering.preparePersistenceEntries(previewEntries, { mode: 'preview' });
+
+  assert.deepEqual(previewEntries[0].value.map(item => item.number), ['RNT-26-000001', 'RNT-26-000002']);
+  assert.equal(previewEntries[1].value[0].number, 'RNT-26-000001');
+  assert.equal(previewEntries[2].value[0].number, 'CTR-26-000001');
+  assert.equal(previewEntries[3].value[0].number, 'CTR-26-000001');
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 0);
+
+  const appliedEntries = structuredClone(previewEntries).map(entry => ({
+    ...entry,
+    value: entry.value.map(record => {
+      const next = { ...record };
+      delete next.number;
+      delete next.documentNumber;
+      delete next.sheetNumber;
+      return next;
+    }),
+  }));
+  numbering.preparePersistenceEntries(appliedEntries);
+  assert.deepEqual(
+    appliedEntries.map(entry => entry.value.map(record => record.number)),
+    previewEntries.map(entry => entry.value.map(record => record.number)),
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 3);
+});
+
+test('an outer canonical persistence transaction rolls back nested number reservations on downstream failure', t => {
+  const { db } = tempDatabase(t);
+  db.exec('CREATE TABLE app_data (name TEXT PRIMARY KEY, json TEXT NOT NULL)');
+  const numbering = businessNumbering(db, { rentals: [] });
+  const persist = db.transaction((entries, failAfterNumbering) => {
+    numbering.preparePersistenceEntries(entries);
+    if (failAfterNumbering) throw new Error('injected downstream boundary failure');
+    db.prepare('INSERT INTO app_data (name, json) VALUES (?, ?)').run(
+      'rentals',
+      JSON.stringify(entries[0].value),
+    );
+  });
+
+  assert.throws(
+    () => persist.immediate([{ name: 'rentals', value: [{ id: 'R-ROLLBACK' }] }], true),
+    /injected downstream boundary failure/,
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM app_data').get().count, 0);
+
+  persist.immediate([{ name: 'rentals', value: [{ id: 'R-COMMIT' }] }], false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM app_data').get().count, 1);
+});
+
+test('server writes canonical numbering and tenant app_data inside one outer immediate transaction', () => {
+  const serverSource = fs.readFileSync(path.join(process.cwd(), 'server/server.js'), 'utf8');
+  assert.match(serverSource, /const persistCanonicalDataBatch = ensureDb\(\)\.transaction\(entries => \{/);
+  assert.match(serverSource, /persistCanonicalDataBatch\.immediate\(\[\{ name, value: data \}\]\)/);
+  assert.match(serverSource, /persistCanonicalDataBatch\.immediate\(entries\)/);
 });
 
 test('managed document type and master link are immutable after number assignment', t => {

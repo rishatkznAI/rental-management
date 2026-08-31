@@ -17,12 +17,13 @@ function createServiceCore(deps) {
   const {
     readData,
     writeData,
-    writeDataBatch: persistDataBatch = entries => {
-      for (const entry of entries || []) writeData(entry.name, entry.value);
-    },
+    writeDataBatch: persistDataBatch,
     nowIso,
     equipmentMatchesServiceTicket,
   } = deps;
+  if (typeof persistDataBatch !== 'function') {
+    throw new TypeError('Service core requires an atomic batch writer.');
+  }
 
   function serviceStatusLabel(status) {
     return ({
@@ -65,6 +66,21 @@ function createServiceCore(deps) {
     return persistServiceTicketUpdate(updatedTicket, 'Система');
   }
 
+  function servicePersistenceOptions(options, current, previous = null) {
+    const extraEntries = [
+      ...(Array.isArray(options?.extraEntries) ? options.extraEntries : []),
+      ...(typeof options?.buildExtraEntries === 'function'
+        ? (options.buildExtraEntries(current, previous) || [])
+        : []),
+    ];
+    return {
+      write: typeof options?.writeDataBatch === 'function'
+        ? options.writeDataBatch
+        : persistDataBatch,
+      extraEntries,
+    };
+  }
+
   function applyServiceTicketCreationEffects(ticket, author = 'Система', options = {}) {
     if (!ticket) return;
     const previous = readServiceTickets().find(item => String(item?.id || '') === String(ticket?.id || '')) || null;
@@ -77,9 +93,13 @@ function createServiceCore(deps) {
     const requestedServiceTickets = Array.isArray(options.serviceTickets)
       ? options.serviceTickets.map(item => String(item?.id || '') === String(ticket.id || '') ? ticket : item)
       : options.serviceTickets;
+    const persistence = servicePersistenceOptions(options, ticket, previous);
     if (isPdiServiceTicket(ticket)) {
       if (options.persistService && Array.isArray(requestedServiceTickets)) {
-        persistDataBatch([{ name: 'service', value: requestedServiceTickets }]);
+        persistence.write([
+          { name: 'service', value: requestedServiceTickets },
+          ...persistence.extraEntries,
+        ]);
         return { persisted: true, ticket };
       }
       return { persisted: false, ticket };
@@ -160,11 +180,12 @@ function createServiceCore(deps) {
       existingList: equipmentList,
       nextList: nextEquipment,
     });
-    persistDataBatch([
+    persistence.write([
       ...(options.persistService ? [{ name: 'service', value: serviceTickets }] : []),
       ...(nextClassicRentals.some((item, index) => item !== classicRentals[index]) ? [{ name: 'rentals', value: nextClassicRentals }] : []),
       ...(nextRentals.some((item, index) => item !== ganttRentals[index]) ? [{ name: 'gantt_rentals', value: nextRentals }] : []),
       ...(lifecycle.changed ? [{ name: 'equipment', value: nextEquipment }] : []),
+      ...persistence.extraEntries,
     ]);
     return { persisted: Boolean(options.persistService), ticket };
   }
@@ -229,7 +250,7 @@ function createServiceCore(deps) {
     if (lifecycle.changed) writeData('equipment', nextEquipment);
   }
 
-  function persistServiceTicketUpdate(updatedTicket, author = 'Система') {
+  function persistServiceTicketUpdate(updatedTicket, author = 'Система', options = {}) {
     const tickets = readServiceTickets();
     const previous = tickets.find(ticket => ticket.id === updatedTicket.id) || null;
     const normalizedForWrite = normalizeServiceTicketForWrite(updatedTicket, {
@@ -274,9 +295,11 @@ function createServiceCore(deps) {
         ))
       : lifecycle.nextEquipment;
     const equipmentChanged = lifecycle.changed || nextEquipment.some((item, index) => item !== lifecycle.nextEquipment[index]);
-    persistDataBatch([
+    const persistence = servicePersistenceOptions(options, normalized, previous);
+    persistence.write([
       { name: 'service', value: nextTickets },
       ...(equipmentChanged ? [{ name: 'equipment', value: nextEquipment }] : []),
+      ...persistence.extraEntries,
     ]);
     return normalized;
   }
@@ -297,14 +320,15 @@ function createServiceCore(deps) {
       author,
       reason: `Удаление сервисной заявки ${ticket?.id || ''}`,
     });
-    persistDataBatch([
-      ...(Array.isArray(options.extraEntries) ? options.extraEntries : []),
+    const persistence = servicePersistenceOptions(options, ticket, ticket);
+    persistence.write([
       { name: 'service', value: nextTickets },
       ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+      ...persistence.extraEntries,
     ]);
   }
 
-  function persistServiceTicketBulkReplace(tickets, author = 'Система') {
+  function persistServiceTicketBulkReplace(tickets, author = 'Система', options = {}) {
     const previousTickets = readServiceTickets();
     const previousById = new Map(previousTickets.map(ticket => [String(ticket?.id || ''), ticket]));
     const normalizedTickets = (Array.isArray(tickets) ? tickets : []).map(ticket => normalizeServiceTicketForWrite(ticket, {
@@ -330,9 +354,11 @@ function createServiceCore(deps) {
       author,
       reason: 'Массовая замена сервисных заявок',
     });
-    persistDataBatch([
+    const persistence = servicePersistenceOptions(options, nextTickets, previousTickets);
+    persistence.write([
       { name: 'service', value: nextTickets },
       ...(lifecycle.changed ? [{ name: 'equipment', value: lifecycle.nextEquipment }] : []),
+      ...persistence.extraEntries,
     ]);
     return nextTickets;
   }
@@ -351,7 +377,7 @@ function createServiceCore(deps) {
     return [...history].reverse().find(item => item && !item.resolvedAt) || null;
   }
 
-  function returnServiceTicketForRevision(ticket, payload = {}, actor = {}) {
+  function returnServiceTicketForRevision(ticket, payload = {}, actor = {}, persistenceOptions = {}) {
     if (!['ready', 'closed'].includes(String(ticket?.status || ''))) {
       const error = new Error('Вернуть на доработку можно только готовую или закрытую заявку');
       error.status = 400;
@@ -409,10 +435,10 @@ function createServiceCore(deps) {
         revision,
       ],
     }, `Заявка возвращена механику на доработку: ${reason}${checklistText}${detailText}`, revision.createdByName, 'status_change');
-    return persistServiceTicketUpdate(updated, revision.createdByName);
+    return persistServiceTicketUpdate(updated, revision.createdByName, persistenceOptions);
   }
 
-  function resolveServiceTicketRevision(ticket, payload = {}, actor = {}) {
+  function resolveServiceTicketRevision(ticket, payload = {}, actor = {}, persistenceOptions = {}) {
     if (ticket?.status !== 'needs_revision') {
       const error = new Error('Повторно отправить можно только заявку в статусе «На доработке»');
       error.status = 400;
@@ -453,7 +479,11 @@ function createServiceCore(deps) {
       revisionHistory: nextHistory,
       closedAt: now,
     }, `Заявка повторно отправлена после доработки${comment ? `: ${comment}` : ''}`, actor.userName || actor.name || 'Механик', 'status_change');
-    return persistServiceTicketUpdate(updated, actor.userName || actor.name || 'Механик');
+    return persistServiceTicketUpdate(
+      updated,
+      actor.userName || actor.name || 'Механик',
+      persistenceOptions,
+    );
   }
 
   function generateRevisionId() {

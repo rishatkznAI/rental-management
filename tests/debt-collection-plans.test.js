@@ -9,7 +9,6 @@ const express = serverRequire('express');
 const { createAccessControl } = require('../server/lib/access-control.js');
 const { normalizeRole } = require('../server/lib/role-groups.js');
 const { registerDebtCollectionPlanRoutes } = require('../server/routes/debt-collection-plans.js');
-const { createAuditLogger } = require('../server/lib/security-audit.js');
 
 const READ_PERMISSIONS = {
   debt_collection_plans: ['Администратор', 'Менеджер по аренде', 'Менеджер по продажам', 'Офис-менеджер'],
@@ -40,10 +39,21 @@ function createState(overrides = {}) {
 }
 
 function createApp(state = createState()) {
+  let nextBatchError = null;
+  const idCounters = new Map();
   const app = express();
   app.use(express.json());
   const readData = name => state[name] || [];
-  const writeData = (name, value) => { state[name] = value; };
+  const writeAuditDataBatch = entries => {
+    if (nextBatchError) {
+      const error = nextBatchError;
+      nextBatchError = null;
+      throw error;
+    }
+    const staged = structuredClone(state);
+    for (const entry of entries) staged[entry.name] = structuredClone(entry.value);
+    Object.assign(state, staged);
+  };
   const accessControl = createAccessControl({ readData });
   const sessions = new Map([
     ['admin-token', 'U-admin'],
@@ -65,6 +75,7 @@ function createApp(state = createState()) {
       normalizedRole: normalizeRole(user.role),
       email: user.email,
     };
+    req.actorScope = { companyId: 'COMPANY-DEBT', tenantId: 'COMPANY-DEBT' };
     return next();
   }
 
@@ -90,23 +101,26 @@ function createApp(state = createState()) {
 
   app.use('/api', registerDebtCollectionPlanRoutes({
     readData,
-    writeData,
+    writeAuditDataBatch,
     requireAuth,
     requireRead,
     requireWrite,
     canReadCollection,
     accessControl,
-    auditLog: createAuditLogger({
-      readData,
-      writeData,
-      generateId: prefix => `${prefix}-${state.audit_logs.length + 1}`,
-      nowIso: () => '2026-05-02T10:00:00.000Z',
-      logger: { warn() {} },
-    }),
-    generateId: prefix => `${prefix}-1`,
+    generateId: prefix => {
+      const next = (idCounters.get(prefix) || 0) + 1;
+      idCounters.set(prefix, next);
+      return `${prefix}-${next}`;
+    },
     idPrefixes: { debt_collection_plans: 'DCP' },
     nowIso: () => '2026-05-02T10:00:00.000Z',
   }));
+  app.failNextBatch = () => {
+    const error = new Error('injected debt-plan atomic batch failure');
+    error.code = 'INJECTED_BATCH_FAILURE';
+    error.status = 503;
+    nextBatchError = error;
+  };
   return app;
 }
 
@@ -174,6 +188,32 @@ test('admin and office can create plan, manager cannot mutate', async () => {
     assert.equal(state.debt_collection_plans.length, 1);
     assert.equal(state.audit_logs[0].action, 'debt_collection_plans.create');
   });
+});
+
+test('debt plan and every semantic audit event roll back together on batch failure', async () => {
+  const state = createState();
+  const app = createApp(state);
+  const before = structuredClone({
+    plans: state.debt_collection_plans,
+    audit: state.audit_logs,
+  });
+  app.failNextBatch();
+
+  await withServer(app, async (baseUrl) => {
+    const response = await request(baseUrl, 'POST', '/api/debt-collection-plans', 'office-token', {
+      clientId: 'C-1',
+      status: 'new',
+      priority: 'high',
+      nextActionType: 'call',
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, 'INJECTED_BATCH_FAILURE');
+  });
+
+  assert.deepEqual({
+    plans: state.debt_collection_plans,
+    audit: state.audit_logs,
+  }, before);
 });
 
 test('status update writes safe audit without sensitive fields', async () => {

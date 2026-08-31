@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Boxes, X } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { AuthenticatedImage } from '../../components/ui/AuthenticatedImage';
+import { buildEquipmentQuickViewGsmFields as buildGsmFields } from '../../lib/equipmentQuickViewGsmFields';
 import { normalizePhotoReference } from '../../lib/media';
 import type { Equipment as EquipmentEntity } from '../../types';
 import { EQUIPMENT_PREVIEW_TABS, EQUIPMENT_QUICK_VIEW_EMPTY_COPY } from './equipment.constants';
@@ -51,21 +52,6 @@ function PreviewEmpty({ children }: { children: ReactNode }) {
       {children}
     </div>
   );
-}
-
-function buildGsmFields(selectedEquipment: EquipmentEntity): EquipmentPreviewField[] {
-  const latitude = selectedEquipment.gsmLastLat ?? selectedEquipment.gsmLatitude;
-  const longitude = selectedEquipment.gsmLastLng ?? selectedEquipment.gsmLongitude;
-  return [
-    { label: 'Статус', value: selectedEquipment.gsmStatus || selectedEquipment.gsmSignalStatus || '—' },
-    { label: 'IMEI', value: selectedEquipment.gsmImei || '—' },
-    { label: 'Устройство', value: selectedEquipment.gsmDeviceId || selectedEquipment.gsmTrackerId || '—' },
-    { label: 'Последний сигнал', value: selectedEquipment.gsmLastSeenAt || selectedEquipment.gsmLastSignalAt || '—' },
-    { label: 'Адрес', value: selectedEquipment.gsmAddress || '—' },
-    { label: 'Координаты', value: latitude && longitude ? `${latitude}, ${longitude}` : '—' },
-    { label: 'Моточасы GSM', value: selectedEquipment.gsmLastMotoHours || selectedEquipment.gsmHourmeter || '—' },
-    { label: 'Напряжение', value: selectedEquipment.gsmLastVoltage || selectedEquipment.gsmBatteryVoltage || '—' },
-  ];
 }
 
 export function EquipmentQuickViewPanel({

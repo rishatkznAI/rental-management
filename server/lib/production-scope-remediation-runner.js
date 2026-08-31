@@ -4,6 +4,9 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+const {
   cleanupBackupArchive,
   createFullBackupArchive,
 } = require('./full-backup');
@@ -18,6 +21,7 @@ const {
   planProductionScopeRemediation,
   sqliteTotalChanges,
   stableJson,
+  targetCollectionsForPlan,
 } = require('./production-scope-remediation');
 const { isEligiblePlatformUser } = require('./platform-identity-repository');
 const { createTrustedActorScopeResolver } = require('./trusted-actor-scope');
@@ -28,15 +32,9 @@ const BACKUP_FILENAME = /^rentcore-phase-a-\d{8}T\d{6}Z\.zip$/;
 const BACKUP_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const HEX_64 = /^[a-f0-9]{64}$/;
 const SHA_40 = /^[a-f0-9]{40}$/;
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const ISO_UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const MAX_BACKUP_AGE_MS = 24 * 60 * 60 * 1000;
-const TARGET_COLLECTIONS = [
-  'counterparties',
-  'counterparty_role_assignments',
-  'clients',
-  'client_objects',
-];
-
 class ProductionScopeRunnerError extends Error {
   constructor(code, message, status = 409, blockers = []) {
     super(message);
@@ -104,7 +102,23 @@ function normalizedSqliteFileSet(files) {
     : null]));
 }
 
+function normalizedSqliteDurableFileSet(files) {
+  const normalized = normalizedSqliteFileSet(files);
+  return {
+    database: normalized.database,
+    wal: normalized.wal,
+  };
+}
+
+// The database and WAL are the authoritative durable SQLite state. The SHM file
+// is a transient WAL index: opening an otherwise read-only database may rebuild
+// it byte-for-byte differently without changing database content or the WAL.
+// Keep hashing SHM as forensic evidence, but never use it as a mutation gate.
 function sqliteFileSetFingerprint(files) {
+  return sha256(stableJson(normalizedSqliteDurableFileSet(files)));
+}
+
+function sqliteObservedFileSetFingerprint(files) {
   return sha256(stableJson(normalizedSqliteFileSet(files)));
 }
 
@@ -132,7 +146,7 @@ function databaseContentFingerprint(db) {
     encoding: String(db.pragma('encoding', { simple: true })),
     autoVacuum: Number(db.pragma('auto_vacuum', { simple: true })),
   };
-  const schema = db.prepare(`
+  const schema = prepareSqliteReadonlyStatement(db, `
     SELECT type, name, tbl_name AS tableName, sql
     FROM sqlite_master
     WHERE name NOT LIKE 'sqlite_%' OR name = 'sqlite_sequence'
@@ -145,7 +159,7 @@ function databaseContentFingerprint(db) {
   }));
   const tables = schema.filter(item => item.type === 'table').map(item => item.name);
   const contents = tables.map(name => {
-    const encodedRows = db.prepare(`SELECT * FROM ${quoteIdentifier(name)}`).all().map(row => (
+    const encodedRows = prepareSqliteReadonlyStatement(db, `SELECT * FROM ${quoteIdentifier(name)}`).all().map(row => (
       Object.fromEntries(Object.keys(row).sort().map(key => [key, fingerprintSqlValue(row[key])]))
     ));
     encodedRows.sort((left, right) => {
@@ -164,6 +178,17 @@ function normalizedText(value, maxLength = 240) {
   return String(value ?? '').trim().slice(0, maxLength);
 }
 
+function normalizedRailwayTarget(value) {
+  return Object.fromEntries([
+    'projectId',
+    'environmentId',
+    'serviceId',
+    'volumeId',
+    'volumeName',
+    'volumeMountPath',
+  ].map(field => [field, normalizedText(value?.[field], 160)]));
+}
+
 function assertDeploymentSha(expectedDeployedSha, actualDeployedSha) {
   const expected = normalizedText(expectedDeployedSha, 40).toLowerCase();
   const actual = normalizedText(actualDeployedSha, 80).toLowerCase();
@@ -176,8 +201,45 @@ function assertDeploymentSha(expectedDeployedSha, actualDeployedSha) {
   return actual;
 }
 
+function exactSourceBindingBlockers(
+  plan,
+  { databaseFingerprint, railwayIdentity, acceptedDatabaseFingerprints = [] } = {},
+) {
+  const requiresBinding = Number(plan?.manifestVersion || 0) >= 2;
+  const source = plan?.exactSourceBinding?.source;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return requiresBinding ? [{ code: 'EXACT_SOURCE_BINDING_REQUIRED' }] : [];
+  }
+  const captureDeployedSha = normalizedText(source.captureDeployedSha, 40).toLowerCase();
+  const captureDeploymentId = normalizedText(source.captureDeploymentId, 36).toLowerCase();
+  const expectedDatabaseFingerprint = normalizedText(source.databaseContentFingerprint, 64);
+  const expectedRailwayTarget = normalizedRailwayTarget(source.railwayIdentity);
+  if (
+    !SHA_40.test(captureDeployedSha)
+    || !UUID.test(captureDeploymentId)
+    || !HEX_64.test(expectedDatabaseFingerprint)
+    || Object.values(expectedRailwayTarget).some(value => !value)
+  ) {
+    return [{ code: 'EXACT_SOURCE_BINDING_INVALID' }];
+  }
+  const blockers = [];
+  const allowedDatabaseFingerprints = new Set([
+    expectedDatabaseFingerprint,
+    ...acceptedDatabaseFingerprints
+      .map(value => normalizedText(value, 64))
+      .filter(value => HEX_64.test(value)),
+  ]);
+  if (!allowedDatabaseFingerprints.has(normalizedText(databaseFingerprint, 64))) {
+    blockers.push({ code: 'EXACT_SOURCE_DATABASE_FINGERPRINT_MISMATCH' });
+  }
+  if (stableJson(expectedRailwayTarget) !== stableJson(normalizedRailwayTarget(railwayIdentity))) {
+    blockers.push({ code: 'EXACT_SOURCE_RAILWAY_TARGET_MISMATCH' });
+  }
+  return blockers;
+}
+
 function readUsers(db) {
-  const row = db.prepare('SELECT json FROM app_data WHERE name = ?').get('users');
+  const row = prepareSqliteReadonlyStatement(db, 'SELECT json FROM app_data WHERE name = ?').get('users');
   if (!row) fail('USERS_COLLECTION_MISSING', 'The authoritative users collection is missing.');
   let users;
   try {
@@ -321,12 +383,25 @@ function assertConservation(state) {
     || state?.botDisabled !== true
     || state?.gsmDisabled !== true
     || state?.storageWriteGuardEnabled !== true
+    || state?.schemaCompatibilityDisabled !== true
     || state?.cleanResetDisabled !== true
     || state?.adminResetDisabled !== true
   ) {
     fail(
       'MAINTENANCE_WRITE_FREEZE_REQUIRED',
-      'Every application, bot, GSM, storage, reset, and startup write path must be frozen.',
+      'Every application, bot, GSM, storage, compatibility, reset, and startup write path must be frozen.',
+    );
+  }
+}
+
+function assertProductionExecutionAuthorized(plan) {
+  if (
+    plan?.productionExecutionAuthorized === false
+    || (Number(plan?.manifestVersion || 0) >= 2 && plan?.productionExecutionAuthorized !== true)
+  ) {
+    fail(
+      'PRODUCTION_EXECUTION_NOT_AUTHORIZED',
+      'The embedded exact execution plan is review-only; guarded backup/apply is disabled.',
     );
   }
 }
@@ -338,7 +413,7 @@ function clone(value) {
 function buildExecutionPlan(basePlan, receipt) {
   if (
     !receipt
-    || receipt.receiptVersion !== 1
+    || receipt.receiptVersion !== 2
     || !BACKUP_ID.test(normalizedText(receipt.backupId, 36).toLowerCase())
     || !BACKUP_FILENAME.test(normalizedText(receipt.filename, 120))
     || !HEX_64.test(normalizedText(receipt.sha256, 64))
@@ -348,6 +423,7 @@ function buildExecutionPlan(basePlan, receipt) {
     || !normalizedText(receipt.generatedAt, 80)
     || !HEX_64.test(normalizedText(receipt.databaseFingerprint, 64))
     || !HEX_64.test(normalizedText(receipt.sourceFileSetFingerprint, 64))
+    || !HEX_64.test(normalizedText(receipt.sourceObservedFileSetFingerprint, 64))
     || !HEX_64.test(normalizedText(receipt.stateFingerprint, 64))
     || !HEX_64.test(normalizedText(receipt.userInventoryFingerprint, 64))
     || !SHA_40.test(normalizedText(receipt.deployedSha, 40))
@@ -368,6 +444,7 @@ function buildExecutionPlan(basePlan, receipt) {
     deployedSha: receipt.deployedSha,
     databaseFingerprint: receipt.databaseFingerprint,
     sourceFileSetFingerprint: receipt.sourceFileSetFingerprint,
+    sourceObservedFileSetFingerprint: receipt.sourceObservedFileSetFingerprint,
     stateFingerprint: receipt.stateFingerprint,
     userInventoryFingerprint: receipt.userInventoryFingerprint,
     canonicalCompanyId: receipt.canonicalCompanyId,
@@ -425,12 +502,19 @@ function loadStoredReceipt(dbPath, reference) {
     fail('BACKUP_RECEIPT_INVALID', 'The stored receipt has no exact expected post-state fingerprint.');
   }
   if (sqliteFileSetFingerprint(stored.sourceFileSet) !== stored.sourceFileSetFingerprint) {
-    fail('BACKUP_RECEIPT_INVALID', 'The stored DB/WAL/SHM fingerprint is internally inconsistent.');
+    fail('BACKUP_RECEIPT_INVALID', 'The stored durable DB/WAL fingerprint is internally inconsistent.');
+  }
+  if (sqliteObservedFileSetFingerprint(stored.sourceFileSet) !== stored.sourceObservedFileSetFingerprint) {
+    fail('BACKUP_RECEIPT_INVALID', 'The stored observed DB/WAL/SHM fingerprint is internally inconsistent.');
   }
   return stored;
 }
 
 function assertReceiptBindings({ receipt, plan, deployedSha, railwayIdentity }) {
+  const exactSourceBlockers = exactSourceBindingBlockers(plan, {
+    databaseFingerprint: receipt?.databaseFingerprint,
+    railwayIdentity: receipt?.railwayIdentity,
+  });
   if (
     receipt.deployedSha !== deployedSha
     || receipt.canonicalCompanyId !== plan?.authority?.companyId
@@ -439,6 +523,14 @@ function assertReceiptBindings({ receipt, plan, deployedSha, railwayIdentity }) 
     || stableJson(receipt.railwayIdentity || null) !== stableJson(railwayIdentity || null)
   ) {
     fail('BACKUP_RECEIPT_CONTEXT_MISMATCH', 'The stored receipt belongs to another release or production context.');
+  }
+  if (exactSourceBlockers.length > 0) {
+    fail(
+      'BACKUP_RECEIPT_SOURCE_BINDING_MISMATCH',
+      'The stored receipt differs from the exact reviewed source binding.',
+      409,
+      exactSourceBlockers,
+    );
   }
 }
 
@@ -452,6 +544,7 @@ function runPreflight({
   expectedDeployedSha,
   actualDeployedSha,
   railwayIdentity,
+  acceptedExactDatabaseFingerprints = [],
   DatabaseConstructor = Database,
 }) {
   const deployedSha = assertDeploymentSha(expectedDeployedSha, actualDeployedSha);
@@ -485,7 +578,14 @@ function runPreflight({
     db.close();
   }
   const afterFiles = sqliteFileSet(resolvedDbPath);
-  const runtimeBlockers = [...inventory.blockers];
+  const runtimeBlockers = [
+    ...inventory.blockers,
+    ...exactSourceBindingBlockers(plan, {
+      databaseFingerprint,
+      railwayIdentity,
+      acceptedDatabaseFingerprints: acceptedExactDatabaseFingerprints,
+    }),
+  ];
   if (totalChangesAfter - totalChangesBefore !== 0) {
     runtimeBlockers.push({ code: 'PREFLIGHT_REPORTED_WRITES' });
   }
@@ -528,7 +628,11 @@ function runPreflight({
       afterFiles,
       beforeFileSetFingerprint: sqliteFileSetFingerprint(beforeFiles),
       afterFileSetFingerprint: sqliteFileSetFingerprint(afterFiles),
-      databaseWalAndShmUnchanged: dataFilesUnchanged(beforeFiles, afterFiles),
+      beforeObservedFileSetFingerprint: sqliteObservedFileSetFingerprint(beforeFiles),
+      afterObservedFileSetFingerprint: sqliteObservedFileSetFingerprint(afterFiles),
+      databaseAndWalUnchanged: dataFilesUnchanged(beforeFiles, afterFiles),
+      shmObservationUnchanged: stableJson(normalizedSqliteFileSet(beforeFiles).shm)
+        === stableJson(normalizedSqliteFileSet(afterFiles).shm),
     },
     runtimeSafety: {
       readonly: true,
@@ -594,6 +698,7 @@ async function runBackup({
   now = new Date(),
   DatabaseConstructor = Database,
 }) {
+  assertProductionExecutionAuthorized(plan);
   assertConservation(conservationState);
   const preflight = runPreflight({
     dbPath,
@@ -617,7 +722,7 @@ async function runBackup({
   try {
     const sourceFilesBeforeBackup = sqliteFileSet(dbPath);
     if (sqliteFileSetFingerprint(sourceFilesBeforeBackup) !== preflight.sqlite.afterFileSetFingerprint) {
-      fail('BACKUP_SOURCE_STATE_CHANGED', 'SQLite DB/WAL/SHM changed after the frozen preflight.');
+      fail('BACKUP_SOURCE_STATE_CHANGED', 'Durable SQLite DB/WAL changed after the frozen preflight.');
     }
     backup = await createFullBackupArchive({
       readData,
@@ -642,7 +747,7 @@ async function runBackup({
     }
     const sourceFilesAfterBackup = sqliteFileSet(dbPath);
     if (sqliteFileSetFingerprint(sourceFilesAfterBackup) !== sqliteFileSetFingerprint(sourceFilesBeforeBackup)) {
-      fail('BACKUP_SOURCE_FILES_CHANGED', 'SQLite DB/WAL/SHM changed while the backup was created.');
+      fail('BACKUP_SOURCE_FILES_CHANGED', 'Durable SQLite DB/WAL changed while the backup was created.');
     }
     fs.copyFileSync(backup.path, outputPath, fs.constants.COPYFILE_EXCL);
     fs.chmodSync(outputPath, 0o600);
@@ -653,7 +758,7 @@ async function runBackup({
       fs.closeSync(outputFd);
     }
     const receipt = {
-      receiptVersion: 1,
+      receiptVersion: 2,
       backupId: crypto.randomUUID(),
       filename,
       generatedAt: now.toISOString(),
@@ -665,6 +770,7 @@ async function runBackup({
       userInventoryFingerprint: preflight.userInventory.fingerprint,
       sourceFileSet: normalizedSqliteFileSet(sourceFilesAfterBackup),
       sourceFileSetFingerprint: sqliteFileSetFingerprint(sourceFilesAfterBackup),
+      sourceObservedFileSetFingerprint: sqliteObservedFileSetFingerprint(sourceFilesAfterBackup),
       deployedSha: preflight.deployedSha,
       bundledPlanChecksum: preflight.bundledPlanChecksum,
       canonicalCompanyId: plan.authority.companyId,
@@ -776,6 +882,7 @@ function assertIndependentBackupEvidence(evidence, receipt, now = new Date()) {
     && evidence?.userInventoryFingerprint === receipt.userInventoryFingerprint
     && evidence?.databaseFingerprint === receipt.databaseFingerprint
     && evidence?.sourceFileSetFingerprint === receipt.sourceFileSetFingerprint
+    && evidence?.sourceObservedFileSetFingerprint === receipt.sourceObservedFileSetFingerprint
     && evidence?.canonicalCompanyId === receipt.canonicalCompanyId
     && evidence?.bundledPlanChecksum === receipt.bundledPlanChecksum
     && evidence?.executionPlanChecksum === receipt.executionPlanChecksum
@@ -794,6 +901,9 @@ function assertIndependentBackupEvidence(evidence, receipt, now = new Date()) {
     || !/^(?:sha256:)?[a-f0-9]{64}$/.test(normalizedText(evidence?.githubArtifactDigest, 80))
     || !Number.isSafeInteger(evidence?.encryptedArchiveSizeBytes)
     || evidence.encryptedArchiveSizeBytes <= 0
+    || evidence?.decryptabilityVerified !== true
+    || evidence?.decryptedArchiveSha256 !== receipt.sha256
+    || evidence?.decryptedArchiveSizeBytes !== receipt.sizeBytes
     || approvalReference.length < 16
     || /[\u0000-\u001f\u007f]/.test(approvalReference)
     || evidence?.confirmation !== INDEPENDENT_COPY_CONFIRMATION
@@ -833,6 +943,7 @@ function runApply({
   DatabaseConstructor = Database,
   faultInjector,
 }) {
+  assertProductionExecutionAuthorized(plan);
   assertConservation(conservationState);
   const deployedSha = assertDeploymentSha(expectedDeployedSha, actualDeployedSha);
   if (confirmation !== APPLY_CONFIRMATION) {
@@ -854,7 +965,7 @@ function runApply({
     fail('DATABASE_FINGERPRINT_REQUIRED', 'The exact approved database fingerprint is required.');
   }
   if (!HEX_64.test(normalizedText(expectedSourceFileSetFingerprint, 64))) {
-    fail('SQLITE_FILE_SET_FINGERPRINT_REQUIRED', 'The exact approved DB/WAL/SHM fingerprint is required.');
+    fail('SQLITE_FILE_SET_FINGERPRINT_REQUIRED', 'The exact approved durable DB/WAL fingerprint is required.');
   }
   if (!HEX_64.test(normalizedText(expectedPostDatabaseFingerprint, 64))) {
     fail('EXPECTED_POST_DATABASE_FINGERPRINT_REQUIRED', 'The exact approved post-state fingerprint is required.');
@@ -899,7 +1010,7 @@ function runApply({
     fail('DATABASE_FINGERPRINT_MISMATCH', 'The complete production database changed after backup.');
   }
   if (preflight.sqlite.afterFileSetFingerprint !== storedReceipt.sourceFileSetFingerprint) {
-    fail('SQLITE_FILE_SET_CHANGED', 'Production DB/WAL/SHM changed after backup.');
+    fail('SQLITE_FILE_SET_CHANGED', 'Production DB/WAL changed after backup.');
   }
   if (!preflight.readyToApply) {
     fail('APPLY_PREFLIGHT_BLOCKED', 'Apply preflight has blockers.', 409, preflight.blockers);
@@ -913,6 +1024,17 @@ function runApply({
     DatabaseConstructor,
   });
   const db = ensureDb();
+  // better-sqlite3 turns a nested transaction into a SAVEPOINT, even when the
+  // wrapper's `.immediate()` variant is used. Accepting an already-active outer
+  // transaction would therefore lose both guarantees this runner needs: it
+  // would not acquire its own BEGIN IMMEDIATE lock and could return success
+  // before the outer transaction commits. Fail closed before any mutation.
+  if (db?.inTransaction) {
+    fail(
+      'REMEDIATION_DATABASE_TRANSACTION_ACTIVE',
+      'Production remediation requires sole ownership of a top-level SQLite transaction.',
+    );
+  }
   db.pragma('foreign_keys = ON');
   const before = sqliteTotalChanges(db);
   const result = applyProductionScopeRemediation({
@@ -922,7 +1044,7 @@ function runApply({
     expectedPlanChecksum,
     transactionalGuard() {
       if (sqliteFileSetFingerprint(sqliteFileSet(dbPath)) !== storedReceipt.sourceFileSetFingerprint) {
-        fail('TRANSACTIONAL_SQLITE_FILE_SET_MISMATCH', 'DB/WAL/SHM changed before the first write.');
+        fail('TRANSACTIONAL_SQLITE_FILE_SET_MISMATCH', 'DB/WAL changed before the first write.');
       }
       if (databaseContentFingerprint(db) !== storedReceipt.databaseFingerprint) {
         fail('TRANSACTIONAL_DATABASE_FINGERPRINT_MISMATCH', 'Database changed before the first write.');
@@ -951,7 +1073,7 @@ function runApply({
 }
 
 function readCollection(db, name) {
-  const row = db.prepare('SELECT json FROM app_data WHERE name = ?').get(name);
+  const row = prepareSqliteReadonlyStatement(db, 'SELECT json FROM app_data WHERE name = ?').get(name);
   if (!row) return [];
   const value = JSON.parse(row.json);
   return Array.isArray(value) ? value : [];
@@ -986,6 +1108,7 @@ function runVerify({
     expectedDeployedSha,
     actualDeployedSha,
     railwayIdentity,
+    acceptedExactDatabaseFingerprints: [storedReceipt.expectedPostDatabaseFingerprint],
     DatabaseConstructor,
   });
   const verifyBeforeFiles = sqliteFileSet(dbPath);
@@ -994,14 +1117,14 @@ function runVerify({
     db.pragma('foreign_keys = ON');
     db.pragma('query_only = ON');
     const companyId = executionPlan.authority.companyId;
-    const company = db.prepare('SELECT id, status FROM canonical_companies WHERE id = ?').get(companyId);
+    const company = prepareSqliteReadonlyStatement(db, 'SELECT id, status FROM canonical_companies WHERE id = ?').get(companyId);
     const headOfficeId = executionPlan.authority?.headOffice?.id
       || executionPlan.authority?.identityBootstrap?.branches?.find(branch => branch.isHeadOffice)?.id;
-    const headOffice = db.prepare(`
+    const headOffice = prepareSqliteReadonlyStatement(db, `
       SELECT id, companyId, status, isHeadOffice
       FROM canonical_branches WHERE id = ?
     `).get(headOfficeId);
-    const membershipRows = db.prepare(`
+    const membershipRows = prepareSqliteReadonlyStatement(db, `
       SELECT id, principalId, companyId, status, companyWideBranchAuthority
       FROM company_memberships WHERE companyId = ? ORDER BY principalId
     `).all(companyId);
@@ -1010,6 +1133,20 @@ function runVerify({
     const verificationBlockers = [];
     const totalChangesBefore = sqliteTotalChanges(db);
     if (preflight.databaseFingerprint !== storedReceipt.expectedPostDatabaseFingerprint) {
+      verificationBlockers.push({ code: 'UNEXPECTED_POST_DATABASE_FINGERPRINT' });
+    }
+    // runPreflight and this final verification use separate readonly handles.
+    // Recompute the complete logical database after establishing the final file
+    // baseline so a write in that handoff cannot hide outside scoped collections.
+    // A later write is still caught by the before/after durable DB/WAL gate.
+    const verificationDatabaseFingerprint = databaseContentFingerprint(db);
+    if (verificationDatabaseFingerprint !== preflight.databaseFingerprint) {
+      verificationBlockers.push({ code: 'DATABASE_MUTATION_DURING_VERIFY' });
+    }
+    if (
+      verificationDatabaseFingerprint !== storedReceipt.expectedPostDatabaseFingerprint
+      && !verificationBlockers.some(blocker => blocker.code === 'UNEXPECTED_POST_DATABASE_FINGERPRINT')
+    ) {
       verificationBlockers.push({ code: 'UNEXPECTED_POST_DATABASE_FINGERPRINT' });
     }
     for (const mapping of executionPlan.actorMappings.filter(item => item.action === 'CREATE_MEMBERSHIP')) {
@@ -1039,7 +1176,7 @@ function runVerify({
       }
     }
     let tenantMismatchCount = 0;
-    for (const collection of TARGET_COLLECTIONS) {
+    for (const collection of targetCollectionsForPlan(executionPlan)) {
       tenantMismatchCount += readCollection(db, collection).filter(row => (
         normalizedText(row?.companyId) !== normalizedText(row?.tenantId)
       )).length;
@@ -1073,7 +1210,7 @@ function runVerify({
       ok: verificationBlockers.length === 0,
       deployedSha: preflight.deployedSha,
       stateFingerprint: preflight.stateFingerprint,
-      databaseFingerprint: preflight.databaseFingerprint,
+      databaseFingerprint: verificationDatabaseFingerprint,
       planChecksum: preflight.executionPlanChecksum,
       blockers: verificationBlockers,
       summary: {
@@ -1094,7 +1231,11 @@ function runVerify({
         totalChangesDelta: totalChangesAfter - totalChangesBefore,
         beforeFileSetFingerprint: sqliteFileSetFingerprint(verifyBeforeFiles),
         afterFileSetFingerprint: sqliteFileSetFingerprint(verifyAfterFiles),
-        databaseWalAndShmUnchanged: dataFilesUnchanged(verifyBeforeFiles, verifyAfterFiles),
+        beforeObservedFileSetFingerprint: sqliteObservedFileSetFingerprint(verifyBeforeFiles),
+        afterObservedFileSetFingerprint: sqliteObservedFileSetFingerprint(verifyAfterFiles),
+        databaseAndWalUnchanged: dataFilesUnchanged(verifyBeforeFiles, verifyAfterFiles),
+        shmObservationUnchanged: stableJson(normalizedSqliteFileSet(verifyBeforeFiles).shm)
+          === stableJson(normalizedSqliteFileSet(verifyAfterFiles).shm),
       },
     };
   } finally {
@@ -1128,4 +1269,5 @@ module.exports = {
   safeBackupPath,
   sqliteFileSet,
   sqliteFileSetFingerprint,
+  sqliteObservedFileSetFingerprint,
 };

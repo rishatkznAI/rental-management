@@ -1096,6 +1096,126 @@ test('P2-01 evidence digest is emitted from actual production reads and changes 
   }
 });
 
+test('P2-01 evidence read boundary rejects reader-shaped DML before Statement.get executes', () => {
+  const context = createPr9bContext();
+  try {
+    context.db.exec(`
+      CREATE TABLE stage4_read_guard_probe (value TEXT NOT NULL);
+      INSERT INTO stage4_read_guard_probe (value) VALUES ('before');
+    `);
+    let hostilePrepareCalls = 0;
+    let hostileGetCalls = 0;
+    const armedDb = new Proxy(context.db, {
+      get(target, property) {
+        if (property === 'prepare') {
+          return sql => {
+            if (
+              hostilePrepareCalls === 0
+              && /SELECT\s+\*\s+FROM\s+actual_receivable_eligible_events\s+WHERE\s+id\s*=\s*\?/i.test(String(sql))
+              && /companyId\s*=\s*\?/i.test(String(sql))
+              && /branchId\s*=\s*\?/i.test(String(sql))
+            ) {
+              hostilePrepareCalls += 1;
+              const statement = target.prepare(`
+                UPDATE stage4_read_guard_probe SET value = 'mutated'
+                WHERE ? IS NOT NULL AND ? IS NOT NULL AND ? IS NOT NULL
+                RETURNING value
+              `);
+              return new Proxy(statement, {
+                get(statementTarget, statementProperty) {
+                  const value = Reflect.get(statementTarget, statementProperty, statementTarget);
+                  if (statementProperty === 'get') {
+                    return (...args) => {
+                      hostileGetCalls += 1;
+                      return value.apply(statementTarget, args);
+                    };
+                  }
+                  return typeof value === 'function' ? value.bind(statementTarget) : value;
+                },
+              });
+            }
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const trace = createEvidenceTrace();
+    const repository = createPostingRepositoryForTest({ ...context, db: armedDb }, {
+      evidenceRecorder: trace.record,
+    });
+    assert.throws(() => repository.post(postingCommand(context)));
+    assert.equal(hostilePrepareCalls, 1);
+    assert.equal(hostileGetCalls, 0);
+    assert.equal(
+      context.db.prepare('SELECT value FROM stage4_read_guard_probe').get().value,
+      'before',
+    );
+    assert.equal(
+      trace.entries.some(entry => entry.table === 'stage4_read_guard_probe'),
+      false,
+    );
+  } finally {
+    context.db.close();
+  }
+});
+
+for (const [repositoryName, createRepository] of [
+  ['posting', createPostingRepositoryForTest],
+  ['eligibility', createInstrumentedEligibilityRepository],
+]) {
+  test(`P2-01 ${repositoryName} evidence pragma boundary rejects a disguised write before Statement.all executes`, () => {
+    const context = createPr9bContext();
+    try {
+      const beforeVersion = context.db.pragma('user_version', { simple: true });
+      let hostilePrepareCalls = 0;
+      let hostileAllCalls = 0;
+      const armedDb = new Proxy(context.db, {
+        get(target, property) {
+          if (property === 'prepare') {
+            return sql => {
+              if (
+                hostilePrepareCalls === 0
+                && /^\s*PRAGMA\s+foreign_key_check\s*$/i.test(String(sql))
+              ) {
+                hostilePrepareCalls += 1;
+                const statement = target.prepare('PRAGMA user_version=7');
+                return new Proxy(statement, {
+                  get(statementTarget, statementProperty) {
+                    const value = Reflect.get(statementTarget, statementProperty, statementTarget);
+                    if (statementProperty === 'all') {
+                      return (...args) => {
+                        hostileAllCalls += 1;
+                        return value.apply(statementTarget, args);
+                      };
+                    }
+                    return typeof value === 'function' ? value.bind(statementTarget) : value;
+                  },
+                });
+              }
+              return target.prepare(sql);
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const trace = createEvidenceTrace();
+      assert.throws(
+        () => createRepository({ ...context, db: armedDb }, { evidenceRecorder: trace.record }),
+        error => error.code === 'SQLITE_READONLY_STATEMENT_REQUIRED',
+      );
+      assert.equal(hostilePrepareCalls, 1);
+      assert.equal(hostileAllCalls, 0);
+      assert.equal(context.db.pragma('user_version', { simple: true }), beforeVersion);
+      assert.equal(trace.entries.some(entry => entry.table === 'stage4_read_guard_probe'), false);
+    } finally {
+      context.db.close();
+    }
+  });
+}
+
 for (const table of [
   'billing_source_activation_boundaries',
   'billing_source_rental_lines',

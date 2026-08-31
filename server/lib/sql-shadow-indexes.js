@@ -770,11 +770,27 @@ function invalidDateRows(list, fields) {
 }
 
 function diagnoseSqlShadowConsistency(db) {
-  ensureSqlShadowSchema(db);
+  // Diagnostics must never run schema migrations. A missing or stale shadow
+  // schema is itself diagnostic evidence and must fail closed on a readonly DB.
+  assertSqlShadowMigration(db, getSqlShadowMigration(db));
   const documents = readAppDataCollection(db, 'documents');
   const ganttRentals = readAppDataCollection(db, 'gantt_rentals');
   const rentals = readAppDataCollection(db, 'rentals');
   const equipment = readAppDataCollection(db, 'equipment');
+  for (const [name, source] of Object.entries({ documents, gantt_rentals: ganttRentals, rentals, equipment })) {
+    if (!source.ok) {
+      const error = new Error(`Collection ${name} contains invalid JSON.`);
+      error.code = 'SQL_SHADOW_DIAGNOSTIC_INVALID_JSON';
+      error.collection = name;
+      throw error;
+    }
+    if (source.rawType && source.rawType !== 'array') {
+      const error = new Error(`Collection ${name} must contain an array.`);
+      error.code = 'SQL_SHADOW_DIAGNOSTIC_INVALID_SHAPE';
+      error.collection = name;
+      throw error;
+    }
+  }
   const docSqlRows = db.prepare(`SELECT id, date, documentDate, updatedAt FROM ${DOCUMENTS_TABLE}`).all();
   const ganttSqlRows = db.prepare(`SELECT id, rentalId, sourceRentalId, originalRentalId, equipmentId, startDate, endDate, plannedReturnDate FROM ${GANTT_TABLE}`).all();
   const sourceDocuments = documents.value;

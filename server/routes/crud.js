@@ -21,6 +21,8 @@ const {
   assertRepairItemsAdmin,
   inferServiceAuditSource,
   isRepairItemCollection,
+  prepareAuditedServiceMutationEntries,
+  prepareServiceMutationAuditEntries,
 } = require('../lib/service-audit-log');
 const {
   RENTAL_CHANGE_REQUEST_STATUS,
@@ -132,8 +134,17 @@ const {
   isScopedMasterDataCollection,
   requireRequestActorScope,
 } = require('../lib/trusted-actor-scope');
+const { hasUserAuthorityChange } = require('../lib/user-authority-transition');
+const {
+  CATALOG_ORIGIN_KINDS,
+  isPlatformDefaultTenantOverlayCollection,
+} = require('../lib/platform-default-tenant-overlay');
+const {
+  assertEquipmentGsmProjectionMutation,
+  preserveEquipmentGsmProjection,
+  stripEquipmentGsmProjectionFields,
+} = require('../lib/gsm/trusted-device-scope');
 
-const INLINE_RELATION_IDEMPOTENCY_COLLECTION = 'inline_relation_idempotency';
 const INLINE_RELATION_IDEMPOTENCY_SCOPES = new Set(['client_objects', 'client_contracts']);
 
 function stableJson(value) {
@@ -174,10 +185,9 @@ function registerCrudRoutes(deps) {
     idPrefixes,
     readData,
     writeData,
-    writeDataBatch: persistDataBatch = entries => {
-      for (const entry of entries || []) writeData(entry.name, entry.value);
-    },
-    deleteSessionsForUserIds,
+    writeDataBatch,
+    writeServiceDataBatch,
+    persistUserAuthorityTransition,
     requireAuth,
     requireRead,
     requireWrite,
@@ -201,8 +211,66 @@ function registerCrudRoutes(deps) {
     serviceAuditLog,
     normalizeRecordClientLink,
     businessNumbering = null,
+    requestIdempotency = null,
+    catalogLifecycle = null,
     db = null,
   } = deps;
+  const persistDataBatch = typeof writeDataBatch === 'function'
+    ? writeDataBatch
+    : entries => {
+        for (const entry of entries || []) writeData(entry.name, entry.value);
+      };
+
+  function requireAtomicServiceWriter() {
+    if (typeof writeServiceDataBatch === 'function') return writeServiceDataBatch;
+    const error = new Error('Atomic service audit persistence is unavailable.');
+    error.code = 'SERVICE_ATOMIC_AUDIT_REQUIRED';
+    error.status = 503;
+    throw error;
+  }
+
+  function serviceMutationAuditEntries(req, serviceEvents, securityEvents) {
+    return prepareServiceMutationAuditEntries({
+      reqOrUser: req,
+      serviceEvents,
+      securityEvents,
+      serviceAuditLog,
+      auditLog,
+    });
+  }
+
+  function persistAuditedServiceMutation(req, businessEntries, serviceEvents, securityEvents) {
+    requireAtomicServiceWriter()(prepareAuditedServiceMutationEntries({
+      reqOrUser: req,
+      businessEntries,
+      serviceEvents,
+      securityEvents,
+      serviceAuditLog,
+      auditLog,
+    }));
+  }
+
+  function serviceTicketAuditEvent(req, action, ticket) {
+    return {
+      serviceId: ticket.id,
+      action,
+      entityType: 'service_ticket',
+      entityId: ticket.id,
+      snapshot: ticket,
+      source: inferServiceAuditSource(req, 'api'),
+    };
+  }
+
+  function repairItemAuditEvent(req, collection, action, item) {
+    return {
+      serviceId: item.serviceTicketId || item.repairId,
+      action,
+      entityType: collection === 'repair_work_items' ? 'repair_work_item' : 'repair_part_item',
+      entityId: item.id,
+      snapshot: item,
+      source: inferServiceAuditSource(req, 'api'),
+    };
+  }
 
   const router = express.Router();
   const requiredAccessMethods = [
@@ -223,6 +291,30 @@ function registerCrudRoutes(deps) {
   if (missingAccessMethods.length > 0) {
     throw new Error(`Generic CRUD requires access-control methods: ${missingAccessMethods.join(', ')}`);
   }
+  if (
+    (collections || []).includes('users')
+    && (
+      typeof persistUserAuthorityTransition !== 'function'
+      || typeof auditLog?.preparePersistenceEntry !== 'function'
+    )
+  ) {
+    throw new Error('Generic users CRUD requires atomic user-authority transition persistence.');
+  }
+  const registersMixedCatalog = (collections || []).some(isPlatformDefaultTenantOverlayCollection);
+  const requiredCatalogLifecycleMethods = [
+    'createTenantCatalogEntry',
+    'updateEffectiveTenantCatalogRecord',
+    'deleteEffectiveTenantCatalogRecord',
+  ];
+  if (
+    registersMixedCatalog
+    && (
+      !catalogLifecycle
+      || requiredCatalogLifecycleMethods.some(name => typeof catalogLifecycle[name] !== 'function')
+    )
+  ) {
+    throw new Error('Generic mixed-catalog CRUD requires the trusted logical catalog lifecycle.');
+  }
 
   function sendAccessError(res, error) {
     return res.status(error?.status || 403).json({
@@ -230,6 +322,118 @@ function registerCrudRoutes(deps) {
       ...(error?.code ? { code: error.code } : {}),
       error: error?.message || 'Forbidden',
     });
+  }
+
+  function sendCatalogLifecycleError(res, error) {
+    return res.status(error?.status || 409).json({
+      ok: false,
+      ...(error?.code ? { code: error.code } : {}),
+      error: error?.message || 'Catalog lifecycle mutation failed.',
+      ...(error?.details !== undefined ? { details: error.details } : {}),
+    });
+  }
+
+  function sanitizeCatalogResult(collection, item, user) {
+    return item ? accessControl.sanitizeEntityForRead(collection, item, user) : null;
+  }
+
+  function normalizeMixedCatalogCreateInput(collection, input) {
+    let normalized = { ...input };
+    if (collection === 'service_works') {
+      normalized = normalizeServiceWorkRecord({ ...normalized, updatedAt: nowIso() });
+    } else if (collection === 'spare_parts') {
+      normalized = normalizeSparePartRecord({ ...normalized, updatedAt: nowIso() });
+    } else {
+      const timestamp = nowIso();
+      normalized = {
+        ...normalized,
+        createdAt: normalized.createdAt || timestamp,
+        updatedAt: timestamp,
+      };
+    }
+    // Physical identity and scope are allocated atomically by the trusted
+    // boundary. The generic normalizers historically allocated an ID, so drop
+    // that server-local placeholder before entering the lifecycle.
+    delete normalized.id;
+    delete normalized.companyId;
+    delete normalized.tenantId;
+    delete normalized.platformDefaultId;
+    delete normalized.catalogOrigin;
+    return normalized;
+  }
+
+  function normalizeMixedCatalogPatch(collection, current, patch) {
+    if (collection === 'service_works') {
+      const normalized = normalizeServiceWorkRecord({
+        ...current,
+        ...patch,
+        id: current.id,
+        createdAt: current.createdAt,
+        updatedAt: nowIso(),
+      });
+      delete normalized.id;
+      delete normalized.catalogOrigin;
+      return normalized;
+    }
+    if (collection === 'spare_parts') {
+      const normalized = normalizeSparePartRecord({
+        ...current,
+        ...patch,
+        id: current.id,
+        createdAt: current.createdAt,
+        updatedAt: nowIso(),
+      });
+      delete normalized.id;
+      delete normalized.catalogOrigin;
+      return normalized;
+    }
+    return { ...patch, updatedAt: nowIso() };
+  }
+
+  function requireRequestIdempotency() {
+    if (
+      !requestIdempotency
+      || typeof requestIdempotency.inspect !== 'function'
+      || typeof requestIdempotency.execute !== 'function'
+    ) {
+      const error = new Error('Сервис серверной идемпотентности недоступен.');
+      error.status = 503;
+      error.code = 'IDEMPOTENCY_SERVICE_UNAVAILABLE';
+      throw error;
+    }
+    return requestIdempotency;
+  }
+
+  function inlineIdempotencyInput(req, collection, actorScope, key, fingerprint) {
+    return {
+      scope: actorScope,
+      operation: `${collection}.create`,
+      clientKey: key,
+      requestFingerprint: fingerprint,
+      resultType: collection,
+      createdByUserId: String(req.user?.userId || ''),
+    };
+  }
+
+  function sendInlineRelationReplay(req, res, collection, actorScope, resultId) {
+    const existing = (readData(collection) || [])
+      .find(item => String(item?.id || '') === String(resultId || ''));
+    if (!existing) {
+      return res.status(409).json({
+        ok: false,
+        code: 'IDEMPOTENCY_RESULT_UNAVAILABLE',
+        error: 'Результат предыдущего запроса больше недоступен. Обновите список перед повтором.',
+      });
+    }
+    if (!accessControl.canAccessEntity(collection, existing, req.user)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    if (actorScope) assertRecordMatchesActorScope(existing, actorScope);
+    res.setHeader('Idempotency-Replayed', 'true');
+    const replayed = accessControl.sanitizeEntityForRead(collection, existing, req.user);
+    return res.status(200).json(collection === 'payments'
+      ? decoratePaymentCounterparty(replayed, { readData })
+      : replayed);
   }
 
   function sendCounterpartyCompatibilityError(res, error) {
@@ -262,10 +466,38 @@ function registerCrudRoutes(deps) {
     return Boolean(collection);
   }
 
-  function syncPaymentStatusesAfterPaymentWrite(payments) {
-    const currentGanttRentals = readData('gantt_rentals') || [];
-    const nextGanttRentals = syncGanttRentalPaymentStatuses(currentGanttRentals, payments, readData('payment_allocations') || []);
-    writeData('gantt_rentals', nextGanttRentals);
+  function isPaymentProjectionCollection(collection) {
+    return collection === 'payments' || collection === 'payment_allocations';
+  }
+
+  function buildPaymentProjectionEntries(collection, nextValue) {
+    const payments = collection === 'payments' ? nextValue : (readData('payments') || []);
+    const paymentAllocations = collection === 'payment_allocations'
+      ? nextValue
+      : (readData('payment_allocations') || []);
+    return [
+      { name: collection, value: nextValue },
+      {
+        name: 'gantt_rentals',
+        value: syncGanttRentalPaymentStatuses(
+          readData('gantt_rentals') || [],
+          payments,
+          paymentAllocations,
+        ),
+      },
+    ];
+  }
+
+  function persistPaymentProjection(collection, nextValue) {
+    if (typeof writeDataBatch !== 'function') {
+      const error = new Error('Atomic payment projection persistence is unavailable.');
+      error.status = 503;
+      error.code = 'PAYMENT_PROJECTION_ATOMIC_WRITE_REQUIRED';
+      throw error;
+    }
+    const entries = buildPaymentProjectionEntries(collection, nextValue);
+    assertPaymentAllocationPersistenceEntriesSafe(entries, { readData });
+    persistDataBatch(entries);
   }
 
   function validateEquipmentDowntimeRecord(record, existingDowntimes, excludeId = '') {
@@ -827,6 +1059,10 @@ function registerCrudRoutes(deps) {
     const next = { ...user };
     if (!next.password && existing?.password) {
       next.password = existing.password;
+    } else if (existing?.password && next.password === existing.password) {
+      // A profile-only PATCH carries the stored password through the merged record.
+      // Do not mistake that inherited legacy value for a password reset.
+      next.password = existing.password;
     } else if (next.password && !String(next.password).startsWith('h1:') && !String(next.password).startsWith('h2:scrypt:')) {
       next.password = hashPassword(String(next.password));
     }
@@ -905,44 +1141,35 @@ function registerCrudRoutes(deps) {
     }
   }
 
-  function auditUserStatusChanges(req, previousUser, nextUser) {
-    if (!previousUser || !nextUser || previousUser.status === nextUser.status) return;
-    auditLog?.(req, {
+  function safeUserAuditSnapshot(user) {
+    if (!user) return null;
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+    };
+  }
+
+  function userStatusAuditEvents(previousUser, nextUser) {
+    if (!previousUser || !nextUser || previousUser.status === nextUser.status) return [];
+    const events = [{
       action: 'users.status_change',
       entityType: 'users',
       entityId: nextUser.id,
-      before: {
-        id: previousUser.id,
-        email: previousUser.email,
-        role: previousUser.role,
-        status: previousUser.status,
-      },
-      after: {
-        id: nextUser.id,
-        email: nextUser.email,
-        role: nextUser.role,
-        status: nextUser.status,
-      },
-    });
+      before: safeUserAuditSnapshot(previousUser),
+      after: safeUserAuditSnapshot(nextUser),
+    }];
     if (previousUser.status === 'Активен' && nextUser.status !== 'Активен') {
-      auditLog?.(req, {
+      events.push({
         action: 'users.deactivate',
         entityType: 'users',
         entityId: nextUser.id,
-        before: {
-          id: previousUser.id,
-          email: previousUser.email,
-          role: previousUser.role,
-          status: previousUser.status,
-        },
-        after: {
-          id: nextUser.id,
-          email: nextUser.email,
-          role: nextUser.role,
-          status: nextUser.status,
-        },
+        before: safeUserAuditSnapshot(previousUser),
+        after: safeUserAuditSnapshot(nextUser),
       });
     }
+    return events;
   }
 
   function crmArchiveForbiddenReason(collection) {
@@ -956,22 +1183,43 @@ function registerCrudRoutes(deps) {
     return null;
   }
 
-  function invalidateAffectedUserSessions(previousUsers, nextUsers) {
-    if (typeof deleteSessionsForUserIds !== 'function') return;
+  function persistUserMutation(req, {
+    previousUsers,
+    nextUsers,
+    action,
+    entityId = null,
+    before = null,
+    after = null,
+    metadata = null,
+  }) {
     const previous = Array.isArray(previousUsers) ? previousUsers : [];
     const next = Array.isArray(nextUsers) ? nextUsers : [];
-    const nextById = new Map(next.map(item => [item.id, item]));
-    const affectedIds = previous
-      .filter(item => {
-        const nextItem = nextById.get(item.id);
-        if (!nextItem) return true;
-        return nextItem.status !== 'Активен' || nextItem.email !== item.email || nextItem.role !== item.role;
-      })
-      .map(item => item.id);
-
-    if (affectedIds.length > 0) {
-      deleteSessionsForUserIds(affectedIds);
+    const previousById = new Map(previous.map(item => [String(item?.id || ''), item]));
+    const statusEvents = next.flatMap(item => userStatusAuditEvents(
+      previousById.get(String(item?.id || '')),
+      item,
+    ));
+    const auditEntry = auditLog.preparePersistenceEntry(req, [{
+      action,
+      entityType: 'users',
+      entityId,
+      before: safeUserAuditSnapshot(before),
+      after: safeUserAuditSnapshot(after),
+      metadata,
+    }, ...statusEvents]);
+    if (!auditEntry) {
+      const error = new Error('Atomic user authority audit persistence is unavailable.');
+      error.code = 'USER_AUTHORITY_AUDIT_REQUIRED';
+      error.status = 503;
+      throw error;
     }
+    return persistUserAuthorityTransition({
+      entries: [
+        { name: 'users', value: next },
+        auditEntry,
+      ],
+      expectedUsers: previous,
+    });
   }
 
   function createEntityChangeRequest(req, {
@@ -1851,47 +2099,31 @@ function registerCrudRoutes(deps) {
           assertBusinessNumberNotProvided(req.body);
         }
         accessControl.assertCanCreateCollection(collection, req.user, req.body);
+        if (collection === 'equipment') {
+          assertEquipmentGsmProjectionMutation(req.body);
+        }
         let input = accessControl.sanitizeCreateInput(collection, req.body, req.user);
+        if (collection === 'equipment') {
+          input = stripEquipmentGsmProjectionFields(input);
+        }
         if (actorScope) input = assignTrustedScope(input, actorScope);
         const idempotencyKey = readInlineRelationIdempotencyKey(req, collection);
         const idempotencyFingerprint = idempotencyKey
           ? inlineRelationFingerprint(collection, input)
           : '';
+        const idempotencyInput = idempotencyKey
+          ? inlineIdempotencyInput(req, collection, actorScope, idempotencyKey, idempotencyFingerprint)
+          : null;
         if (idempotencyKey) {
-          const actorUserId = String(req.user?.userId || '');
-          const idempotencyRecords = readData(INLINE_RELATION_IDEMPOTENCY_COLLECTION) || [];
-          const previousAttempt = idempotencyRecords.find(item =>
-            item?.collection === collection && item?.key === idempotencyKey
-          );
-          if (previousAttempt) {
-            if (
-              previousAttempt.fingerprint !== idempotencyFingerprint
-              || String(previousAttempt.actorUserId || '') !== actorUserId
-            ) {
-              return res.status(409).json({
-                ok: false,
-                code: 'IDEMPOTENCY_KEY_REUSED',
-                error: 'Idempotency-Key уже использован с другим содержимым запроса.',
-              });
-            }
-            const existing = (readData(collection) || [])
-              .find(item => String(item?.id || '') === String(previousAttempt.entityId || ''));
-            if (!existing) {
-              return res.status(409).json({
-                ok: false,
-                code: 'IDEMPOTENCY_RESULT_UNAVAILABLE',
-                error: 'Результат предыдущего запроса больше недоступен. Обновите список перед повтором.',
-              });
-            }
-            if (!accessControl.canAccessEntity(collection, existing, req.user)) {
-              return res.status(403).json({ ok: false, error: 'Forbidden' });
-            }
-            if (actorScope) assertRecordMatchesActorScope(existing, actorScope);
-            res.setHeader('Idempotency-Replayed', 'true');
-            const replayed = accessControl.sanitizeEntityForRead(collection, existing, req.user);
-            return res.status(200).json(collection === 'payments'
-              ? decoratePaymentCounterparty(replayed, { readData })
-              : replayed);
+          const inspected = requireRequestIdempotency().inspect(idempotencyInput);
+          if (inspected.status === 'replayed') {
+            return sendInlineRelationReplay(
+              req,
+              res,
+              collection,
+              actorScope,
+              inspected.resultId,
+            );
           }
         }
         if (collection === 'equipment') {
@@ -1917,6 +2149,19 @@ function registerCrudRoutes(deps) {
           requireNonEmptyString(input?.unit, 'Единица измерения');
           validateSparePartCatalogRecord(input);
         }
+        if (isPlatformDefaultTenantOverlayCollection(collection)) {
+          const created = catalogLifecycle.createTenantCatalogEntry(
+            collection,
+            normalizeMixedCatalogCreateInput(collection, input),
+          );
+          auditLog?.(req, {
+            action: `${collection}.create`,
+            entityType: collection,
+            entityId: created.id,
+            after: created,
+          });
+          return res.status(201).json(sanitizeCatalogResult(collection, created, req.user));
+        }
         if (collection === 'payments') {
           validatePaymentRecord(input);
         }
@@ -1926,10 +2171,26 @@ function registerCrudRoutes(deps) {
 
         const data = readData(collection) || [];
         let newItem = withClientLink(collection, { ...input, id: input.id || generateId(prefix) });
-        if (collection === 'client_contracts' && businessNumbering) {
-          businessNumbering.assignNewRecord('client_contracts', newItem);
-        }
-        newItem = normalizeClientDomainRecord(collection, newItem);
+        const deferClientContractNumber = Boolean(
+          collection === 'client_contracts'
+          && businessNumbering
+          && idempotencyKey,
+        );
+        const prepareClientContractNumberInPersistence = Boolean(
+          collection === 'client_contracts'
+          && businessNumbering,
+        );
+        newItem = prepareClientContractNumberInPersistence
+          ? normalizeClientContractRecord(newItem, null, {
+            readData,
+            nowIso,
+            // The server-owned number is allocated only inside the eventual
+            // persistence transaction. A keyed request keeps its explicit
+            // allocation after winning idempotency; an unkeyed request is
+            // numbered by the central canonical batch writer.
+            allowMissingServerNumber: true,
+          })
+          : normalizeClientDomainRecord(collection, newItem);
         if (collection === 'client_objects') {
           assertEntityOwnerScope({
             actor: { ...req.user, ...actorScope },
@@ -1967,6 +2228,7 @@ function registerCrudRoutes(deps) {
           if (!validation.ok) {
             return res.status(validation.status).json({ ok: false, error: validation.error });
           }
+          newItem = validation.downtime;
         }
         if (collection === 'clients') {
           assertClientInnUnique(data, newItem);
@@ -1998,9 +2260,6 @@ function registerCrudRoutes(deps) {
         if (collection === 'clients' || collection === 'equipment') {
           newItem = mergeEntityHistory(collection, null, newItem, req.user.userName);
         }
-        if (['service', 'warranty_claims'].includes(collection) && businessNumbering) {
-          businessNumbering.assignNewRecord(collection, newItem);
-        }
         let clientCompatibilityWrite = null;
         if (collection === 'clients') {
           const prepared = prepareClientCompatibilityCreate({
@@ -2030,70 +2289,100 @@ function registerCrudRoutes(deps) {
             { name: 'payment_allocations', value: [...data, newItem] },
           ], { readData });
         }
-        if (collection === 'service' && typeof applyServiceTicketCreationEffects === 'function') {
+        if (collection === 'users') {
+          persistUserMutation(req, {
+            previousUsers: data,
+            nextUsers: [...data, newItem],
+            action: 'users.create',
+            entityId: newItem.id,
+            after: newItem,
+          });
+        } else if (collection === 'service') {
+          if (typeof applyServiceTicketCreationEffects !== 'function') {
+            throw Object.assign(new Error('Atomic service creation lifecycle is unavailable.'), {
+              code: 'SERVICE_ATOMIC_AUDIT_REQUIRED',
+              status: 503,
+            });
+          }
           const lifecycleResult = applyServiceTicketCreationEffects(newItem, req.user.userName, {
             persistService: true,
             serviceTickets: [...data, newItem],
+            writeDataBatch: requireAtomicServiceWriter(),
+            buildExtraEntries: persistedTicket => serviceMutationAuditEntries(
+              req,
+              [serviceTicketAuditEvent(req, 'ticket_created', persistedTicket)],
+              [{
+                action: 'service.create',
+                entityType: 'service',
+                entityId: persistedTicket.id,
+                after: persistedTicket,
+              }],
+            ),
           });
           newItem = lifecycleResult?.ticket || newItem;
-          if (lifecycleResult?.persisted !== true) writeData(collection, [...data, newItem]);
+          if (lifecycleResult?.persisted !== true) {
+            persistAuditedServiceMutation(req, [{
+              name: collection,
+              value: [...data, newItem],
+            }], [serviceTicketAuditEvent(req, 'ticket_created', newItem)], [{
+              action: 'service.create',
+              entityType: 'service',
+              entityId: newItem.id,
+              after: newItem,
+            }]);
+          }
+        } else if (isRepairItemCollection(collection)) {
+          persistAuditedServiceMutation(req, [{
+            name: collection,
+            value: [...data, newItem],
+          }], [repairItemAuditEvent(
+            req,
+            collection,
+            collection === 'repair_work_items' ? 'work_added' : 'part_added',
+            newItem,
+          )], [{
+            action: `${collection}.create`,
+            entityType: collection,
+            entityId: newItem.id,
+            after: newItem,
+          }]);
         } else if (collection === 'clients') {
           persistDataBatch(clientCompatibilityWrite.entries);
         } else if (idempotencyKey) {
-          const idempotencyRecords = readData(INLINE_RELATION_IDEMPOTENCY_COLLECTION) || [];
-          persistDataBatch([
-            { name: collection, value: [...data, newItem] },
-            {
-              name: INLINE_RELATION_IDEMPOTENCY_COLLECTION,
-              value: [...idempotencyRecords, {
-                collection,
-                key: idempotencyKey,
-                fingerprint: idempotencyFingerprint,
-                entityId: newItem.id,
-                actorUserId: String(req.user?.userId || ''),
-                createdAt: nowIso(),
-              }],
-            },
-          ]);
+          const outcome = requireRequestIdempotency().execute(idempotencyInput, () => {
+            if (deferClientContractNumber) {
+              businessNumbering.assignNewRecord('client_contracts', newItem);
+              newItem = normalizeClientContractRecord(newItem, null, { readData, nowIso });
+            }
+            persistDataBatch([{ name: collection, value: [...data, newItem] }]);
+            return newItem.id;
+          });
+          if (outcome.status === 'replayed') {
+            return sendInlineRelationReplay(
+              req,
+              res,
+              collection,
+              actorScope,
+              outcome.resultId,
+            );
+          }
+        } else if (isPaymentProjectionCollection(collection)) {
+          persistPaymentProjection(collection, [...data, newItem]);
         } else {
           writeData(collection, [...data, newItem]);
         }
-        if (isCriticalAuditCollection(collection)) {
+        if (
+          isCriticalAuditCollection(collection)
+          && collection !== 'users'
+          && collection !== 'service'
+          && !isRepairItemCollection(collection)
+        ) {
           auditLog?.(req, {
             action: `${collection}.create`,
             entityType: collection,
             entityId: newItem.id,
             after: newItem,
           });
-        }
-        if (collection === 'repair_work_items') {
-          serviceAuditLog?.(req, {
-            serviceId: newItem.repairId,
-            action: 'work_added',
-            entityType: 'repair_work_item',
-            entityId: newItem.id,
-            snapshot: newItem,
-            source: inferServiceAuditSource(req, 'api'),
-          });
-        }
-        if (collection === 'repair_part_items') {
-          serviceAuditLog?.(req, {
-            serviceId: newItem.repairId,
-            action: 'part_added',
-            entityType: 'repair_part_item',
-            entityId: newItem.id,
-            snapshot: newItem,
-            source: inferServiceAuditSource(req, 'api'),
-          });
-        }
-        if (collection === 'users' && newItem.status !== 'Активен') {
-          invalidateAffectedUserSessions([], [newItem]);
-        }
-        if (collection === 'payments') {
-          syncPaymentStatusesAfterPaymentWrite(data);
-        }
-        if (collection === 'payment_allocations') {
-          syncPaymentStatusesAfterPaymentWrite(readData('payments') || []);
         }
         if (collection === 'users') {
           return res.status(201).json(sanitizeUser(newItem));
@@ -2201,7 +2490,16 @@ function registerCrudRoutes(deps) {
             readData,
           });
         }
-        accessControl.assertCanUpdateEntity(collection, data[idx], req.user);
+        if (
+          isPlatformDefaultTenantOverlayCollection(collection)
+          && data[idx]?.catalogOrigin?.kind === CATALOG_ORIGIN_KINDS.PLATFORM_DEFAULT
+        ) {
+          // Updating a logical platform default means creating a tenant-owned
+          // override. Authorize it as tenant creation, never as default mutation.
+          accessControl.assertCanCreateCollection(collection, req.user, req.body);
+        } else {
+          accessControl.assertCanUpdateEntity(collection, data[idx], req.user);
+        }
         if (collection === 'equipment') {
           assertNoRawProductionSmokeFixturePatch(data[idx], req.body);
         }
@@ -2241,7 +2539,43 @@ function registerCrudRoutes(deps) {
 
       try {
         let clientCompatibilityWrite = null;
+        if (collection === 'equipment') {
+          assertEquipmentGsmProjectionMutation(req.body, { current: data[idx] });
+        }
         let safePatch = accessControl.sanitizeUpdateInput(collection, req.body, req.user, data[idx]);
+        if (collection === 'equipment') {
+          safePatch = stripEquipmentGsmProjectionFields(safePatch);
+        }
+        if (isPlatformDefaultTenantOverlayCollection(collection)) {
+          if (Object.keys(safePatch).length === 0) {
+            const error = new Error('Catalog PATCH must contain at least one mutable business field.');
+            error.status = 400;
+            error.code = 'CATALOG_PATCH_EMPTY';
+            throw error;
+          }
+          if (collection === 'service_works') {
+            requireNonEmptyString(safePatch?.name ?? data[idx].name, 'Название работы');
+            validateServiceWorkCatalogRecord(safePatch);
+          }
+          if (collection === 'spare_parts') {
+            requireNonEmptyString(safePatch?.name ?? data[idx].name, 'Название запчасти');
+            requireNonEmptyString(safePatch?.unit ?? data[idx].unit, 'Единица измерения');
+            validateSparePartCatalogRecord(safePatch);
+          }
+          const updated = catalogLifecycle.updateEffectiveTenantCatalogRecord(
+            collection,
+            req.params.id,
+            normalizeMixedCatalogPatch(collection, data[idx], safePatch),
+          );
+          auditLog?.(req, {
+            action: `${collection}.update`,
+            entityType: collection,
+            entityId: req.params.id,
+            before: data[idx],
+            after: updated,
+          });
+          return res.json(sanitizeCatalogResult(collection, updated, req.user));
+        }
         if (collection === 'warranty_claims') {
           assertWarrantyTargetServiceAccess({ ...data[idx], ...safePatch }, data[idx], req.user);
         }
@@ -2299,7 +2633,7 @@ function registerCrudRoutes(deps) {
           if (!validation.ok) {
             return res.status(validation.status).json({ ok: false, error: validation.error });
           }
-          safePatch = nextDowntime;
+          safePatch = validation.downtime;
         }
         if (collection === 'users') {
           validateUserSafetyChange(req, data, data[idx], { ...data[idx], ...safePatch, id: data[idx].id }, 'update', req.body);
@@ -2350,16 +2684,12 @@ function registerCrudRoutes(deps) {
             validateEquipmentRecord(nextItem, data, data[idx]);
           }
           if (collection === 'users') {
-            if (
-              safePatch.password ||
-              safePatch.role !== undefined ||
-              safePatch.status !== undefined ||
-              safePatch.email !== undefined
-            ) {
-              nextItem.tokenVersion = (Number(data[idx].tokenVersion) || 0) + 1;
-              nextItem.passwordChangedAt = safePatch.password ? nowIso() : data[idx].passwordChangedAt;
-            }
             nextItem = normalizeUserPasswordForWrite(nextItem, data[idx]);
+            if (hasUserAuthorityChange(data[idx], nextItem)) {
+              const passwordChanged = nextItem.password !== data[idx].password;
+              nextItem.tokenVersion = (Number(data[idx].tokenVersion) || 0) + 1;
+              nextItem.passwordChangedAt = passwordChanged ? nowIso() : data[idx].passwordChangedAt;
+            }
           }
           if (collection === 'equipment') {
             nextItem = normalizeEquipmentStorageRecord(nextItem);
@@ -2422,8 +2752,52 @@ function registerCrudRoutes(deps) {
         const contractActivityClients = collection === 'client_contracts' && clientContractChanged(previousItem, data[idx])
           ? appendClientContractActivity(readData('clients') || [], data[idx], req.user)
           : null;
-        if (collection === 'service' && typeof persistServiceTicketUpdate === 'function') {
-          data[idx] = persistServiceTicketUpdate(data[idx], req.user.userName);
+        if (collection === 'users') {
+          persistUserMutation(req, {
+            previousUsers: readData('users') || [],
+            nextUsers: data,
+            action: 'users.update',
+            entityId: data[idx].id,
+            before: previousItem,
+            after: data[idx],
+          });
+        } else if (collection === 'service') {
+          if (typeof persistServiceTicketUpdate !== 'function') {
+            throw Object.assign(new Error('Atomic service update lifecycle is unavailable.'), {
+              code: 'SERVICE_ATOMIC_AUDIT_REQUIRED',
+              status: 503,
+            });
+          }
+          data[idx] = persistServiceTicketUpdate(data[idx], req.user.userName, {
+            writeDataBatch: requireAtomicServiceWriter(),
+            buildExtraEntries: persistedTicket => serviceMutationAuditEntries(
+              req,
+              [serviceTicketAuditEvent(req, 'ticket_updated', persistedTicket)],
+              [{
+                action: 'service.update',
+                entityType: 'service',
+                entityId: persistedTicket.id,
+                before: previousItem,
+                after: persistedTicket,
+              }],
+            ),
+          });
+        } else if (isRepairItemCollection(collection)) {
+          persistAuditedServiceMutation(req, [{
+            name: collection,
+            value: data,
+          }], [repairItemAuditEvent(
+            req,
+            collection,
+            collection === 'repair_work_items' ? 'work_updated' : 'part_updated',
+            data[idx],
+          )], [{
+            action: `${collection}.update`,
+            entityType: collection,
+            entityId: data[idx].id,
+            before: previousItem,
+            after: data[idx],
+          }]);
         } else if (collection === 'clients') {
           persistDataBatch(clientCompatibilityWrite.entries);
         } else if (contractActivityClients) {
@@ -2431,13 +2805,20 @@ function registerCrudRoutes(deps) {
             { name: 'client_contracts', value: data },
             { name: 'clients', value: contractActivityClients },
           ]);
+        } else if (isPaymentProjectionCollection(collection)) {
+          persistPaymentProjection(collection, data);
         } else {
           writeData(collection, data);
         }
         if (collection === 'equipment') {
           createReceiptServiceTicket(previousItem, data[idx], req.user.userName);
         }
-        if (isCriticalAuditCollection(collection)) {
+        if (
+          isCriticalAuditCollection(collection)
+          && collection !== 'users'
+          && collection !== 'service'
+          && !isRepairItemCollection(collection)
+        ) {
           auditLog?.(req, {
             action: `${collection}.update`,
             entityType: collection,
@@ -2459,18 +2840,6 @@ function registerCrudRoutes(deps) {
                 }
               : data[idx],
           });
-        }
-        if (collection === 'users') {
-          auditUserStatusChanges(req, previousItem, data[idx]);
-        }
-        if (collection === 'users' && previousItem) {
-          invalidateAffectedUserSessions([previousItem], [data[idx]]);
-        }
-        if (collection === 'payments') {
-          syncPaymentStatusesAfterPaymentWrite(data);
-        }
-        if (collection === 'payment_allocations') {
-          syncPaymentStatusesAfterPaymentWrite(readData('payments') || []);
         }
         if (collection === 'users') {
           return res.json(sanitizeUser(data[idx]));
@@ -2563,6 +2932,27 @@ function registerCrudRoutes(deps) {
         return res.status(403).json({ ok: false, error: knowledgeProgressForbiddenReason });
       }
       const removedItem = data[idx];
+      if (isPlatformDefaultTenantOverlayCollection(collection)) {
+        try {
+          const fallback = catalogLifecycle.deleteEffectiveTenantCatalogRecord(
+            collection,
+            req.params.id,
+          );
+          auditLog?.(req, {
+            action: `${collection}.delete`,
+            entityType: collection,
+            entityId: req.params.id,
+            before: removedItem,
+            after: fallback,
+          });
+          return res.json({
+            ok: true,
+            effective: sanitizeCatalogResult(collection, fallback, req.user),
+          });
+        } catch (error) {
+          return sendCatalogLifecycleError(res, error);
+        }
+      }
       try {
         if (collection === 'equipment') {
           assertProductionSmokeFixtureMutationAllowed({
@@ -2676,69 +3066,112 @@ function registerCrudRoutes(deps) {
         }
       }
       let serviceDeleteEntries = [];
+      let serviceDeleteEvents = [];
       if (collection === 'service') {
         const repairId = removedItem.id;
-        for (const workItem of (readData('repair_work_items') || []).filter(item => item.repairId === repairId)) {
-          serviceAuditLog?.(req, {
-            serviceId: repairId,
-            action: 'work_deleted',
-            entityType: 'repair_work_item',
-            entityId: workItem.id,
-            snapshot: workItem,
-            source: inferServiceAuditSource(req, 'api'),
-          });
-        }
-        for (const partItem of (readData('repair_part_items') || []).filter(item => item.repairId === repairId)) {
-          serviceAuditLog?.(req, {
-            serviceId: repairId,
-            action: 'part_deleted',
-            entityType: 'repair_part_item',
-            entityId: partItem.id,
-            snapshot: partItem,
-            source: inferServiceAuditSource(req, 'api'),
-          });
-        }
+        const belongsToTicket = item => (
+          String(item?.serviceTicketId || item?.repairId || '') === String(repairId)
+        );
+        const removedWorks = (readData('repair_work_items') || []).filter(belongsToTicket);
+        const removedParts = (readData('repair_part_items') || []).filter(belongsToTicket);
+        serviceDeleteEvents = [
+          ...removedWorks.map(workItem => repairItemAuditEvent(req, 'repair_work_items', 'work_deleted', workItem)),
+          ...removedParts.map(partItem => repairItemAuditEvent(req, 'repair_part_items', 'part_deleted', partItem)),
+          serviceTicketAuditEvent(req, 'ticket_deleted', removedItem),
+        ];
         serviceDeleteEntries = [
-          { name: 'repair_work_items', value: (readData('repair_work_items') || []).filter(item => item.repairId !== repairId) },
-          { name: 'repair_part_items', value: (readData('repair_part_items') || []).filter(item => item.repairId !== repairId) },
+          { name: 'repair_work_items', value: (readData('repair_work_items') || []).filter(item => !belongsToTicket(item)) },
+          { name: 'repair_part_items', value: (readData('repair_part_items') || []).filter(item => !belongsToTicket(item)) },
         ];
       }
-      if (collection === 'repair_work_items') {
-        serviceAuditLog?.(req, {
-          serviceId: removedItem.repairId,
-          action: 'work_deleted',
-          entityType: 'repair_work_item',
-          entityId: removedItem.id,
-          snapshot: removedItem,
-          source: inferServiceAuditSource(req, 'api'),
-        });
-      }
-      if (collection === 'repair_part_items') {
-        serviceAuditLog?.(req, {
-          serviceId: removedItem.repairId,
-          action: 'part_deleted',
-          entityType: 'repair_part_item',
-          entityId: removedItem.id,
-          snapshot: removedItem,
-          source: inferServiceAuditSource(req, 'api'),
-        });
-      }
+      const previousUsers = collection === 'users' ? [...data] : null;
       data.splice(idx, 1);
-      if (collection === 'service' && typeof persistServiceTicketDeletion === 'function') {
+      if (collection === 'users') {
         try {
-          persistServiceTicketDeletion(removedItem, req.user.userName, { extraEntries: serviceDeleteEntries });
+          persistUserMutation(req, {
+            previousUsers,
+            nextUsers: data,
+            action: 'users.delete',
+            entityId: removedItem.id,
+            before: removedItem,
+          });
         } catch (error) {
-          return res.status(500).json({
+          return res.status(error?.status || 500).json({
             ok: false,
-            code: 'SERVICE_DELETE_PERSISTENCE_FAILED',
+            ...(error?.code ? { code: error.code } : {}),
+            error: error?.message || 'Не удалось атомарно удалить пользователя.',
+          });
+        }
+      } else if (collection === 'service') {
+        try {
+          if (typeof persistServiceTicketDeletion !== 'function') {
+            throw Object.assign(new Error('Atomic service deletion lifecycle is unavailable.'), {
+              code: 'SERVICE_ATOMIC_AUDIT_REQUIRED',
+              status: 503,
+            });
+          }
+          persistServiceTicketDeletion(removedItem, req.user.userName, {
+            writeDataBatch: requireAtomicServiceWriter(),
+            extraEntries: [
+              ...serviceDeleteEntries,
+              ...serviceMutationAuditEntries(req, serviceDeleteEvents, [{
+                action: 'service.delete',
+                entityType: 'service',
+                entityId: removedItem.id,
+                before: removedItem,
+              }]),
+            ],
+          });
+        } catch (error) {
+          return res.status(error?.status || 500).json({
+            ok: false,
+            code: error?.code || 'SERVICE_DELETE_PERSISTENCE_FAILED',
             error: error?.message || 'Не удалось атомарно удалить сервисную заявку.',
+          });
+        }
+      } else if (isRepairItemCollection(collection)) {
+        try {
+          persistAuditedServiceMutation(req, [{
+            name: collection,
+            value: data,
+          }], [repairItemAuditEvent(
+            req,
+            collection,
+            collection === 'repair_work_items' ? 'work_deleted' : 'part_deleted',
+            removedItem,
+          )], [{
+            action: `${collection}.delete`,
+            entityType: collection,
+            entityId: removedItem.id,
+            before: removedItem,
+          }]);
+        } catch (error) {
+          return res.status(error?.status || 500).json({
+            ok: false,
+            ...(error?.code ? { code: error.code } : {}),
+            error: error?.message || 'Не удалось атомарно удалить сервисный факт.',
+          });
+        }
+      } else if (isPaymentProjectionCollection(collection)) {
+        try {
+          persistPaymentProjection(collection, data);
+        } catch (error) {
+          return res.status(error?.status || 500).json({
+            ok: false,
+            ...(error?.code ? { code: error.code } : {}),
+            error: error?.message || 'Atomic payment projection persistence failed.',
           });
         }
       } else {
         for (const entry of serviceDeleteEntries) writeData(entry.name, entry.value);
         writeData(collection, data);
       }
-      if (isCriticalAuditCollection(collection)) {
+      if (
+        isCriticalAuditCollection(collection)
+        && collection !== 'users'
+        && collection !== 'service'
+        && !isRepairItemCollection(collection)
+      ) {
         auditLog?.(req, {
           action: `${collection}.delete`,
           entityType: collection,
@@ -2752,15 +3185,6 @@ function registerCrudRoutes(deps) {
               }
             : removedItem,
         });
-      }
-      if (collection === 'users') {
-        invalidateAffectedUserSessions([removedItem], []);
-      }
-      if (collection === 'payments') {
-        syncPaymentStatusesAfterPaymentWrite(data);
-      }
-      if (collection === 'payment_allocations') {
-        syncPaymentStatusesAfterPaymentWrite(readData('payments') || []);
       }
       return res.json({ ok: true });
     });
@@ -2818,6 +3242,16 @@ function registerCrudRoutes(deps) {
       }
       try {
         accessControl.assertCanBulkReplace(collection, req.user);
+        if (collection === 'equipment') {
+          const existingById = new Map((readData('equipment') || [])
+            .map(item => [String(item?.id || '').trim(), item])
+            .filter(([id]) => id));
+          list = list.map((item) => {
+            const previous = existingById.get(String(item?.id || '').trim()) || null;
+            assertEquipmentGsmProjectionMutation(item, { current: previous });
+            return stripEquipmentGsmProjectionFields(item);
+          });
+        }
         accessControl.assertSafeAdminBulkReplaceInput(collection, list);
       } catch (error) {
         return sendAccessError(res, error);
@@ -2871,6 +3305,21 @@ function registerCrudRoutes(deps) {
               }
             }
             return assignTrustedScope(item, trustedBulkScope);
+          });
+        } catch (error) {
+          return sendAccessError(res, error);
+        }
+      }
+
+      if (collection === 'equipment') {
+        const existingById = new Map((readData('equipment') || [])
+          .map(item => [String(item?.id || '').trim(), item])
+          .filter(([id]) => id));
+        try {
+          list = list.map((item) => {
+            const previous = existingById.get(String(item?.id || '').trim()) || null;
+            assertEquipmentGsmProjectionMutation(item, { current: previous });
+            return preserveEquipmentGsmProjection(item, previous);
           });
         } catch (error) {
           return sendAccessError(res, error);
@@ -2937,12 +3386,15 @@ function registerCrudRoutes(deps) {
       }
       if (collection === 'equipment_downtimes') {
         list = list.map(item => normalizeEquipmentDowntimeRecord(item, null, { user: req.user, nowIso }));
+        const canonicalDowntimes = [];
         for (const item of list) {
           const validation = validateEquipmentDowntimeRecord(item, list, item.id);
           if (!validation.ok) {
             return res.status(validation.status).json({ ok: false, error: validation.error });
           }
+          canonicalDowntimes.push(validation.downtime);
         }
+        list = canonicalDowntimes;
       }
       try {
         if (collection === 'payments') {
@@ -3038,24 +3490,24 @@ function registerCrudRoutes(deps) {
         });
       }
 
-      if (collection === 'service_works') {
-        writeData(collection, list.map(item => normalizeServiceWorkRecord({ ...item, updatedAt: nowIso() })));
-        auditLog?.(req, {
-          action: `${collection}.bulk_replace`,
-          entityType: collection,
-          after: { count: list.length },
-        });
-        return res.json({ ok: true, count: list.length });
-      }
-
-      if (collection === 'spare_parts') {
-        writeData(collection, list.map(item => normalizeSparePartRecord({ ...item, updatedAt: nowIso() })));
-        auditLog?.(req, {
-          action: `${collection}.bulk_replace`,
-          entityType: collection,
-          after: { count: list.length },
-        });
-        return res.json({ ok: true, count: list.length });
+      if (isPlatformDefaultTenantOverlayCollection(collection)) {
+        try {
+          const normalizedList = collection === 'service_works'
+            ? list.map(item => normalizeServiceWorkRecord(item))
+            : collection === 'spare_parts'
+              ? list.map(item => normalizeSparePartRecord(item))
+              : list;
+          writeData(collection, normalizedList);
+          const effective = readData(collection) || [];
+          auditLog?.(req, {
+            action: `${collection}.bulk_replace`,
+            entityType: collection,
+            after: { count: effective.length },
+          });
+          return res.json({ ok: true, count: effective.length });
+        } catch (error) {
+          return sendCatalogLifecycleError(res, error);
+        }
       }
 
       if (collection === 'users') {
@@ -3063,11 +3515,25 @@ function registerCrudRoutes(deps) {
         const existingById = new Map(existing.map(item => [item.id, item]));
         const merged = list.map(item => {
           const existingUser = existingById.get(item.id);
+          let nextUser;
           if (!item.password) {
             const existingPwd = existingUser?.password;
-            if (existingPwd) return preserveExistingUserAuthState({ ...item, password: existingPwd }, existingUser);
+            if (existingPwd) {
+              nextUser = preserveExistingUserAuthState({ ...item, password: existingPwd }, existingUser);
+            }
           }
-          return preserveExistingUserAuthState(normalizeUserPasswordForWrite(item, existingUser), existingUser);
+          if (!nextUser) {
+            nextUser = preserveExistingUserAuthState(
+              normalizeUserPasswordForWrite(item, existingUser),
+              existingUser,
+            );
+          }
+          if (existingUser && hasUserAuthorityChange(existingUser, nextUser)) {
+            const passwordChanged = nextUser.password !== existingUser.password;
+            nextUser.tokenVersion = (Number(existingUser.tokenVersion) || 0) + 1;
+            nextUser.passwordChangedAt = passwordChanged ? nowIso() : existingUser.passwordChangedAt;
+          }
+          return nextUser;
         });
         const incomingIds = new Set(merged.map(item => String(item?.id || '')));
         for (const existingUser of existing) {
@@ -3088,48 +3554,58 @@ function registerCrudRoutes(deps) {
         } catch (error) {
           return res.status(error?.status || 400).json({ ok: false, error: error.message });
         }
-        writeData('users', merged);
-        invalidateAffectedUserSessions(existing, merged);
-        auditLog?.(req, {
-          action: `${collection}.bulk_replace`,
-          entityType: collection,
-          after: { count: merged.length },
-        });
-        for (const nextUser of merged) {
-          auditUserStatusChanges(req, existingById.get(nextUser.id), nextUser);
+        try {
+          persistUserMutation(req, {
+            previousUsers: existing,
+            nextUsers: merged,
+            action: `${collection}.bulk_replace`,
+            metadata: { count: merged.length },
+          });
+        } catch (error) {
+          return res.status(error?.status || 500).json({
+            ok: false,
+            ...(error?.code ? { code: error.code } : {}),
+            error: error?.message || 'Не удалось атомарно заменить пользователей.',
+          });
         }
         return res.json({ ok: true, count: merged.length });
       }
 
+      let repairBulkEvents = [];
       if (isRepairItemCollection(collection)) {
         const existing = readData(collection) || [];
         const incomingIds = new Set(list.map(item => String(item?.id || '')).filter(Boolean));
         const existingIds = new Set(existing.map(item => String(item?.id || '')).filter(Boolean));
-        const source = inferServiceAuditSource(req, 'sync');
-        for (const removed of existing) {
-          if (!incomingIds.has(String(removed?.id || ''))) {
-            serviceAuditLog?.(req, {
-              serviceId: removed.repairId,
-              action: collection === 'repair_work_items' ? 'work_deleted' : 'part_deleted',
-              entityType: collection === 'repair_work_items' ? 'repair_work_item' : 'repair_part_item',
-              entityId: removed.id,
-              snapshot: removed,
-              source,
-            });
-          }
-        }
-        for (const added of list) {
-          if (!existingIds.has(String(added?.id || ''))) {
-            serviceAuditLog?.(req, {
-              serviceId: added.repairId,
-              action: collection === 'repair_work_items' ? 'work_added' : 'part_added',
-              entityType: collection === 'repair_work_items' ? 'repair_work_item' : 'repair_part_item',
-              entityId: added.id,
-              snapshot: added,
-              source,
-            });
-          }
-        }
+        const existingById = new Map(existing.map(item => [String(item?.id || ''), item]));
+        repairBulkEvents = [
+          ...existing
+            .filter(removed => !incomingIds.has(String(removed?.id || '')))
+            .map(removed => repairItemAuditEvent(
+              req,
+              collection,
+              collection === 'repair_work_items' ? 'work_deleted' : 'part_deleted',
+              removed,
+            )),
+          ...list
+            .filter(added => !existingIds.has(String(added?.id || '')))
+            .map(added => repairItemAuditEvent(
+              req,
+              collection,
+              collection === 'repair_work_items' ? 'work_added' : 'part_added',
+              added,
+            )),
+          ...list
+            .filter(updated => {
+              const previous = existingById.get(String(updated?.id || ''));
+              return previous && stableJson(previous) !== stableJson(updated);
+            })
+            .map(updated => repairItemAuditEvent(
+              req,
+              collection,
+              collection === 'repair_work_items' ? 'work_updated' : 'part_updated',
+              updated,
+            )),
+        ];
       }
 
       let normalizedList;
@@ -3226,9 +3702,40 @@ function registerCrudRoutes(deps) {
           ...(error?.details ? { details: error.details } : {}),
         });
       }
-      if (collection === 'service' && typeof persistServiceTicketBulkReplace === 'function') {
+      if (collection === 'service') {
         try {
-          persistServiceTicketBulkReplace(normalizedList, req.user.userName);
+          if (typeof persistServiceTicketBulkReplace !== 'function') {
+            throw Object.assign(new Error('Atomic service bulk lifecycle is unavailable.'), {
+              code: 'SERVICE_ATOMIC_AUDIT_REQUIRED',
+              status: 503,
+            });
+          }
+          persistServiceTicketBulkReplace(normalizedList, req.user.userName, {
+            writeDataBatch: requireAtomicServiceWriter(),
+            buildExtraEntries: (nextTickets, previousTickets) => {
+              const previousById = new Map(previousTickets.map(item => [String(item?.id || ''), item]));
+              const nextById = new Map(nextTickets.map(item => [String(item?.id || ''), item]));
+              const serviceEvents = [
+                ...nextTickets
+                  .filter(item => !previousById.has(String(item?.id || '')))
+                  .map(item => serviceTicketAuditEvent(req, 'ticket_created', item)),
+                ...nextTickets
+                  .filter(item => {
+                    const previous = previousById.get(String(item?.id || ''));
+                    return previous && stableJson(previous) !== stableJson(item);
+                  })
+                  .map(item => serviceTicketAuditEvent(req, 'ticket_updated', item)),
+                ...previousTickets
+                  .filter(item => !nextById.has(String(item?.id || '')))
+                  .map(item => serviceTicketAuditEvent(req, 'ticket_deleted', item)),
+              ];
+              return serviceMutationAuditEntries(req, serviceEvents, [{
+                action: 'service.bulk_replace',
+                entityType: 'service',
+                after: { count: nextTickets.length },
+              }]);
+            },
+          });
         } catch (error) {
           return res.status(error?.status || 500).json({
             ok: false,
@@ -3237,21 +3744,36 @@ function registerCrudRoutes(deps) {
             ...(error?.details ? { details: error.details } : {}),
           });
         }
+      } else if (isRepairItemCollection(collection)) {
+        try {
+          persistAuditedServiceMutation(req, [{
+            name: collection,
+            value: normalizedList,
+          }], repairBulkEvents, [{
+            action: `${collection}.bulk_replace`,
+            entityType: collection,
+            after: { count: normalizedList.length },
+          }]);
+        } catch (error) {
+          return res.status(error?.status || 500).json({
+            ok: false,
+            ...(error?.code ? { code: error.code } : {}),
+            error: error?.message || 'Не удалось атомарно заменить сервисные факты.',
+          });
+        }
       } else if (collection === 'clients') {
         persistDataBatch(clientCompatibilityWrite.entries);
+      } else if (isPaymentProjectionCollection(collection)) {
+        persistPaymentProjection(collection, normalizedList);
       } else {
         writeData(collection, normalizedList);
       }
-      auditLog?.(req, {
-        action: `${collection}.bulk_replace`,
-        entityType: collection,
-        after: { count: list.length },
-      });
-      if (collection === 'payments') {
-        syncPaymentStatusesAfterPaymentWrite(normalizedList);
-      }
-      if (collection === 'payment_allocations') {
-        syncPaymentStatusesAfterPaymentWrite(readData('payments') || []);
+      if (collection !== 'service' && !isRepairItemCollection(collection)) {
+        auditLog?.(req, {
+          action: `${collection}.bulk_replace`,
+          entityType: collection,
+          after: { count: list.length },
+        });
       }
       return res.json({ ok: true, count: list.length });
     });

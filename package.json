@@ -9,7 +9,7 @@
   "scripts": {
     "build": "node scripts/vite-build.mjs",
     "dev": "CSS_TRANSFORMER_WASM=1 NAPI_RS_FORCE_WASI=1 vite",
-    "demo:reset": "DEMO_ENV=true DEMO_MODE=true ALLOW_DEMO_SEED=true DB_PATH=server/data/demo.sqlite node server/scripts/seed-demo-data.js",
+    "demo:reset": "DEMO_ENV=true DEMO_MODE=true ALLOW_DEMO_SEED=true DEMO_DATABASE_DISPOSABLE=true DB_PATH=server/data/demo.sqlite node server/scripts/seed-demo-data.js",
     "postinstall": "node scripts/fix-lightningcss-wasm.mjs",
     "test": "node --test tests/*.test.js",
     "test:e2e": "playwright test",
@@ -41,6 +41,8 @@
     "tw-animate-css": "1.3.8"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.2",
+    "@babel/traverse": "7.29.0",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "4.1.12",
     "@vitejs/plugin-react": "4.7.0",

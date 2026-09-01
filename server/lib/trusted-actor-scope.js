@@ -2,6 +2,9 @@ const {
   CANONICAL_COMPANIES_TABLE,
 } = require('./canonical-receivables-schema');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+const {
   COMPANY_MEMBERSHIPS_TABLE,
 } = require('./platform-identity-schema');
 
@@ -60,13 +63,13 @@ function createTrustedActorScopeResolver({ db } = {}) {
   if (!db || typeof db.prepare !== 'function') {
     throw new Error('Trusted actor scope resolver requires a SQLite database.');
   }
-  const activeMemberships = db.prepare(`
+  const activeMemberships = prepareSqliteReadonlyStatement(db, `
     SELECT id, companyId, principalId, version
     FROM ${COMPANY_MEMBERSHIPS_TABLE}
     WHERE principalId = ? AND status = 'active'
     ORDER BY companyId, id
   `);
-  const activeCompany = db.prepare(`
+  const activeCompany = prepareSqliteReadonlyStatement(db, `
     SELECT id
     FROM ${CANONICAL_COMPANIES_TABLE}
     WHERE id = ? AND status = 'active'

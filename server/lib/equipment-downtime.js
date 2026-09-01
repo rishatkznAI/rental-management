@@ -150,12 +150,35 @@ function findDowntimeConflict(downtime, downtimes, equipmentList = [], excludeId
 
 function validateEquipmentDowntimePayload(input, context = {}) {
   const equipment = Array.isArray(context.equipment) ? context.equipment : [];
-  const downtime = normalizeEquipmentDowntimeRecord(input, null, context);
-  const refs = downtimeEquipmentRefs(downtime, equipment);
+  let downtime = normalizeEquipmentDowntimeRecord(input, null, context);
+  let refs = downtimeEquipmentRefs(downtime, equipment);
 
   if (!refs.equipmentId && !refs.serialNumber && !refs.equipmentInv) {
     return { ok: false, status: 400, error: 'Выберите технику для простоя.' };
   }
+  const equipmentMatches = equipment.filter(item => {
+    if (refs.equipmentId) return text(item?.id) === refs.equipmentId;
+    if (refs.serialNumber) return text(item?.serialNumber) === refs.serialNumber;
+    return isSafeEquipmentInventoryRef(refs.equipmentInv)
+      && text(item?.inventoryNumber) === refs.equipmentInv;
+  });
+  if (equipmentMatches.length !== 1) {
+    return {
+      ok: false,
+      status: equipmentMatches.length > 1 ? 409 : 400,
+      error: equipmentMatches.length > 1
+        ? 'Ссылка на технику неоднозначна. Выберите карточку техники по стабильному ID.'
+        : 'Карточка техники для простоя не найдена.',
+    };
+  }
+  const authoritativeEquipment = equipmentMatches[0];
+  downtime = {
+    ...downtime,
+    equipmentId: text(authoritativeEquipment.id),
+    equipmentInv: text(authoritativeEquipment.inventoryNumber) || downtime.equipmentInv,
+    serialNumber: text(authoritativeEquipment.serialNumber) || downtime.serialNumber,
+  };
+  refs = downtimeEquipmentRefs(downtime, equipment);
   if (!downtime.startDate) {
     return { ok: false, status: 400, error: 'Укажите дату начала простоя.' };
   }

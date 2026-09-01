@@ -7,6 +7,7 @@ const serverRequire = createRequire(new URL('../server/package.json', import.met
 const express = serverRequire('express');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { createAuditLogger } = require('../server/lib/security-audit.js');
 const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
 const { createServiceCore } = require('../server/lib/service-core.js');
 const { registerServiceRoutes } = require('../server/routes/service.js');
@@ -26,6 +27,7 @@ function createState() {
     repair_work_items: [],
     repair_part_items: [],
     service_audit_log: [],
+    audit_logs: [],
     service_field_trips: [],
   };
 }
@@ -54,29 +56,58 @@ function createServiceApp(state = createState(), user = { userId: 'U-admin', use
   app.use(express.json());
   const readData = name => state[name] || [];
   const writeData = (name, value) => { state[name] = value; };
+  let nextBatchError = null;
+  const writeDataBatch = entries => {
+    if (nextBatchError) {
+      const error = nextBatchError;
+      nextBatchError = null;
+      throw error;
+    }
+    const staged = (entries || []).map(entry => ({
+      name: entry.name,
+      value: structuredClone(entry.value),
+    }));
+    for (const entry of staged) state[entry.name] = entry.value;
+  };
   const accessControl = createAccessControl({ readData });
   const serviceCore = createServiceCore({
     readData,
     writeData,
+    writeDataBatch,
     nowIso: () => '2026-04-30T10:00:00.000Z',
     equipmentMatchesServiceTicket: (ticket, equipment) => ticket.equipmentId && ticket.equipmentId === equipment.id,
   });
+  let auditSequence = 0;
   const serviceAuditLog = createServiceAuditLog({
     readData,
     writeData,
-    generateId: prefix => `${prefix}-${state.service_audit_log.length + 1}`,
+    generateId: prefix => `${prefix}-${++auditSequence}`,
+    nowIso: () => '2026-04-30T10:00:00.000Z',
+  });
+  const auditLog = createAuditLogger({
+    readData,
+    writeData,
+    generateId: prefix => `${prefix}-${++auditSequence}`,
     nowIso: () => '2026-04-30T10:00:00.000Z',
   });
   const router = express.Router();
 
   router.use((req, _res, next) => {
     req.user = user;
+    req.actorScope = {
+      companyId: 'COMPANY-A',
+      tenantId: 'COMPANY-A',
+      membershipId: `MEMBERSHIP-${user.userId || user.id}`,
+      principalId: user.userId || user.id,
+      source: 'service-route-test',
+    };
     next();
   });
 
   registerServiceRoutes(router, {
     readData,
     writeData,
+    writeDataBatch,
     requireAuth: (_req, _res, next) => next(),
     requireAdmin: overrides.requireAdmin || ((_req, _res, next) => next()),
     requireRead: () => (_req, _res, next) => next(),
@@ -99,14 +130,28 @@ function createServiceApp(state = createState(), user = { userId: 'U-admin', use
     },
     migrateLegacyRepairFacts: overrides.migrateLegacyRepairFacts || (() => ({ changed: false })),
     accessControl,
-    auditLog: () => {},
+    auditLog,
     serviceAuditLog,
     returnServiceTicketForRevision: serviceCore.returnServiceTicketForRevision,
     resolveServiceTicketRevision: serviceCore.resolveServiceTicketRevision,
+    catalogLifecycle: overrides.catalogLifecycle || {
+      archiveEffectiveTenantCatalogRecord() {
+        throw Object.assign(
+          new Error('Catalog deactivation is outside the numeric service-route fixture.'),
+          { status: 503 },
+        );
+      },
+    },
   });
 
   app.use('/api', router);
-  return { app, state };
+  return {
+    app,
+    state,
+    failNextBatch(error = Object.assign(new Error('injected service batch failure'), { status: 503 })) {
+      nextBatchError = error;
+    },
+  };
 }
 
 async function withServer(app, fn) {
@@ -121,17 +166,17 @@ async function withServer(app, fn) {
   }
 }
 
-async function request(baseUrl, method, path, body) {
+async function request(baseUrl, method, path, body, headers = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
 }
 
-test('/api/admin/migrate-repair-facts defaults to dry-run and requires confirm to apply', async () => {
+test('/api/admin/migrate-repair-facts is diagnostic-only and routes apply to platform maintenance', async () => {
   const calls = [];
   const { app } = createServiceApp(createState(), undefined, {
     migrateLegacyRepairFacts: options => {
@@ -160,10 +205,9 @@ test('/api/admin/migrate-repair-facts defaults to dry-run and requires confirm t
     assert.equal(dryRunOverride.body.applied, false);
 
     const applied = await request(baseUrl, 'POST', '/api/admin/migrate-repair-facts', { confirm: true });
-    assert.equal(applied.status, 200);
-    assert.equal(applied.body.dryRun, false);
-    assert.equal(applied.body.applied, true);
-    assert.deepEqual(calls, [{ dryRun: true }, { dryRun: true }, { dryRun: false }]);
+    assert.equal(applied.status, 409);
+    assert.equal(applied.body.code, 'PLATFORM_MAINTENANCE_REQUIRED');
+    assert.deepEqual(calls, [{ dryRun: true }, { dryRun: true }]);
   });
 });
 
@@ -285,6 +329,73 @@ test('repair item mutations are admin-only and write service audit entries', asy
     const audit = await request(baseUrl, 'GET', '/api/service/S-1/audit');
     assert.equal(audit.status, 200);
     assert.equal(audit.body.length, 4);
+  });
+});
+
+test('repair item business and audit writes roll back together on injected batch failure', async () => {
+  const harness = createServiceApp();
+  await withServer(harness.app, async baseUrl => {
+    const beforeCreate = structuredClone({
+      workItems: harness.state.repair_work_items,
+      serviceAudit: harness.state.service_audit_log,
+      securityAudit: harness.state.audit_logs,
+    });
+    harness.failNextBatch();
+    const failedCreate = await request(baseUrl, 'POST', '/api/repair_work_items', {
+      repairId: 'S-1',
+      workId: 'SW-1',
+      quantity: 1,
+    });
+    assert.equal(failedCreate.status, 503);
+    assert.deepEqual(harness.state.repair_work_items, beforeCreate.workItems);
+    assert.deepEqual(harness.state.service_audit_log, beforeCreate.serviceAudit);
+    assert.deepEqual(harness.state.audit_logs, beforeCreate.securityAudit);
+
+    const created = await request(baseUrl, 'POST', '/api/repair_work_items', {
+      repairId: 'S-1',
+      workId: 'SW-1',
+      quantity: 1,
+    });
+    assert.equal(created.status, 201);
+    assert.equal(harness.state.repair_work_items.length, 1);
+    assert.equal(harness.state.service_audit_log.at(-1).action, 'work_added');
+    assert.equal(harness.state.audit_logs.at(-1).action, 'service.work_item.create');
+
+    const beforeDelete = structuredClone({
+      workItems: harness.state.repair_work_items,
+      serviceAudit: harness.state.service_audit_log,
+      securityAudit: harness.state.audit_logs,
+    });
+    harness.failNextBatch();
+    const failedDelete = await request(
+      baseUrl,
+      'DELETE',
+      `/api/repair_work_items/${created.body.id}`,
+    );
+    assert.equal(failedDelete.status, 503);
+    assert.deepEqual(harness.state.repair_work_items, beforeDelete.workItems);
+    assert.deepEqual(harness.state.service_audit_log, beforeDelete.serviceAudit);
+    assert.deepEqual(harness.state.audit_logs, beforeDelete.securityAudit);
+  });
+});
+
+test('web repair endpoint ignores forged bot or sync audit provenance', async () => {
+  const { app, state } = createServiceApp();
+  await withServer(app, async baseUrl => {
+    const response = await request(
+      baseUrl,
+      'POST',
+      '/api/repair_part_items?source=sync',
+      {
+        repairId: 'S-1',
+        partId: 'SP-1',
+        quantity: 1,
+        source: 'bot',
+      },
+      { 'x-skytech-source': 'bot' },
+    );
+    assert.equal(response.status, 201);
+    assert.equal(state.service_audit_log.at(-1).source, 'web');
   });
 });
 

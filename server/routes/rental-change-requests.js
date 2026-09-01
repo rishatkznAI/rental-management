@@ -41,9 +41,7 @@ function registerRentalChangeRequestRoutes(deps) {
   const {
     readData,
     writeData,
-    writeDataBatch: persistDataBatch = entries => {
-      for (const entry of entries || []) writeData(entry.name, entry.value);
-    },
+    writeDataBatch: persistDataBatch,
     requireAuth,
     requireRead = () => (_req, _res, next) => next(),
     validateRentalPayload,
@@ -53,6 +51,9 @@ function registerRentalChangeRequestRoutes(deps) {
     nowIso = () => new Date().toISOString(),
     canonicalizeRentalRelationForWrite = rental => rental,
   } = deps;
+  if (typeof persistDataBatch !== 'function') {
+    throw new TypeError('Rental change requests require an atomic batch writer.');
+  }
 
   const router = express.Router();
   const collection = 'rental_change_requests';
@@ -168,20 +169,6 @@ function registerRentalChangeRequestRoutes(deps) {
       serialNumber: equipment.serialNumber || '',
       equipment: inventoryNumber ? [inventoryNumber] : (equipment.serialNumber ? [equipment.serialNumber] : []),
     };
-  }
-
-  function appendRelatedRentalHistory(rentalId, entry) {
-    if (!rentalId || !entry) return;
-    const rentals = [...(readData('rentals') || [])];
-    const resolution = resolveRentalForChangeRequest({
-      rentalId,
-      rentals,
-      ganttRentals: readData('gantt_rentals') || [],
-    });
-    if (!resolution.ok) return;
-    const idx = resolution.rentalIndex;
-    rentals[idx] = appendRentalHistory(rentals[idx], [entry]);
-    writeData('rentals', rentals);
   }
 
   function relatedRentalHistoryWrite(rentalId, entry) {
@@ -402,7 +389,7 @@ function registerRentalChangeRequestRoutes(deps) {
   }
 
   function applyDocumentRequest(request, adminName) {
-    const documents = readData('documents') || [];
+    const documents = [...(readData('documents') || [])];
     const documentId = request.entityId || request.documentId;
     const documentIdx = documents.findIndex(item => item.id === documentId);
     if (documentIdx === -1) {
@@ -411,12 +398,17 @@ function registerRentalChangeRequestRoutes(deps) {
 
     if (request.operation === 'delete') {
       documents.splice(documentIdx, 1);
-      writeData('documents', documents);
-      appendRelatedRentalHistory(
+      const historyWrite = relatedRentalHistoryWrite(
         request.rentalId,
         createRentalHistoryEntry(adminName, `Согласовано и применено: ${request.type}`),
       );
-      return { ok: true };
+      return {
+        ok: true,
+        writes: [
+          { name: 'documents', value: documents },
+          ...(historyWrite ? [historyWrite] : []),
+        ],
+      };
     }
 
     return { ok: false, status: 400, error: 'Неизвестная операция по документу' };

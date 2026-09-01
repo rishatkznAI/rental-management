@@ -193,6 +193,14 @@ function createNumberSequenceAllocator({
       AND entity_type = @entityType
       AND entity_id = @entityId
   `);
+  const findSequence = db.prepare(`
+    SELECT last_value
+    FROM number_sequences
+    WHERE scope_type = @scopeType
+      AND scope_id = @scopeId
+      AND entity_type = @entityType
+      AND year = @year
+  `);
   const incrementSequence = db.prepare(`
     INSERT INTO number_sequences (
       scope_type, scope_id, entity_type, year, last_value, created_at, updated_at
@@ -291,8 +299,73 @@ function createNumberSequenceAllocator({
     } : null;
   }
 
+  function createPreviewAllocator() {
+    const simulatedByEntity = new Map();
+    const simulatedLastValues = new Map();
+
+    function previewAllocate({ entityType, entityId, year } = {}) {
+      const normalizedType = normalizeEntityType(entityType);
+      const normalizedId = text(entityId);
+      if (!normalizedId) {
+        throw numberingError('NUMBERING_ENTITY_ID_REQUIRED', 'Для присвоения номера нужен canonical entity id.', 500);
+      }
+      const now = nowIso();
+      const normalizedYear = year === undefined || year === null
+        ? yearFromIso(now)
+        : normalizeSequenceYear(year);
+      const trustedScope = currentScope();
+      const entityKey = [trustedScope.scopeType, trustedScope.scopeId, normalizedType, normalizedId].join('\u0000');
+      const simulated = simulatedByEntity.get(entityKey);
+      if (simulated) return { ...simulated };
+
+      const existing = findByEntity.get({
+        ...trustedScope,
+        entityType: normalizedType,
+        entityId: normalizedId,
+      });
+      if (existing) {
+        return {
+          scopeType: existing.scope_type,
+          scopeId: existing.scope_id,
+          entityType: existing.entity_type,
+          entityId: existing.entity_id,
+          year: Number(existing.year),
+          sequenceValue: Number(existing.sequence_value),
+          number: existing.number,
+          createdAt: existing.created_at,
+        };
+      }
+
+      const sequenceKey = [trustedScope.scopeType, trustedScope.scopeId, normalizedType, normalizedYear].join('\u0000');
+      let lastValue = simulatedLastValues.get(sequenceKey);
+      if (lastValue === undefined) {
+        lastValue = Number(findSequence.get({
+          ...trustedScope,
+          entityType: normalizedType,
+          year: normalizedYear,
+        })?.last_value || 0);
+      }
+      const sequenceValue = lastValue + 1;
+      const result = {
+        ...trustedScope,
+        entityType: normalizedType,
+        entityId: normalizedId,
+        year: normalizedYear,
+        sequenceValue,
+        number: formatBusinessNumber(normalizedType, normalizedYear, sequenceValue),
+        createdAt: now,
+      };
+      simulatedLastValues.set(sequenceKey, sequenceValue);
+      simulatedByEntity.set(entityKey, result);
+      return { ...result };
+    }
+
+    return Object.freeze({ allocate: previewAllocate });
+  }
+
   return Object.freeze({
     allocate,
+    createPreviewAllocator,
     find,
     scope: staticScope,
   });

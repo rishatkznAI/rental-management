@@ -36,16 +36,25 @@ const {
   registerProductionScopeRemediationRoutes,
 } = require('../server/routes/production-scope-remediation.js');
 const bundledProductionPlan = require('../server/config/production-scope-remediation-plan.js');
+const reviewedProductionEnvironment = require(
+  '../server/config/production-scope-remediation-environment.js'
+);
+const {
+  PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID,
+} = require('../server/lib/production-smoke-identity.js');
 
 const DEPLOYED_SHA = '1'.repeat(40);
 const SIGNING_SECRET = 'test-remediation-signing-secret-that-is-long-enough';
 const COMPANY_ID = 'company-approved-a';
 const HEAD_OFFICE_ID = 'branch-approved-head-office';
 const COLLECTIONS = [
+  'equipment',
   'counterparties',
   'counterparty_role_assignments',
   'clients',
   'client_objects',
+  'documents',
+  'app_settings',
 ];
 const RAILWAY_IDENTITY = Object.freeze({
   projectId: 'project-production',
@@ -60,16 +69,20 @@ const CONSERVATION_STATE = Object.freeze({
   botDisabled: true,
   gsmDisabled: true,
   storageWriteGuardEnabled: true,
+  schemaCompatibilityDisabled: true,
   cleanResetDisabled: true,
   adminResetDisabled: true,
 });
 
 function seedCollections(db) {
   const values = {
+    equipment: [],
     counterparties: [{ id: 'CP-1', legalName: 'Approved customer' }],
     counterparty_role_assignments: [{ id: 'CPRA-1', counterpartyId: 'CP-1', role: 'customer' }],
     clients: [{ id: 'C-1', counterpartyId: 'CP-1', company: 'Approved customer' }],
     client_objects: [{ id: 'CO-1', clientId: 'C-1', counterpartyId: 'CP-1', name: 'Site' }],
+    documents: [],
+    app_settings: [],
   };
   const insert = db.prepare('INSERT INTO app_data (name, json) VALUES (?, ?)');
   for (const name of COLLECTIONS) insert.run(name, JSON.stringify(values[name]));
@@ -281,6 +294,9 @@ function applyOptions(fixture, backup) {
       encryptedArchiveSha256: 'd'.repeat(64),
       githubArtifactDigest: 'e'.repeat(64),
       encryptedArchiveSizeBytes: backup.receipt.sizeBytes + 100,
+      decryptabilityVerified: true,
+      decryptedArchiveSha256: backup.receipt.sha256,
+      decryptedArchiveSizeBytes: backup.receipt.sizeBytes,
       backupId: backup.receipt.backupId,
       filename: backup.receipt.filename,
       backupSha256: backup.receipt.sha256,
@@ -290,6 +306,7 @@ function applyOptions(fixture, backup) {
       userInventoryFingerprint: backup.receipt.userInventoryFingerprint,
       databaseFingerprint: backup.receipt.databaseFingerprint,
       sourceFileSetFingerprint: backup.receipt.sourceFileSetFingerprint,
+      sourceObservedFileSetFingerprint: backup.receipt.sourceObservedFileSetFingerprint,
       canonicalCompanyId: backup.receipt.canonicalCompanyId,
       bundledPlanChecksum: backup.receipt.bundledPlanChecksum,
       executionPlanChecksum: backup.receipt.executionPlanChecksum,
@@ -352,6 +369,11 @@ function createRouteHarness(fixture, overrides = {}) {
     isEnabled: () => enabled,
     getAllowedMode: () => allowedMode,
     getSigningSecret: () => SIGNING_SECRET,
+    getExpectedExecutionSha: () => (
+      Object.prototype.hasOwnProperty.call(overrides, 'expectedExecutionSha')
+        ? overrides.expectedExecutionSha
+        : DEPLOYED_SHA
+    ),
     getRuntimeIdentity: () => ({
       projectId: expectedEnvironment.projectId,
       environmentId: expectedEnvironment.environmentId,
@@ -412,7 +434,7 @@ test('default runner mode is readonly preflight and reports zero writes', (t) =>
   assert.equal(result.runtimeSafety.readonly, true);
   assert.equal(result.runtimeSafety.queryOnly, true);
   assert.equal(result.runtimeSafety.totalChangesDelta, 0);
-  assert.equal(result.sqlite.databaseWalAndShmUnchanged, true);
+  assert.equal(result.sqlite.databaseAndWalUnchanged, true);
   assert.equal(result.sqlite.beforeFileSetFingerprint, result.sqlite.afterFileSetFingerprint);
   assert.equal(sqliteTotalChanges(fixture.context.db), before);
   assert.equal(result.readyForBackup, true);
@@ -427,7 +449,8 @@ test('bundled production plan remains fail-closed and preflight-only releasable'
   assert.equal(Object.isFrozen(bundledProductionPlan.actorMappings), true);
   assert.equal(
     bundledProductionPlan.actorMappings.some(mapping => (
-      mapping.userId === 'production-smoke-admin' && mapping.action === 'UNRESOLVED'
+      mapping.userId === PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID
+      && mapping.action === 'UNRESOLVED'
     )),
     true,
   );
@@ -723,7 +746,7 @@ test('backup, apply, and verify are separate; verify proves idempotent zero-diff
   assert.equal(verified.summary.idempotentPlannedWriteCount, 0);
   assert.equal(verified.runtimeSafety.totalChangesDelta, 0);
   assert.equal(verified.verifyRuntimeSafety.totalChangesDelta, 0);
-  assert.equal(verified.verifyRuntimeSafety.databaseWalAndShmUnchanged, true);
+  assert.equal(verified.verifyRuntimeSafety.databaseAndWalUnchanged, true);
 
   const beforeRepeat = databaseContentFingerprint(fixture.context.db);
   assert.throws(
@@ -962,10 +985,10 @@ test('manual workflow is production-protected, target-pinned, and has no deploy 
   assert.equal((source.match(/secrets\.RAILWAY_PROJECT_TOKEN/g) || []).length, 3);
   assert.equal((source.match(/railway status\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--json >/g) || []).length, 1);
   assert.equal((source.match(/railway volume\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--service "\$RAILWAY_SERVICE_ID"\s+\\\s+files --volume "\$RAILWAY_VOLUME_ID" download/g) || []).length, 1);
-  assert.match(source, /1558b38d-bf16-4b50-9ee6-0871b7152116/);
-  assert.match(source, /62833109-61cb-4600-9200-d624d6537a05/);
-  assert.match(source, /b2016e92-3c50-4b00-800d-625a139b219c/);
-  assert.match(source, /48b8768c-a8a9-4a87-8a4b-b980fff5d00c/);
+  assert.equal(source.includes(reviewedProductionEnvironment.projectId), true);
+  assert.equal(source.includes(reviewedProductionEnvironment.environmentId), true);
+  assert.equal(source.includes(reviewedProductionEnvironment.serviceId), true);
+  assert.equal(source.includes(reviewedProductionEnvironment.volumeId), true);
   assert.match(
     source,
     /PRODUCTION_API_ORIGIN: https:\/\/rental-management-production-35bc\.up\.railway\.app/,

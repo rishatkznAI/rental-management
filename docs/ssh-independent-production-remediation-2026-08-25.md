@@ -68,7 +68,9 @@ Only the derived HMAC is sent to the service. The signing secret, Railway token,
 - explicit disposition for every eligible actor;
 - `integrity_check=ok` and zero foreign-key violations;
 - zero `total_changes()` delta;
-- identical DB/WAL/SHM size and SHA-256 before and after inspection.
+- identical durable DB/WAL size and SHA-256 before and after inspection;
+- before/after SHM size and SHA-256 as forensic observations, without treating a
+  read-only SHM rebuild as a business-data mutation.
 
 The user inventory returns only stable ID, display name, status, role, classification, proposed action, and evidence. It excludes passwords, password hashes, tokens, sessions, cookies, API keys, secrets, and arbitrary user payloads.
 
@@ -82,6 +84,7 @@ Any new eligible actor, unexpected record, unresolved mapping, schema drift, col
 - MAX bot disabled;
 - GSM/GPRS disabled;
 - central production-scope write guard enabled;
+- one-shot schema compatibility mode disabled;
 - clean reset disabled;
 - admin password reset disabled.
 
@@ -93,25 +96,27 @@ The remediation runner is the only intended database writer in this state. `back
 
 `backup` reruns preflight under the complete freeze. It permits only the plan's recoverable missing-backup blocker. It then:
 
-1. captures the exact source DB/WAL/SHM file set;
+1. captures the exact source DB/WAL/SHM file set, with a durable DB/WAL gate and
+   a separate observed DB/WAL/SHM fingerprint;
 2. uses the SQLite backup API to produce a coherent database snapshot;
 3. builds a full archive and requires `skippedFilesCount=0`;
 4. validates every ZIP entry;
 5. opens the embedded SQLite snapshot read-only;
 6. reruns integrity, foreign-key, source-identity, scoped-state, and complete-database fingerprint checks;
-7. proves the source DB/WAL/SHM set did not change during backup;
+7. proves the durable source DB/WAL set did not change during backup while
+   retaining both SHM observations;
 8. stores the archive with mode `0600` under `/data/backups` and `fsync`s it;
 9. simulates the exact deterministic apply on a temporary copy of the snapshot;
 10. records the exact expected complete post-state database fingerprint;
 11. atomically stores a server-owned receipt adjacent to the archive.
 
-The receipt binds its UUID, filename, timestamp, byte size, archive SHA-256, source database identity, complete logical database fingerprint, DB/WAL/SHM set and fingerprint, scoped state, user inventory, deployed SHA, bundled and execution plan checksums, exact expected post-state fingerprint, canonical Company ID, Railway identity, archive integrity, and archive completeness.
+The receipt binds its UUID, filename, timestamp, byte size, archive SHA-256, source database identity, complete logical database fingerprint, durable DB/WAL fingerprint, observed DB/WAL/SHM set and fingerprint, scoped state, user inventory, deployed SHA, bundled and execution plan checksums, exact expected post-state fingerprint, canonical Company ID, Railway identity, archive integrity, and archive completeness. SHM is a transient WAL index which SQLite may rebuild during a read-only open; it is preserved as evidence but is not an authoritative mutation gate.
 
 Later requests supply only the receipt's UUID and filename. The server loads the receipt from its own volume and rejects missing, forged, stale, malformed, internally inconsistent, or context-mismatched receipts. An HTTP caller cannot replace receipt fields.
 
 ## Independent protected copy
 
-Backup mode has no automatic transition to apply. The workflow downloads exactly `/backups/<receipt.filename>` from the pinned Railway volume, verifies plaintext SHA-256 and size against the server receipt, encrypts it with GPG AES-256 using a separate protected passphrase, deletes the plaintext runner copy, and uploads only the encrypted file as a GitHub Actions artifact with 30-day retention.
+Backup mode has no automatic transition to apply. The workflow downloads exactly `/backups/<receipt.filename>` from the pinned Railway volume, verifies plaintext SHA-256 and size against the server receipt, encrypts it with GPG AES-256 using a separate protected passphrase, immediately decrypts a verification copy and rechecks the original plaintext SHA-256 and size, deletes both plaintext runner copies, and uploads only the encrypted file as a GitHub Actions artifact with 30-day retention.
 
 The workflow creates machine evidence containing the GitHub run and artifact IDs/URL, GitHub artifact digest, encrypted-file SHA-256 and size, and every critical receipt binding. It deliberately writes:
 
@@ -129,9 +134,9 @@ An authorized reviewer must independently download the encrypted artifact, verif
 
 ## Apply transaction and TOCTOU closure
 
-`apply` requires exact values for the deployed SHA, execution-plan checksum, scoped-state fingerprint, user-inventory fingerprint, complete source-database fingerprint, DB/WAL/SHM fingerprint, expected complete post-state fingerprint, canonical Company ID, receipt UUID/filename, independent-copy evidence, and literal `RENTCORE_PHASE_A_APPLY` confirmation.
+`apply` requires exact values for the deployed SHA, execution-plan checksum, scoped-state fingerprint, user-inventory fingerprint, complete source-database fingerprint, durable DB/WAL fingerprint, expected complete post-state fingerprint, canonical Company ID, receipt UUID/filename, independent-copy evidence (including the separate observed DB/WAL/SHM fingerprint), and literal `RENTCORE_PHASE_A_APPLY` confirmation.
 
-Before opening a write transaction it repeats preflight, reloads and validates the server-owned receipt, validates the archive, rejects receipts older than 24 hours, and compares all approved fingerprints. Inside `BEGIN IMMEDIATE`, before the first write, it repeats both the exact DB/WAL/SHM comparison and the complete logical database fingerprint. The immediate lock closes the gap against another writer after that check.
+Before opening a write transaction it repeats preflight, reloads and validates the server-owned receipt, validates the archive, rejects receipts older than 24 hours, and compares all approved fingerprints. It refuses an already-active SQLite transaction because better-sqlite3 would otherwise downgrade the requested top-level transaction to a nested savepoint. Inside its own `BEGIN IMMEDIATE`, before the first write, it repeats both the exact durable DB/WAL comparison and the complete logical database fingerprint. The immediate lock closes the gap against another writer after that check.
 
 All identity bootstrap and collection changes happen in that one immediate transaction. Collection updates use compare-and-swap on the original JSON. Bootstrap IDs and timestamps are deterministic from the approved execution plan and backup receipt. Before commit, the runner proves zero remaining planned diff, exact expected semantic state, and the exact simulated complete post-state database fingerprint. Any exception rolls back identity and collection writes together.
 
@@ -149,9 +154,76 @@ Fault-injection coverage forces failures after identity mutation, during collect
 - no `companyId` / `tenantId` mismatch exists in target collections;
 - rerunning the plan produces zero CREATE/UPDATE/RELINK operations;
 - SQLite integrity and foreign keys remain valid;
-- `total_changes()` remains zero and DB/WAL/SHM stay unchanged during verification.
+- `total_changes()` remains zero and durable DB/WAL state stays unchanged during
+  verification; any SHM rebuild remains explicitly visible in the evidence.
 
 Rollback material is considered ready only when both copies exist and are verified: the coherent plaintext archive on the pinned Railway volume and the independently downloaded, encrypted GitHub artifact with verified decryptability and matching plaintext hash. Restore is a separate human-authorized operation and is not implemented as an automatic failure handler. An apply or verify failure leaves the maintenance freeze active and does not trigger an unreviewed restore.
+
+## Controlled login and UI validation
+
+The remediation `verify` operation runs first while the central write freeze and
+`APP_DISABLED=true` are still active. Only after that exact post-state check has
+passed may the same immutable application SHA be restarted in the separately
+gated validation mode. This phase permits health/version reads, one exact
+`POST /api/auth/login`, authenticated read-only API/UI checks, and no business
+mutation. It is not a general unfreeze.
+
+The validation startup requires the immutable Railway project, environment,
+service, volume name, `/data` mount, nonempty replica ID, a 40-character deployed
+SHA, and the exact non-symlink `/data/app.sqlite`. It also requires all of these
+literal controls:
+
+```text
+NODE_ENV=production
+PRODUCTION_SCOPE_REMEDIATION_VALIDATION_READ_ONLY=true
+PRODUCTION_SCOPE_REMEDIATION_ENABLED=false
+PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE=false
+PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY=false
+PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES=
+PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODE=
+PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET=
+APP_DISABLED=false
+BOT_DISABLED=true
+GSM_DISABLED=true
+GSM_ENABLED=false
+SKYTECH_CLEAN_RESET_ENABLED=false
+SKYTECH_CLEAN_RESET_TOKEN=
+SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED=false
+SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA=
+SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN=
+ADMIN_RESET_PASSWORD=
+```
+
+Invalid or incomplete controls abort before SQLite is opened. The existing
+database is opened without schema creation/migration; startup identity/session
+cleanup, background maintenance, webhook registration, polling, and GSM/GPRS
+transports remain suppressed. SQLite remains in connection-level `query_only`
+mode for every read. Only the exact smoke-reader login may synchronously lower
+that guard inside one owned `BEGIN IMMEDIATE` transaction, and that transaction
+can write only its session plus the tenant-scoped `login.success` audit event;
+failure rolls both back and restores `query_only` before returning. Cached DB
+access revalidates the conservation contract, and the initial open holds a
+no-follow descriptor while checking the database inode again after SQLite opens
+it. The login boundary accepts only the exact
+`production-smoke-reader@skytech.internal` body shape with a bounded nonempty
+password and then verifies the complete remediated reader authority record.
+Pre-existing sessions for every other principal are rejected before route
+authorization, so an old Administrator session cannot reach side-effecting GET
+operations during this phase. Failed validation
+logins do not append audit records, and a legacy smoke-reader credential cannot
+be rehashed in this phase. A successful login may create only the expected
+technical smoke session and its success-audit evidence. The production smoke then checks
+the technical-auditor role, approved read collections, denied finance access,
+and sends an authenticated POST to the intentionally nonexistent
+`/api/__production_validation_write_probe__`; the global boundary must answer
+`503 PRODUCTION_VALIDATION_READ_ONLY`. Because that path has no application
+handler, a missing boundary would produce `404` rather than mutate data.
+
+After API and browser checks, record and independently classify the exact
+session/audit delta, set `PRODUCTION_SCOPE_REMEDIATION_VALIDATION_READ_ONLY=false`,
+and restart the same SHA with the reviewed steady-state bot/GSM controls. Do not
+reuse the pre-login database fingerprint as if the technical session and audit
+records had never been created.
 
 ## Release configuration
 
@@ -167,6 +239,11 @@ PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE=false
 ```
 
 The signing secret must match the protected GitHub Environment secret. The release must expose the exact Railway runtime identity variables and `RAILWAY_GIT_COMMIT_SHA`. The workflow's `expected_deployed_sha` must equal the immutable commit actually deployed. This configuration authorizes only read-only preflight; it does not authorize backup or apply.
+
+The workflow consumes the existing production Environment secret
+`RAILWAY_PROJECT_TOKEN` and exposes it to Railway CLI only as its expected
+`RAILWAY_TOKEN` process variable. A repository-level or differently named token
+is not a fallback.
 
 After the reviewed preflight, disable the surface by setting `PRODUCTION_SCOPE_REMEDIATION_ENABLED=false`, clearing `PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES`, and rotating/removing the signing secret unless a separately reviewed frozen phase is approved.
 

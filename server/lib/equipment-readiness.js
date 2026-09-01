@@ -1,9 +1,12 @@
 const {
-  equipmentMatchesServiceTicket,
-  rentalMatchesEquipment,
   normalizeEquipmentRef,
   buildEquipmentLookup,
 } = require('./equipment-matching');
+const {
+  gsmCurrentDeviceBindingIssue,
+  gsmDeviceBindingRevision,
+} = require('./gsm/trusted-device-scope');
+const { requiresGsmTcpIngressCredential } = require('./gsm/device-credential');
 
 const READINESS_LABELS = {
   ready: 'Готова к аренде',
@@ -99,41 +102,58 @@ function pushMapArray(map, key, value) {
   map.get(normalized).push(value);
 }
 
-function setMapFirst(map, key, value) {
-  const normalized = normalizeEquipmentRef(key);
-  if (normalized && !map.has(normalized)) map.set(normalized, value);
-}
-
-function lookupUnique(map, counts, ref) {
-  const normalized = normalizeEquipmentRef(ref);
-  if (!normalized || (counts.get(normalized) || 0) !== 1) return null;
-  return map.get(normalized) || null;
-}
-
-function resolveEquipmentIdsFromRefs(record, lookup, refs = []) {
+// Readiness is an operational decision, so only an authoritative equipment ID
+// may attach a related row to a product. Inventory/serial/label matching is
+// collected in the unmatched diagnostics, never as a blocker input. Those
+// mutable values can be duplicated or edited after a row is written and
+// therefore are not safe to establish a current relationship.
+function resolveEquipmentIdsFromStableRef(record, lookup) {
   const ids = new Set();
   const directId = normalizeEquipmentRef(record?.equipmentId);
   if (directId && lookup.byId.has(directId)) ids.add(directId);
-
-  const scalarRefs = [
-    record?.equipmentInv,
-    record?.inventoryNumber,
-    record?.serialNumber,
-    record?.equipmentInventoryNumber,
-  ];
-  for (const ref of [...scalarRefs, ...refs].flat()) {
-    const normalized = normalizeEquipmentRef(ref);
-    if (!normalized) continue;
-    const byId = lookup.byId.get(normalized);
-    if (byId?.id) ids.add(normalizeEquipmentRef(byId.id));
-    const byInventory = lookupUnique(lookup.byInventory, lookup.inventoryCounts, normalized);
-    if (byInventory?.id) ids.add(normalizeEquipmentRef(byInventory.id));
-    const byEquipmentInv = lookupUnique(lookup.byEquipmentInv, lookup.equipmentInvCounts, normalized);
-    if (byEquipmentInv?.id) ids.add(normalizeEquipmentRef(byEquipmentInv.id));
-    const bySerial = lookupUnique(lookup.bySerial, lookup.serialCounts, normalized);
-    if (bySerial?.id) ids.add(normalizeEquipmentRef(bySerial.id));
-  }
   return ids;
+}
+
+function trustedGsmDeviceRecords(context, lookup) {
+  const records = asArray(context.gsmDevices ?? context.gsm_devices);
+  const equipment = asArray(context.gsmValidationEquipment ?? context.equipment);
+  const byId = new Map();
+  const byEquipmentId = new Map();
+  const ambiguousRecordIds = new Set();
+  const ambiguousEquipmentIds = new Set();
+  for (const device of records) {
+    const recordId = normalizeEquipmentRef(device?.id);
+    const equipmentId = normalizeEquipmentRef(device?.equipmentId);
+    if (
+      !recordId
+      || !equipmentId
+      || !lookup.byId.has(equipmentId)
+      || gsmCurrentDeviceBindingIssue(device, { devices: records, equipment })
+    ) continue;
+    if (byId.has(recordId)) ambiguousRecordIds.add(recordId);
+    else byId.set(recordId, device);
+    if (byEquipmentId.has(equipmentId)) ambiguousEquipmentIds.add(equipmentId);
+    else byEquipmentId.set(equipmentId, device);
+  }
+  for (const recordId of ambiguousRecordIds) byId.delete(recordId);
+  for (const equipmentId of ambiguousEquipmentIds) byEquipmentId.delete(equipmentId);
+  return { records, byId, byEquipmentId };
+}
+
+function trustedGsmPacketEquipmentId(packet, lookup, devices) {
+  const equipmentId = normalizeEquipmentRef(packet?.equipmentId);
+  if (!equipmentId || !lookup.byId.has(equipmentId)) return '';
+  const deviceRecordId = normalizeEquipmentRef(packet?.gsmDeviceRecordId);
+  if (!deviceRecordId) return '';
+  const device = devices.byId.get(deviceRecordId);
+  if (!device || normalizeEquipmentRef(device.equipmentId) !== equipmentId) return '';
+  const packetRevision = Number(packet?.gsmBindingRevision);
+  if (
+    !Number.isInteger(packetRevision)
+    || packetRevision <= 0
+    || packetRevision !== gsmDeviceBindingRevision(device)
+  ) return '';
+  return equipmentId;
 }
 
 function addLatestByTime(map, key, item, fields) {
@@ -161,7 +181,7 @@ function buildReadinessIndexes(context = {}) {
   const unmatchedReceivingPhotos = [];
 
   for (const rental of [...asArray(context.rentals), ...asArray(context.ganttRentals)]) {
-    const ids = resolveEquipmentIdsFromRefs(rental, lookup, Array.isArray(rental?.equipment) ? rental.equipment : []);
+    const ids = resolveEquipmentIdsFromStableRef(rental, lookup);
     if (ids.size === 0) unmatchedRentals.push(rental);
     for (const id of ids) {
       pushMapArray(rentalsByEquipmentId, id, rental);
@@ -173,48 +193,43 @@ function buildReadinessIndexes(context = {}) {
   }
 
   for (const ticket of asArray(context.serviceTickets)) {
-    const ids = resolveEquipmentIdsFromRefs(ticket, lookup);
+    const ids = resolveEquipmentIdsFromStableRef(ticket, lookup);
     if (ids.size === 0) unmatchedServiceTickets.push(ticket);
     for (const id of ids) pushMapArray(serviceByEquipmentId, id, ticket);
   }
 
   for (const delivery of asArray(context.deliveries)) {
-    const ids = resolveEquipmentIdsFromRefs(delivery, lookup, [delivery?.equipmentLabel, delivery?.cargo]);
+    const ids = resolveEquipmentIdsFromStableRef(delivery, lookup);
     if (ids.size === 0) unmatchedDeliveries.push(delivery);
     for (const id of ids) pushMapArray(deliveriesByEquipmentId, id, delivery);
   }
 
   for (const document of asArray(context.documents)) {
-    const ids = resolveEquipmentIdsFromRefs(document, lookup);
+    const ids = resolveEquipmentIdsFromStableRef(document, lookup);
     if (ids.size === 0) unmatchedDocuments.push(document);
     for (const id of ids) pushMapArray(documentsByEquipmentId, id, document);
   }
 
   for (const photo of asArray(context.shippingPhotos)) {
     if (lower(photo?.type) !== 'receiving') continue;
-    const ids = resolveEquipmentIdsFromRefs(photo, lookup, [photo?.equipmentInv]);
+    const ids = resolveEquipmentIdsFromStableRef(photo, lookup);
     if (ids.size === 0) unmatchedReceivingPhotos.push(photo);
     for (const id of ids) pushMapArray(receivingPhotosByEquipmentId, id, photo);
   }
 
-  const equipmentIdByGsmImei = new Map();
-  const equipmentIdByGsmDeviceId = new Map();
-  const equipmentIdByGsmTrackerId = new Map();
-  for (const item of equipmentList) {
-    setMapFirst(equipmentIdByGsmImei, item?.gsmImei, item?.id);
-    setMapFirst(equipmentIdByGsmDeviceId, item?.gsmDeviceId, item?.id);
-    setMapFirst(equipmentIdByGsmTrackerId, item?.gsmTrackerId, item?.id);
-  }
+  const gsmDevices = trustedGsmDeviceRecords(context, lookup);
+  const trustedGsmEquipmentIds = new Set(gsmDevices.byEquipmentId.keys());
+  const latestGsmDeviceByEquipmentId = new Map(gsmDevices.byEquipmentId);
   for (const packet of asArray(context.gsmPackets)) {
-    const ids = new Set();
-    if (packet?.equipmentId && lookup.byId.has(normalizeEquipmentRef(packet.equipmentId))) ids.add(normalizeEquipmentRef(packet.equipmentId));
-    const byImei = equipmentIdByGsmImei.get(normalizeEquipmentRef(packet?.imei));
-    const byDevice = equipmentIdByGsmDeviceId.get(normalizeEquipmentRef(packet?.deviceId));
-    const byTracker = equipmentIdByGsmTrackerId.get(normalizeEquipmentRef(packet?.trackerId));
-    if (byImei) ids.add(normalizeEquipmentRef(byImei));
-    if (byDevice) ids.add(normalizeEquipmentRef(byDevice));
-    if (byTracker) ids.add(normalizeEquipmentRef(byTracker));
-    for (const id of ids) addLatestByTime(latestGsmPacketByEquipmentId, id, packet, ['deviceTime', 'receivedAt', 'createdAt']);
+    // Commands/acknowledgements are outbound transport history, not evidence
+    // that a tracker recently contacted us.
+    if (lower(packet?.direction) === 'outbound') continue;
+    const equipmentId = trustedGsmPacketEquipmentId(packet, lookup, gsmDevices);
+    if (!equipmentId) continue;
+    trustedGsmEquipmentIds.add(equipmentId);
+    // Device clocks are untrusted display/history metadata. Operational
+    // freshness is anchored only to server-controlled receipt timestamps.
+    addLatestByTime(latestGsmPacketByEquipmentId, equipmentId, packet, ['receivedAt', 'createdAt']);
   }
 
   return {
@@ -224,6 +239,8 @@ function buildReadinessIndexes(context = {}) {
     documentsByEquipmentId,
     receivingPhotosByEquipmentId,
     latestGsmPacketByEquipmentId,
+    latestGsmDeviceByEquipmentId,
+    trustedGsmEquipmentIds,
     rentalRatesByCategory,
     unmatchedRentals,
     unmatchedServiceTickets,
@@ -429,47 +446,6 @@ function hasPhotoList(value) {
   return Object.values(value).some(hasPhotoList);
 }
 
-function shippingPhotoMatchesEquipment(photo, equipment, equipmentList) {
-  if (!photo || !equipment) return false;
-  if (photo.equipmentId && photo.equipmentId === equipment.id) return true;
-  if (photo.serialNumber && equipment.serialNumber && photo.serialNumber === equipment.serialNumber) return true;
-  const inventory = normalizeEquipmentRef(photo.inventoryNumber || photo.equipmentInv);
-  return Boolean(inventory && equipment.inventoryNumber && inventory === equipment.inventoryNumber);
-}
-
-function deliveryMatchesEquipment(delivery, equipment, equipmentList) {
-  if (!delivery || !equipment) return false;
-  if (delivery.equipmentId && delivery.equipmentId === equipment.id) return true;
-  if (delivery.equipmentInv && equipment.inventoryNumber && delivery.equipmentInv === equipment.inventoryNumber) return true;
-  if (delivery.inventoryNumber && equipment.inventoryNumber && delivery.inventoryNumber === equipment.inventoryNumber) return true;
-  const rentalLike = {
-    equipmentId: delivery.equipmentId,
-    equipmentInv: delivery.equipmentInv || delivery.inventoryNumber,
-    serialNumber: delivery.serialNumber,
-    equipment: [delivery.equipmentLabel, delivery.cargo].filter(Boolean),
-  };
-  return rentalMatchesEquipment(rentalLike, equipment, equipmentList);
-}
-
-function documentMatchesEquipment(document, equipment) {
-  if (!document || !equipment) return false;
-  if (document.equipmentId && document.equipmentId === equipment.id) return true;
-  if (document.equipmentInv && equipment.inventoryNumber && document.equipmentInv === equipment.inventoryNumber) return true;
-  if (document.inventoryNumber && equipment.inventoryNumber && document.inventoryNumber === equipment.inventoryNumber) return true;
-  if (document.serialNumber && equipment.serialNumber && document.serialNumber === equipment.serialNumber) return true;
-  return false;
-}
-
-function packetMatchesEquipment(packet, equipment) {
-  if (!packet || !equipment) return false;
-  return Boolean(
-    (packet.equipmentId && packet.equipmentId === equipment.id) ||
-    (packet.imei && equipment.gsmImei && packet.imei === equipment.gsmImei) ||
-    (packet.deviceId && equipment.gsmDeviceId && packet.deviceId === equipment.gsmDeviceId) ||
-    (packet.trackerId && equipment.gsmTrackerId && packet.trackerId === equipment.gsmTrackerId)
-  );
-}
-
 function latestByTime(items, fields) {
   return asArray(items)
     .map(item => ({
@@ -481,15 +457,21 @@ function latestByTime(items, fields) {
 }
 
 function getEquipmentGsmLastSeen(equipment, packets) {
-  const direct = parseTime(equipment?.gsmLastSeenAt || equipment?.gsmLastSignalAt);
+  const trustedDevice = packets && !Array.isArray(packets) && packets.latestGsmDeviceByEquipmentId
+    ? packets.latestGsmDeviceByEquipmentId.get(normalizeEquipmentRef(equipment?.id)) || null
+    : null;
+  const direct = parseTime(trustedDevice?.lastPacketAt || trustedDevice?.lastOnlineAt);
   const latestPacket = packets && !Array.isArray(packets) && packets.latestGsmPacketByEquipmentId
     ? packets.latestGsmPacketByEquipmentId.get(normalizeEquipmentRef(equipment?.id))?.item || null
     : latestByTime(
-      asArray(packets).filter(packet => packetMatchesEquipment(packet, equipment)),
-      ['deviceTime', 'receivedAt', 'createdAt'],
+      asArray(packets).filter(packet => (
+        lower(packet?.direction) !== 'outbound'
+        && normalizeEquipmentRef(packet?.equipmentId) === normalizeEquipmentRef(equipment?.id)
+      )),
+      ['receivedAt', 'createdAt'],
     );
   return {
-    lastSeenMs: Math.max(direct, parseTime(latestPacket?.deviceTime || latestPacket?.receivedAt || latestPacket?.createdAt)),
+    lastSeenMs: Math.max(direct, parseTime(latestPacket?.receivedAt || latestPacket?.createdAt)),
     latestPacket,
   };
 }
@@ -506,7 +488,6 @@ function pickStatus(candidates) {
 }
 
 function calculateEquipmentReadiness(equipment, context = {}) {
-  const equipmentList = asArray(context.equipment);
   const indexes = readinessIndexes(context);
   const equipmentId = normalizeEquipmentRef(equipment?.id);
   const now = context.now instanceof Date ? context.now : new Date();
@@ -516,11 +497,7 @@ function calculateEquipmentReadiness(equipment, context = {}) {
     equipment: `/equipment/${encodeURIComponent(equipment?.id || '')}`,
   };
 
-  let relatedRentals = asArray(indexes.rentalsByEquipmentId.get(equipmentId));
-  if (relatedRentals.length === 0) {
-    relatedRentals = asArray(indexes.unmatchedRentals)
-      .filter(rental => rentalMatchesEquipment(rental, equipment, equipmentList));
-  }
+  const relatedRentals = asArray(indexes.rentalsByEquipmentId.get(equipmentId));
   const activeRental = relatedRentals.find(isActiveRental);
   if (activeRental) {
     addCandidate(candidates, 'rented', `Активная аренда ${activeRental.id || ''}`.trim(), { rental: activeRental.id }, { blockedSince: dateKey(activeRental.startDate) });
@@ -533,41 +510,39 @@ function calculateEquipmentReadiness(equipment, context = {}) {
 
   let openServiceTicket = asArray(indexes.serviceByEquipmentId.get(equipmentId))
     .find(ticket => isOpenServiceTicket(ticket));
-  if (!openServiceTicket) {
-    openServiceTicket = asArray(indexes.unmatchedServiceTickets)
-      .find(ticket => isOpenServiceTicket(ticket) && equipmentMatchesServiceTicket(ticket, equipment, equipmentList));
-  }
   if (openServiceTicket) {
     addCandidate(candidates, 'in_service', `Открыта сервисная заявка ${openServiceTicket.id || ''}`.trim(), { serviceTicket: openServiceTicket.id }, { blockedSince: dateKey(openServiceTicket.createdAt || openServiceTicket.startDate || openServiceTicket.date) });
   }
 
   let activeDelivery = asArray(indexes.deliveriesByEquipmentId.get(equipmentId))
     .find(delivery => isActiveDelivery(delivery));
-  if (!activeDelivery) {
-    activeDelivery = asArray(indexes.unmatchedDeliveries)
-      .find(delivery => isActiveDelivery(delivery) && deliveryMatchesEquipment(delivery, equipment, equipmentList));
-  }
   if (activeDelivery) {
     addCandidate(candidates, 'delivery_blocked', `Активная доставка ${activeDelivery.id || ''}`.trim(), { delivery: activeDelivery.id }, { blockedSince: dateKey(activeDelivery.scheduledDate || activeDelivery.plannedDate || activeDelivery.createdAt) });
   }
 
   let blockingDocument = asArray(indexes.documentsByEquipmentId.get(equipmentId))
     .find(document => DOCUMENT_BLOCKER_STATUSES.has(lower(document.status || document.documentStatus)));
-  if (!blockingDocument) {
-    blockingDocument = asArray(indexes.unmatchedDocuments)
-      .find(document => documentMatchesEquipment(document, equipment) && DOCUMENT_BLOCKER_STATUSES.has(lower(document.status || document.documentStatus)));
-  }
   if (blockingDocument) {
     addCandidate(candidates, 'document_blocked', `Проблемный документ ${blockingDocument.documentNumber || blockingDocument.number || blockingDocument.id || ''}`.trim(), { document: blockingDocument.id }, { blockedSince: dateKey(blockingDocument.createdAt || blockingDocument.date || blockingDocument.documentDate) });
   }
 
-  const hasGsmLink = Boolean(equipment?.gsmImei || equipment?.gsmDeviceId || equipment?.gsmTrackerId);
+  const hasGsmLink = indexes.trustedGsmEquipmentIds.has(equipmentId);
   if (hasGsmLink) {
+    const currentGsmDevice = indexes.latestGsmDeviceByEquipmentId.get(equipmentId) || null;
     const { lastSeenMs, latestPacket } = getEquipmentGsmLastSeen(equipment, indexes);
     const staleMs = Number(context.gsmStaleMs || 72 * 60 * 60 * 1000);
-    if (!lastSeenMs) {
+    const ageMs = lastSeenMs ? nowMs - lastSeenMs : null;
+    if (
+      currentGsmDevice
+      && requiresGsmTcpIngressCredential(currentGsmDevice.ingressMode || currentGsmDevice.protocol)
+      && currentGsmDevice.ingressCredentialConfigured !== true
+    ) {
+      addCandidate(candidates, 'gsm_attention', 'Для публичного TCP-трекера не настроен индивидуальный пароль', {}, { blockedSince: dateKey(currentGsmDevice?.updatedAt || currentGsmDevice?.createdAt) });
+    } else if (!lastSeenMs) {
       addCandidate(candidates, 'gsm_attention', 'GSM-трекер привязан, но пакетов/last seen нет', {}, { blockedSince: dateKey(equipment?.gsmCreatedAt || equipment?.updatedAt) });
-    } else if (nowMs - lastSeenMs > staleMs) {
+    } else if (ageMs < 0) {
+      addCandidate(candidates, 'gsm_attention', 'GSM last seen имеет недопустимую будущую дату', {}, { blockedSince: dateKey(equipment?.updatedAt) });
+    } else if (ageMs > staleMs) {
       addCandidate(candidates, 'gsm_attention', 'GSM-трекер давно не выходил на связь', {}, { blockedSince: dateKey(lastSeenMs) });
     } else if (lower(latestPacket?.parseStatus) === 'failed') {
       addCandidate(candidates, 'gsm_attention', 'Последний GSM-пакет разобран с ошибкой', {}, { blockedSince: dateKey(latestPacket?.receivedAt || latestPacket?.createdAt) });
@@ -577,8 +552,7 @@ function calculateEquipmentReadiness(equipment, context = {}) {
   if (isEquipmentAvailableStatus(equipment)) {
     let returnLikePhotos = asArray(indexes.receivingPhotosByEquipmentId.get(equipmentId));
     if (returnLikePhotos.length === 0) {
-      returnLikePhotos = asArray(indexes.unmatchedReceivingPhotos)
-        .filter(photo => shippingPhotoMatchesEquipment(photo, equipment, equipmentList) && lower(photo.type) === 'receiving');
+      returnLikePhotos = [];
     }
     const latestClosedRental = latestByTime(
       relatedRentals.filter(rental => CLOSED_RENTAL_STATUSES.has(lower(rental?.status)) || rental?.actualReturnDate),

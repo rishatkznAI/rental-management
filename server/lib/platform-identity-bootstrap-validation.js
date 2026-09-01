@@ -1,5 +1,8 @@
 const crypto = require('crypto');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+const {
   CANONICAL_BRANCHES_TABLE,
   CANONICAL_COMPANIES_TABLE,
 } = require('./canonical-receivables-schema');
@@ -510,11 +513,11 @@ function sha256(value) {
 }
 
 function readJsonCollection(db, name) {
-  const exists = db.prepare(`
+  const exists = prepareSqliteReadonlyStatement(db, `
     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_data'
   `).get();
   if (!exists) return [];
-  const row = db.prepare('SELECT json FROM app_data WHERE name = ?').get(name);
+  const row = prepareSqliteReadonlyStatement(db, 'SELECT json FROM app_data WHERE name = ?').get(name);
   if (!row) return [];
   try {
     const parsed = JSON.parse(row.json);
@@ -530,63 +533,21 @@ function normalizedSecurityFlag(value) {
   return null;
 }
 
-function readUsersDirectorySnapshot(db) {
-  const exists = db.prepare(`
-    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_data'
-  `).get();
-  if (!exists) {
-    return Object.freeze({
-      ok: false,
-      errorCode: 'USERS_DIRECTORY_TABLE_MISSING',
-      users: Object.freeze([]),
-      records: Object.freeze([]),
-      duplicateUserIds: Object.freeze([]),
-      missingUserIdIndexes: Object.freeze([]),
-      eligibleActiveUserIds: Object.freeze([]),
-      fingerprint: sha256(stableJson({ errorCode: 'USERS_DIRECTORY_TABLE_MISSING' })),
-    });
-  }
-  const row = db.prepare('SELECT json FROM app_data WHERE name = ?').get('users');
-  if (!row) {
-    return Object.freeze({
-      ok: false,
-      errorCode: 'USERS_DIRECTORY_ROW_MISSING',
-      users: Object.freeze([]),
-      records: Object.freeze([]),
-      duplicateUserIds: Object.freeze([]),
-      missingUserIdIndexes: Object.freeze([]),
-      eligibleActiveUserIds: Object.freeze([]),
-      fingerprint: sha256(stableJson({ errorCode: 'USERS_DIRECTORY_ROW_MISSING' })),
-    });
-  }
-  let users;
-  try {
-    users = JSON.parse(row.json);
-  } catch {
-    return Object.freeze({
-      ok: false,
-      errorCode: 'USERS_DIRECTORY_JSON_INVALID',
-      users: Object.freeze([]),
-      records: Object.freeze([]),
-      duplicateUserIds: Object.freeze([]),
-      missingUserIdIndexes: Object.freeze([]),
-      eligibleActiveUserIds: Object.freeze([]),
-      fingerprint: sha256(stableJson({ errorCode: 'USERS_DIRECTORY_JSON_INVALID' })),
-    });
-  }
-  if (!Array.isArray(users)) {
-    return Object.freeze({
-      ok: false,
-      errorCode: 'USERS_DIRECTORY_SHAPE_INVALID',
-      users: Object.freeze([]),
-      records: Object.freeze([]),
-      duplicateUserIds: Object.freeze([]),
-      missingUserIdIndexes: Object.freeze([]),
-      eligibleActiveUserIds: Object.freeze([]),
-      fingerprint: sha256(stableJson({ errorCode: 'USERS_DIRECTORY_SHAPE_INVALID' })),
-    });
-  }
+function invalidUsersDirectorySnapshot(errorCode) {
+  return Object.freeze({
+    ok: false,
+    errorCode,
+    users: Object.freeze([]),
+    records: Object.freeze([]),
+    duplicateUserIds: Object.freeze([]),
+    missingUserIdIndexes: Object.freeze([]),
+    eligibleActiveUserIds: Object.freeze([]),
+    fingerprint: sha256(stableJson({ errorCode })),
+  });
+}
 
+function buildUsersDirectorySnapshot(users) {
+  if (!Array.isArray(users)) return invalidUsersDirectorySnapshot('USERS_DIRECTORY_SHAPE_INVALID');
   const idCounts = new Map();
   const missingUserIdIndexes = [];
   const records = users.map((user, index) => {
@@ -631,26 +592,58 @@ function readUsersDirectorySnapshot(db) {
   });
 }
 
+function readUsersDirectorySnapshot(db) {
+  const exists = prepareSqliteReadonlyStatement(db, `
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_data'
+  `).get();
+  if (!exists) return invalidUsersDirectorySnapshot('USERS_DIRECTORY_TABLE_MISSING');
+  const row = prepareSqliteReadonlyStatement(db, 'SELECT json FROM app_data WHERE name = ?').get('users');
+  if (!row) return invalidUsersDirectorySnapshot('USERS_DIRECTORY_ROW_MISSING');
+  let users;
+  try {
+    users = JSON.parse(row.json);
+  } catch {
+    return invalidUsersDirectorySnapshot('USERS_DIRECTORY_JSON_INVALID');
+  }
+  return buildUsersDirectorySnapshot(users);
+}
+
+function resolveUsersDirectorySnapshot(db, options = {}) {
+  if (options.usersDirectorySnapshot !== undefined) {
+    const snapshot = options.usersDirectorySnapshot;
+    if (
+      !snapshot
+      || typeof snapshot !== 'object'
+      || !Array.isArray(snapshot.users)
+      || typeof snapshot.fingerprint !== 'string'
+    ) {
+      return invalidUsersDirectorySnapshot('USERS_DIRECTORY_OVERRIDE_INVALID');
+    }
+    return snapshot;
+  }
+  return readUsersDirectorySnapshot(db);
+}
+
 function getUsersDirectoryFingerprint(db) {
   return readUsersDirectorySnapshot(db).fingerprint;
 }
 
 function tableCount(db, table) {
-  const exists = db.prepare(`
+  const exists = prepareSqliteReadonlyStatement(db, `
     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?
   `).get(table);
   if (!exists) return null;
-  return Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
+  return Number(prepareSqliteReadonlyStatement(db, `SELECT COUNT(*) AS count FROM ${table}`).get().count);
 }
 
 function listMigrations(db) {
-  const exists = db.prepare(`
+  const exists = prepareSqliteReadonlyStatement(db, `
     SELECT 1
     FROM sqlite_master
     WHERE type = 'table' AND name = 'sql_shadow_schema_migrations'
   `).get();
   if (!exists) return [];
-  return db.prepare(`
+  return prepareSqliteReadonlyStatement(db, `
     SELECT name, version, applied_at
     FROM sql_shadow_schema_migrations
     ORDER BY name
@@ -658,7 +651,7 @@ function listMigrations(db) {
 }
 
 function getSchemaFingerprint(db) {
-  const objects = db.prepare(`
+  const objects = prepareSqliteReadonlyStatement(db, `
     SELECT type, name, tbl_name AS tableName, COALESCE(sql, '') AS sql
     FROM sqlite_master
     WHERE name NOT LIKE 'sqlite_%'
@@ -846,10 +839,10 @@ function authorityPayload(config = {}) {
   };
 }
 
-function calculateBootstrapChecksum(db, config) {
+function calculateBootstrapChecksum(db, config, options = {}) {
   const authority = authorityPayload(config);
   assertNoSecrets(authority);
-  const usersDirectory = readUsersDirectorySnapshot(db);
+  const usersDirectory = resolveUsersDirectorySnapshot(db, options);
   const mappedUserIds = [...new Set(
     (Array.isArray(authority.memberships) ? authority.memberships : [])
       .map(membership => String(membership?.principalId || '').trim())
@@ -875,7 +868,7 @@ function calculateBootstrapChecksum(db, config) {
   }));
 }
 
-function validateBootstrapConfig(db, config = {}) {
+function validateBootstrapConfig(db, config = {}, options = {}) {
   const blockers = [];
   const warnings = [];
   let schemaFingerprint = null;
@@ -971,7 +964,7 @@ function validateBootstrapConfig(db, config = {}) {
     blockers.push({ code: 'ROLE_TEMPLATE_REQUIRED', path: 'roleTemplates' });
   }
 
-  const usersDirectory = readUsersDirectorySnapshot(db);
+  const usersDirectory = resolveUsersDirectorySnapshot(db, options);
   if (!usersDirectory.ok) {
     blockers.push({ code: usersDirectory.errorCode, path: 'app_data.users' });
   }
@@ -990,6 +983,7 @@ function validateBootstrapConfig(db, config = {}) {
   }
 
   const membershipPrincipalIds = new Set();
+  const activeMembershipPrincipalIds = new Set();
   const membershipIds = new Set();
   const memberships = [];
   for (const [index, membership] of (Array.isArray(config.memberships) ? config.memberships : []).entries()) {
@@ -1065,6 +1059,7 @@ function validateBootstrapConfig(db, config = {}) {
       }
       membershipIds.add(id);
       membershipPrincipalIds.add(principalId);
+      if (status === 'active') activeMembershipPrincipalIds.add(principalId);
       if (companyWideBranchAuthority && explicitBranches.length > 0) {
         blockers.push({ code: 'BRANCH_MODE_CONFLICT', path: `memberships[${index}]` });
       }
@@ -1133,7 +1128,7 @@ function validateBootstrapConfig(db, config = {}) {
     if (membershipPrincipalIds.has(userId)) blockers.push({ code: 'USER_MAPPING_CONFLICT', path: 'intentionallyUnmappedUserIds' });
   }
   for (const userId of usersDirectory.eligibleActiveUserIds) {
-    if (!membershipPrincipalIds.has(userId) && !unmapped.has(userId)) {
+    if (!activeMembershipPrincipalIds.has(userId) && !unmapped.has(userId)) {
       blockers.push({ code: 'ACTIVE_USER_UNRESOLVED', path: `app_data.users.${userId}` });
     }
   }
@@ -1162,7 +1157,7 @@ function validateBootstrapConfig(db, config = {}) {
 
   let configChecksum = null;
   try {
-    configChecksum = calculateBootstrapChecksum(db, config);
+    configChecksum = calculateBootstrapChecksum(db, config, { usersDirectorySnapshot: usersDirectory });
   } catch (error) {
     blockers.push({ code: error.code || 'CHECKSUM_FAILED' });
   }
@@ -1260,8 +1255,8 @@ function approvedConfigFromValidation(validation, approval = {}) {
   };
 }
 
-function planPlatformIdentityBootstrap(db, config) {
-  const validation = validateBootstrapConfig(db, config);
+function planPlatformIdentityBootstrap(db, config, options = {}) {
+  const validation = validateBootstrapConfig(db, config, options);
   const normalized = validation.normalized;
   const changes = normalized.company ? {
     companies: 1,
@@ -1330,6 +1325,7 @@ module.exports = {
   AUTHORITY_SNAPSHOT_VERSION,
   buildAuthoritySnapshotFromRows,
   buildExpectedAuthoritySnapshot,
+  buildUsersDirectorySnapshot,
   calculateBootstrapChecksum,
   calculateAuthorityFingerprint,
   deepFreeze,

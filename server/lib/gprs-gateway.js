@@ -1,16 +1,71 @@
 const crypto = require('crypto');
 const net = require('net');
 const { bufferToReadableText, parsePacket: fallbackParsePacket } = require('./gsm/parsers');
+const {
+  applyEquipmentGsmConfigurationProjection,
+  assertTrustedGsmConnectionBinding,
+  assertTrustedGsmDeviceBindingCurrent,
+  captureTrustedGsmDeviceBinding,
+  ensureGsmDeviceBindingLifecycle,
+  gsmCurrentDeviceBindingIssue,
+  gsmDeviceBindingAtRevision,
+  gsmDeviceBindingLifecycleIssue,
+  gsmDeviceBindingRevision,
+  gsmDeviceIdentityValues,
+  gsmDeviceReservedIdentityValues,
+  isActiveGsmDeviceRecord,
+  resolveTrustedStoredGsmBinding,
+} = require('./gsm/trusted-device-scope');
+const {
+  redactGsmSecretText,
+  sanitizeGsmPacketForPersistence,
+  sanitizeGsmRecordForRead,
+  sanitizeTrustedGsmRecordForRead,
+} = require('./gsm/secret-redaction');
+const {
+  GSM_INGRESS_MODE_HTTP_TOKEN,
+  GSM_INGRESS_MODE_TCP_DEVICE_CREDENTIAL,
+  assertGsmDeviceIngressMode,
+  assertGsmIngressCredential,
+  assertGsmIngressSessionCredentialCurrent,
+  fingerprintGsmIngressCredentialHash,
+  gsmDeviceIngressMode,
+} = require('./gsm/device-credential');
+const {
+  boundedPositiveInteger,
+  createTcpIngressAdmissionController,
+} = require('./gsm/tcp-ingress-admission');
 
 const DEFAULT_GPRS_PORT = Number(process.env.GPRS_PORT || 5023);
 const DEFAULT_GPRS_HOST = process.env.GPRS_HOST || '0.0.0.0';
 const DEFAULT_GPRS_ENABLED = !['0', 'false', 'off', 'disabled'].includes(String(process.env.GPRS_ENABLED ?? process.env.GSM_ENABLED ?? '1').toLowerCase());
-const DEFAULT_MAX_PACKET_BYTES = Number(process.env.GPRS_MAX_PACKET_BYTES || 16 * 1024);
-const DEFAULT_MAX_PACKETS_PER_MINUTE = Number(process.env.GPRS_MAX_PACKETS_PER_MINUTE || 120);
-const DEFAULT_CONNECTION_TIMEOUT_MS = Number(process.env.GPRS_CONNECTION_TIMEOUT_MS || 120_000);
-const DEFAULT_DEDUPE_WINDOW_MS = Number(process.env.GSM_DEDUPE_WINDOW_MS || 5 * 60 * 1000);
+const DEFAULT_MAX_PACKET_BYTES = boundedPositiveInteger(
+  process.env.GPRS_MAX_PACKET_BYTES,
+  16 * 1024,
+  { max: 1024 * 1024 },
+);
+const DEFAULT_MAX_PACKETS_PER_MINUTE = boundedPositiveInteger(
+  process.env.GPRS_MAX_PACKETS_PER_MINUTE,
+  120,
+  { max: 100_000 },
+);
+const DEFAULT_CONNECTION_TIMEOUT_MS = boundedPositiveInteger(
+  process.env.GPRS_CONNECTION_TIMEOUT_MS,
+  120_000,
+  { min: 100, max: 60 * 60_000 },
+);
+const DEFAULT_DEDUPE_WINDOW_MS = boundedPositiveInteger(
+  process.env.GSM_DEDUPE_WINDOW_MS,
+  5 * 60 * 1000,
+  { max: 24 * 60 * 60_000 },
+);
 const MAX_PACKET_LOG = 1500;
 const MAX_COMMAND_LOG = 600;
+function resolveGsmMaxCommandBytes(value = process.env.GSM_MAX_COMMAND_BYTES) {
+  return boundedPositiveInteger(value, 16 * 1024, { max: 16 * 1024 });
+}
+
+const MAX_COMMAND_TEXT_CHARS = 4096;
 const MAX_HISTORY_POINTS = 240;
 const ONLINE_WINDOW_MS = 15 * 60 * 1000;
 
@@ -30,18 +85,10 @@ function toText(value) {
   return String(value || '').trim();
 }
 
+// Transport parsers may include framing whitespace, but provisioned device
+// identifiers remain otherwise byte-for-byte significant.
 function normalizeIdentifier(value) {
-  return toText(value).replace(/\s+/g, '');
-}
-
-function identityKey(value) {
-  return normalizeIdentifier(value).toLowerCase();
-}
-
-function identifiersEqual(left, right) {
-  const leftKey = identityKey(left);
-  const rightKey = identityKey(right);
-  return Boolean(leftKey && rightKey && leftKey === rightKey);
+  return toText(value);
 }
 
 function toNumberOrNull(value) {
@@ -51,11 +98,65 @@ function toNumberOrNull(value) {
 }
 
 function isFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return false;
   return Number.isFinite(Number(value));
+}
+
+function hasUsableGsmCoordinates(latValue, lngValue) {
+  if (!isFiniteNumber(latValue) || !isFiniteNumber(lngValue)) return false;
+  const lat = Number(latValue);
+  const lng = Number(lngValue);
+  return Math.abs(lat) <= 90
+    && Math.abs(lng) <= 180
+    && !(lat === 0 && lng === 0);
+}
+
+function hasUsableGsmPacketLocation(packet = {}) {
+  return Boolean(packet)
+    && packet.parseStatus === 'parsed'
+    && hasUsableGsmCoordinates(packet.lat, packet.lng);
+}
+
+function hasNonFutureGsmServerTime(packet = {}, nowMs = Date.now()) {
+  const timestamp = Date.parse(packet?.receivedAt || packet?.createdAt || '');
+  return Number.isFinite(timestamp) && nowMs - timestamp >= 0;
 }
 
 function normalizeRemoteAddress(value) {
   return String(value || '').replace(/^::ffff:/, '') || null;
+}
+
+const GPRS_INGRESS_SECRET_KEYS = new Set([
+  'ingresssecret',
+  'devicesecret',
+  'secret',
+  'password',
+  'passwd',
+  'token',
+]);
+
+function extractGprsIngressSecret(buffer, parsed = {}) {
+  const visit = (value, depth = 0) => {
+    if (!value || typeof value !== 'object' || depth > 3) return '';
+    for (const [key, item] of Object.entries(value)) {
+      const normalized = String(key || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+      if (GPRS_INGRESS_SECRET_KEYS.has(normalized) && ['string', 'number'].includes(typeof item)) {
+        return String(item);
+      }
+    }
+    for (const item of Object.values(value)) {
+      const nested = visit(item, depth + 1);
+      if (nested) return nested;
+    }
+    return '';
+  };
+  const structured = visit(parsed?.parsed);
+  if (structured) return structured;
+  const rawText = bufferToReadableText(buffer) || '';
+  const match = rawText.match(
+    /(?:^|[\s,{;?&])(?:ingressSecret|deviceSecret|secret|password|passwd|token)\s*[:=]\s*["']?([^"'\s,;}&#]+)/i,
+  );
+  return match ? match[1] : '';
 }
 
 function normalizeParseResult(result = {}) {
@@ -103,13 +204,65 @@ function commandStatusSummary(commands) {
   }, { total: 0, queued: 0, sent: 0, acknowledged: 0, failed: 0 });
 }
 
+function commandInputError(code, message, status = 400) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  error.statusCode = status;
+  return error;
+}
+
+function assertGsmCommandInput(command, payload, maxCommandBytes = resolveGsmMaxCommandBytes()) {
+  const safeCommand = toText(command);
+  if (!safeCommand) throw commandInputError('GSM_COMMAND_REQUIRED', 'Команда не заполнена');
+  if (safeCommand.length > MAX_COMMAND_TEXT_CHARS || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(safeCommand)) {
+    throw commandInputError('GSM_COMMAND_INVALID', 'Команда содержит недопустимые символы или слишком длинная');
+  }
+  let serialized;
+  try {
+    serialized = JSON.stringify({ command: safeCommand, payload });
+  } catch {
+    throw commandInputError('GSM_COMMAND_PAYLOAD_INVALID', 'Payload команды должен быть JSON-совместимым');
+  }
+  if (Buffer.byteLength(serialized || '') > maxCommandBytes) {
+    throw commandInputError(
+      'GSM_COMMAND_PAYLOAD_TOO_LARGE',
+      `Payload команды превышает ${maxCommandBytes} байт`,
+      413,
+    );
+  }
+  return safeCommand;
+}
+
+function assertGsmCommandTransportPayload(payload, encoding, maxCommandBytes = resolveGsmMaxCommandBytes()) {
+  const raw = String(payload ?? '').trim();
+  if (!raw) throw commandInputError('GSM_COMMAND_REQUIRED', 'Команда не заполнена');
+  if (encoding === 'hex' && (!/^[0-9a-f]+$/i.test(raw) || raw.length % 2 !== 0)) {
+    throw commandInputError(
+      'GSM_COMMAND_HEX_INVALID',
+      'HEX payload должен содержать непустое чётное количество шестнадцатеричных символов',
+    );
+  }
+  const byteLength = encoding === 'hex'
+    ? raw.length / 2
+    : Buffer.byteLength(raw);
+  if (byteLength > maxCommandBytes) {
+    throw commandInputError(
+      'GSM_COMMAND_PAYLOAD_TOO_LARGE',
+      `Payload команды превышает ${maxCommandBytes} байт`,
+      413,
+    );
+  }
+  return raw;
+}
+
 function getPacketTime(packet) {
   return packet?.receivedAt || packet?.createdAt || null;
 }
 
-function isPacketRecent(packet, sinceMs) {
+function isPacketRecent(packet, sinceMs, nowMs = Date.now()) {
   const time = Date.parse(getPacketTime(packet) || '');
-  return Number.isFinite(time) && time >= sinceMs;
+  return Number.isFinite(time) && time >= sinceMs && time <= nowMs;
 }
 
 function protocolBreakdown(packets) {
@@ -171,6 +324,11 @@ function getPacketSummary(packet) {
 }
 
 function packetFingerprint(packet = {}) {
+  const binding = [
+    toText(packet.gsmDeviceRecordId) || 'no-device-record',
+    Number.isInteger(Number(packet.gsmBindingRevision)) ? Number(packet.gsmBindingRevision) : 'no-binding-revision',
+    toText(packet.equipmentId) || 'no-equipment',
+  ].join('|');
   const identity = toText(packet.imei) || toText(packet.deviceId) || 'unknown';
   const deviceTime = toText(packet.deviceTime) || 'no-device-time';
   const lat = toNumberOrNull(packet.lat);
@@ -178,19 +336,23 @@ function packetFingerprint(packet = {}) {
   if (deviceTime !== 'no-device-time' && lat !== null && lng !== null) {
     return crypto
       .createHash('sha256')
-      .update(`${identity}|${deviceTime}|${lat.toFixed(6)}|${lng.toFixed(6)}`)
+      .update(`${binding}|${identity}|${deviceTime}|${lat.toFixed(6)}|${lng.toFixed(6)}`)
       .digest('hex');
   }
   const rawHex = toText(packet.rawHex || packet.payloadHex);
   return crypto
     .createHash('sha256')
-    .update(`${identity}|${deviceTime}|${rawHex}`)
+    .update(`${binding}|${identity}|${deviceTime}|${rawHex}`)
     .digest('hex');
 }
 
 function createGprsGateway({
   readData,
   writeData,
+  writeDataBatch,
+  resolveTrustedDeviceScope,
+  withActorScope,
+  getCurrentScope,
   logger = console,
   host = DEFAULT_GPRS_HOST,
   port = DEFAULT_GPRS_PORT,
@@ -200,57 +362,146 @@ function createGprsGateway({
   maxPacketsPerMinute = DEFAULT_MAX_PACKETS_PER_MINUTE,
   connectionTimeoutMs = DEFAULT_CONNECTION_TIMEOUT_MS,
   dedupeWindowMs = DEFAULT_DEDUPE_WINDOW_MS,
+  tcpAdmissionController = null,
+  maxConnections,
+  maxConnectionsPerIp,
+  maxAuthAttemptsPerMinute,
+  maxAuthAttemptsPerIpPerMinute,
+  preAuthTimeoutMs,
 } = {}) {
-  if (typeof readData !== 'function' || typeof writeData !== 'function') {
-    throw new Error('GPRS gateway requires readData and writeData functions');
+  if (typeof readData !== 'function' || typeof writeData !== 'function' || typeof writeDataBatch !== 'function') {
+    throw new Error('GPRS gateway requires readData, writeData, and transactional writeDataBatch functions');
+  }
+  if (typeof resolveTrustedDeviceScope !== 'function' || typeof withActorScope !== 'function') {
+    throw new Error('GPRS gateway requires trusted device scope resolution and scoped execution');
+  }
+  if (typeof getCurrentScope !== 'function') {
+    throw new Error('GPRS gateway requires current tenant scope resolution');
   }
 
+  const packetByteLimit = boundedPositiveInteger(
+    maxPacketBytes,
+    DEFAULT_MAX_PACKET_BYTES,
+    { max: 1024 * 1024 },
+  );
+  const connectionPacketRateLimit = boundedPositiveInteger(
+    maxPacketsPerMinute,
+    DEFAULT_MAX_PACKETS_PER_MINUTE,
+    { max: 100_000 },
+  );
+  const connectionIdleTimeoutMs = boundedPositiveInteger(
+    connectionTimeoutMs,
+    DEFAULT_CONNECTION_TIMEOUT_MS,
+    { min: 100, max: 60 * 60_000 },
+  );
+  const packetDedupeWindowMs = boundedPositiveInteger(
+    dedupeWindowMs,
+    DEFAULT_DEDUPE_WINDOW_MS,
+    { max: 24 * 60 * 60_000 },
+  );
+  const commandByteLimit = resolveGsmMaxCommandBytes();
+
   const connections = new Map();
+  const admissionController = tcpAdmissionController || createTcpIngressAdmissionController({
+    maxConnections,
+    maxConnectionsPerIp,
+    maxAuthAttemptsPerMinute,
+    maxAuthAttemptsPerIpPerMinute,
+    preAuthTimeoutMs,
+  });
   const deviceToConnectionId = new Map();
+  const stoppingServers = new WeakSet();
   let tcpServer = null;
+  let startPromise = null;
+  let cancelPendingStart = null;
   let cleanupTimer = null;
   let gatewayStartedAt = null;
   let startError = '';
-  let packetsReceivedTotal = 0;
+  const packetsReceivedByScope = new Map();
 
-  function ensureStorage() {
-    if (!Array.isArray(readData('gsm_devices'))) writeData('gsm_devices', []);
-    if (!Array.isArray(readData('gsm_packets'))) writeData('gsm_packets', []);
-    if (!Array.isArray(readData('gsm_commands'))) writeData('gsm_commands', []);
+  function scopeKey(scope) {
+    const companyId = toText(scope?.companyId);
+    const tenantId = toText(scope?.tenantId);
+    return companyId && tenantId ? `${companyId}\u0000${tenantId}` : '';
+  }
+
+  function currentScope() {
+    const scope = getCurrentScope();
+    return scopeKey(scope) ? scope : null;
+  }
+
+  function scopeMatches(record, scope) {
+    return Boolean(scope)
+      && toText(record?.companyId) === toText(scope.companyId)
+      && toText(record?.tenantId) === toText(scope.tenantId);
+  }
+
+  function visibleConnections() {
+    const scope = currentScope();
+    if (!scope) return [];
+    return [...connections.values()].filter((connection) => {
+      if (!scopeMatches(connection, scope)) return false;
+      try {
+        assertTrustedGsmDeviceBindingCurrent({
+          readData: readScopedRecords,
+          binding: {
+            deviceRecordId: connection.gsmDeviceRecordId,
+            equipmentId: connection.equipmentId,
+            companyId: connection.companyId,
+            tenantId: connection.tenantId,
+            bindingRevision: connection.gsmBindingRevision,
+          },
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  function readScopedRecords(name) {
+    const scope = currentScope();
+    if (!scope) return [];
+    return asArray(readData(name)).filter(record => scopeMatches(record, scope));
   }
 
   function trimCollection(name, maxItems) {
-    const list = asArray(readData(name));
-    if (list.length <= maxItems) return list;
-    const nextList = list.slice(0, maxItems);
-    writeData(name, nextList);
-    return nextList;
+    const list = readScopedRecords(name);
+    return list.slice(0, maxItems);
   }
 
-  function persistPacket(packet) {
-    ensureStorage();
-    const list = asArray(readData('gsm_packets'));
+  function preparePacketPersistence(packet) {
+    const list = readScopedRecords('gsm_packets');
     const fingerprint = packetFingerprint(packet);
     const receivedMs = Date.parse(packet.receivedAt || packet.createdAt || '') || Date.now();
     const duplicate = list.find((item) => {
       const itemTime = Date.parse(item.receivedAt || item.createdAt || '');
-      if (!Number.isFinite(itemTime) || Math.abs(receivedMs - itemTime) > dedupeWindowMs) return false;
+      if (!Number.isFinite(itemTime) || Math.abs(receivedMs - itemTime) > packetDedupeWindowMs) return false;
       return (item.fingerprint || packetFingerprint(item)) === fingerprint;
     });
     if (duplicate) {
-      if (packet.direction === 'inbound') packetsReceivedTotal += 1;
-      return { ...duplicate, duplicate: true, duplicateOf: duplicate.id };
+      if (packet.direction === 'inbound') {
+        const key = scopeKey(packet);
+        packetsReceivedByScope.set(key, (packetsReceivedByScope.get(key) || 0) + 1);
+      }
+      return {
+        storedPacket: { ...duplicate, duplicate: true, duplicateOf: duplicate.id },
+        nextPackets: null,
+      };
     }
     packet.fingerprint = fingerprint;
     list.unshift(packet);
-    writeData('gsm_packets', list.slice(0, MAX_PACKET_LOG));
-    if (packet.direction === 'inbound') packetsReceivedTotal += 1;
-    return packet;
+    return { storedPacket: packet, nextPackets: list.slice(0, MAX_PACKET_LOG) };
+  }
+
+  function recordPersistedInboundPacket(packet) {
+    if (packet.direction !== 'inbound') return;
+    const key = scopeKey(packet);
+    packetsReceivedByScope.set(key, (packetsReceivedByScope.get(key) || 0) + 1);
   }
 
   function persistCommand(command) {
-    ensureStorage();
-    const list = asArray(readData('gsm_commands'));
+    const list = readScopedRecords('gsm_commands');
     const index = list.findIndex(item => item.id === command.id);
     if (index >= 0) {
       list[index] = command;
@@ -260,122 +511,45 @@ function createGprsGateway({
     writeData('gsm_commands', list.slice(0, MAX_COMMAND_LOG));
   }
 
-  function findUniqueEquipmentMatch(value, fields) {
-    const key = normalizeIdentifier(value);
-    if (!key) return { equipment: null, warning: null, strategy: null };
-    const matches = asArray(readData('equipment')).filter(item => fields.some(field => identifiersEqual(key, item[field])));
-    if (matches.length === 1) return { equipment: matches[0], warning: null, strategy: fields.join('|') };
-    if (matches.length > 1) {
-      return {
-        equipment: null,
-        warning: `multiple_equipment_matches:${fields.join('|')}:${key}`,
-        strategy: fields.join('|'),
-      };
-    }
-    return { equipment: null, warning: null, strategy: fields.join('|') };
-  }
-
-  function resolveEquipmentMatchByIdentity(identity = {}) {
-    const deviceId = normalizeIdentifier(identity.deviceId);
-    const imei = normalizeIdentifier(identity.imei);
-    if (!imei && !deviceId) return { equipment: null, warning: null, strategy: null };
-
-    const matchSteps = [
-      { value: deviceId, fields: ['gsmDeviceId'] },
-      { value: imei, fields: ['gsmImei'] },
-      { value: deviceId, fields: ['gsmTrackerId', 'trackerId'] },
-      { value: imei, fields: ['imei'] },
-    ];
-
-    for (const step of matchSteps) {
-      const result = findUniqueEquipmentMatch(step.value, step.fields);
-      if (result.equipment || result.warning) return result;
-    }
-
-    return { equipment: null, warning: null, strategy: null };
-  }
-
-  function resolveEquipmentByIdentity(identity = {}) {
-    return resolveEquipmentMatchByIdentity(identity).equipment;
-  }
-
-  function enrichPacketEquipment(packet = {}) {
-    if (packet.equipmentId) return packet;
-    const match = resolveEquipmentMatchByIdentity(packet);
-    if (!match.equipment && !match.warning) return packet;
-    return {
-      ...packet,
-      equipmentId: match.equipment?.id || null,
-      companyId: match.equipment?.companyId || packet.companyId || null,
-      tenantId: match.equipment?.tenantId || packet.tenantId || null,
-      ...equipmentGsmFields(match.equipment),
-      equipmentLabel: equipmentLabel(match.equipment) || packet.equipmentLabel || null,
-      equipmentMatchStrategy: match.strategy || packet.equipmentMatchStrategy || null,
-      equipmentMatchWarning: match.warning || packet.equipmentMatchWarning || null,
-    };
+  function trustedStoredGsmBinding(record = {}, { currentOnly = false } = {}) {
+    return resolveTrustedStoredGsmBinding(record, {
+      devices: readScopedRecords('gsm_devices'),
+      equipment: readScopedRecords('equipment'),
+      currentOnly,
+    });
   }
 
   function packetMatchesEquipmentFilter(packet = {}, equipmentId = '') {
     if (!equipmentId) return true;
-    return enrichPacketEquipment(packet).equipmentId === equipmentId;
+    const trusted = trustedStoredGsmBinding(packet);
+    return Boolean(trusted && toText(trusted.binding.equipmentId) === toText(equipmentId));
   }
 
-  function resolveEquipmentForPacket(parsed = {}, device = null) {
-    const directMatch = resolveEquipmentMatchByIdentity(parsed);
-    if (directMatch.equipment || directMatch.warning) {
-      return directMatch;
-    }
-    const equipment = resolveEquipmentByDevice(device);
-    return {
-      equipment,
-      warning: null,
-      strategy: equipment ? 'gsm_devices.equipmentId' : null,
-    };
+  function bindingIdentityValues(binding = {}) {
+    return [...new Set([
+      toText(binding.deviceId),
+      toText(binding.imei),
+      toText(binding.trackerId),
+      ...asArray(binding.identities).map(toText),
+    ].filter(Boolean))];
   }
 
-  function findDeviceByIdentity(identity = {}) {
-    const imei = normalizeIdentifier(identity.imei);
-    const deviceId = normalizeIdentifier(identity.deviceId);
-    if (!imei && !deviceId) return null;
-    return asArray(readData('gsm_devices')).find(item => Boolean(
-      (imei && identifiersEqual(item.imei, imei))
-      || (deviceId && identifiersEqual(item.imei, deviceId))
-      || (deviceId && identifiersEqual(item.id, deviceId))
-      || (deviceId && identifiersEqual(item.deviceId, deviceId)),
-    )) || null;
-  }
-
-  function resolveEquipmentByDevice(device) {
-    if (!device?.equipmentId) return null;
-    return asArray(readData('equipment')).find(item => item.id === device.equipmentId) || null;
-  }
-
-  function updateGsmDeviceFromPacket(device, parsed, rawText, receivedAt, equipment = null, matchWarning = null) {
-    const imei = normalizeIdentifier(parsed.imei || device?.imei);
-    const deviceId = normalizeIdentifier(parsed.deviceId || device?.deviceId || device?.id);
-    if (!imei && !deviceId) return;
-    const devices = asArray(readData('gsm_devices'));
-    const index = devices.findIndex(item => Boolean(
-      (imei && identifiersEqual(item.imei, imei))
-      || (deviceId && identifiersEqual(item.id, deviceId))
-      || (deviceId && identifiersEqual(item.deviceId, deviceId)),
-    ));
-    const current = index >= 0 ? devices[index] : {
-      id: `GSM-${imei || deviceId}`,
-      imei: imei || null,
-      deviceId: deviceId || null,
-      protocol: parsed.protocol || 'GPRS',
-      status: 'unknown',
-      createdAt: receivedAt,
-    };
+  function updateGsmDeviceFromPacket(device, parsed, rawText, receivedAt, equipment) {
+    const deviceRecordId = toText(device?.id);
+    if (!deviceRecordId) throw new Error('Provisioned GSM device record ID is required');
+    const devices = readScopedRecords('gsm_devices');
+    const index = devices.findIndex(item => toText(item?.id) === deviceRecordId);
+    if (index < 0) throw new Error('Provisioned GSM device is not visible in trusted tenant scope');
+    const current = ensureGsmDeviceBindingLifecycle(devices[index], {
+      at: receivedAt,
+      reason: 'telemetry_binding_materialized',
+    });
     const next = {
       ...current,
-      equipmentId: equipment?.id || current.equipmentId || null,
-      companyId: equipment?.companyId || current.companyId || null,
-      tenantId: equipment?.tenantId || current.tenantId || null,
+      equipmentId: equipment.id,
+      companyId: equipment.companyId,
+      tenantId: equipment.tenantId,
       equipmentLabel: equipmentLabel(equipment) || current.equipmentLabel || null,
-      imei: imei || current.imei || null,
-      deviceId: deviceId || current.deviceId || null,
       protocol: current.protocol || parsed.protocol || 'GPRS',
       status: 'online',
       lastPacketAt: receivedAt,
@@ -387,33 +561,28 @@ function createGprsGateway({
       lastSatellites: toNumberOrNull(parsed.satellites) ?? current.lastSatellites ?? null,
       lastVoltage: toNumberOrNull(parsed.voltage) ?? current.lastVoltage ?? null,
       lastRawPacket: rawText || current.lastRawPacket || null,
-      equipmentMatchWarning: matchWarning || current.equipmentMatchWarning || null,
-      unlinked: !(equipment?.id || current.equipmentId),
+      equipmentMatchWarning: null,
+      unlinked: false,
       updatedAt: receivedAt,
     };
-    if (index >= 0) devices[index] = next;
-    else devices.unshift(next);
-    writeData('gsm_devices', devices);
+    devices[index] = next;
+    return devices;
   }
 
-  function updateEquipmentFromPacket(equipmentId, parsed, receivedAt) {
-    if (!equipmentId) return;
-    const equipmentList = asArray(readData('equipment'));
+  function updateEquipmentFromPacket(equipmentId, parsed, receivedAt, device) {
+    if (!equipmentId) return null;
+    const equipmentList = readScopedRecords('equipment');
     const index = equipmentList.findIndex(item => item.id === equipmentId);
-    if (index === -1) return;
+    if (index === -1) throw new Error('Linked equipment is not visible in trusted tenant scope');
 
     const current = equipmentList[index];
-    const next = {
+    const next = applyEquipmentGsmConfigurationProjection({
       ...current,
       gsmLastSeenAt: receivedAt,
       gsmLastSignalAt: receivedAt,
       gsmStatus: 'online',
       gsmSignalStatus: 'online',
-    };
-
-    if (parsed.imei && !toText(next.gsmImei)) next.gsmImei = parsed.imei;
-    if (parsed.deviceId && !toText(next.gsmDeviceId)) next.gsmDeviceId = parsed.deviceId;
-    if (parsed.protocol) next.gsmProtocol = parsed.protocol;
+    }, device);
 
     if (isFiniteNumber(parsed.lat) && isFiniteNumber(parsed.lng)) {
       next.gsmLastLat = Number(parsed.lat);
@@ -458,26 +627,29 @@ function createGprsGateway({
     }
 
     equipmentList[index] = next;
-    writeData('equipment', equipmentList);
+    return equipmentList;
   }
 
-  function bindConnection(connection, parsed, equipment) {
+  function bindConnection(connection, parsed, resolution) {
     if (!connection) return;
+    const { device, equipment, scope } = resolution;
     connection.deviceId = parsed.deviceId || connection.deviceId || null;
     connection.imei = parsed.imei || connection.imei || null;
-    if (equipment) {
-      connection.equipmentId = equipment.id;
-      connection.equipmentLabel = equipmentLabel(equipment);
-    }
+    connection.gsmDeviceRecordId = device.id;
+    connection.equipmentId = equipment.id;
+    connection.equipmentLabel = equipmentLabel(equipment);
+    connection.companyId = scope.companyId;
+    connection.tenantId = scope.tenantId;
+    connection.gsmBindingRevision = gsmDeviceBindingRevision(device);
 
     const deviceKey = parsed.deviceId || parsed.imei;
     if (deviceKey) deviceToConnectionId.set(deviceKey, connection.id);
   }
 
-  function buildPacket({ connection, buffer, parsed, receivedAt, equipment, parseError = null, tooLarge = false }) {
+  function buildPacket({ connection, buffer, parsed, receivedAt, device, equipment, parseError = null, tooLarge = false }) {
     const sourceIp = connection?.sourceIp || connection?.remoteAddress || null;
     const rawHex = tooLarge
-      ? buffer.subarray(0, Math.max(0, maxPacketBytes)).toString('hex').toUpperCase()
+      ? buffer.subarray(0, packetByteLimit).toString('hex').toUpperCase()
       : buffer.toString('hex').toUpperCase();
     const rawText = tooLarge ? null : bufferToReadableText(buffer);
     const equipmentId = equipment?.id || connection?.equipmentId || null;
@@ -493,6 +665,8 @@ function createGprsGateway({
       parseError,
       deviceId: parsed.deviceId || null,
       imei: parsed.imei || null,
+      gsmDeviceRecordId: device?.id || null,
+      gsmBindingRevision: device ? gsmDeviceBindingRevision(device) : null,
       equipmentId,
       deviceTime: parsed.deviceTime || null,
       lat: parsed.lat,
@@ -507,7 +681,7 @@ function createGprsGateway({
       parsed: parsed.parsed,
     };
 
-    return {
+    return sanitizeGsmPacketForPersistence({
       ...packet,
       direction: 'inbound',
       trackerId: packet.deviceId,
@@ -524,11 +698,10 @@ function createGprsGateway({
       tenantId: equipment?.tenantId || null,
       createdAt: receivedAt,
       createdBy: 'Трекер',
-    };
+    });
   }
 
   function processRawPacket(buffer, context = {}) {
-    ensureStorage();
     const sourceIp = normalizeRemoteAddress(context.sourceIp || context.remoteAddress || context.connection?.sourceIp || context.connection?.remoteAddress);
     const connection = context.connection || {
       id: context.connectionId || null,
@@ -540,12 +713,6 @@ function createGprsGateway({
     };
     const receivedAt = nowIso();
 
-    if (connection) {
-      connection.lastSeenAt = receivedAt;
-      connection.packetsReceived = (connection.packetsReceived || 0) + 1;
-      connection.bytesReceived = (connection.bytesReceived || 0) + buffer.byteLength;
-    }
-
     let parsed;
     let parseError = null;
     let tooLarge = false;
@@ -554,13 +721,13 @@ function createGprsGateway({
       buffer = Buffer.from(buffer || '');
     }
 
-    if (buffer.byteLength > maxPacketBytes) {
+    if (buffer.byteLength > packetByteLimit) {
       tooLarge = true;
-      parseError = `packet_too_large: ${buffer.byteLength} bytes > ${maxPacketBytes}`;
+      parseError = `packet_too_large: ${buffer.byteLength} bytes > ${packetByteLimit}`;
       parsed = normalizeParseResult({
         parseStatus: 'failed',
         parseError,
-        parsed: { byteLength: buffer.byteLength, maxPacketBytes, truncated: true },
+        parsed: { byteLength: buffer.byteLength, maxPacketBytes: packetByteLimit, truncated: true },
       });
     } else if (context.forceError) {
       parseError = String(context.forceError);
@@ -591,35 +758,95 @@ function createGprsGateway({
         parseError,
       };
     }
+    parsed.imei = parsed.imei || connection?.imei || null;
+    parsed.deviceId = parsed.deviceId || connection?.deviceId || null;
+    const resolution = resolveTrustedDeviceScope({ imei: parsed.imei, deviceId: parsed.deviceId });
+    const authorizedBinding = captureTrustedGsmDeviceBinding(resolution);
+    assertTrustedGsmConnectionBinding({ connection, resolution });
+    const publicTcpIngress = Boolean(connection?.socket);
+    const suppliedIngressSecret = publicTcpIngress && !connection.gsmAuthenticatedAt
+      ? extractGprsIngressSecret(buffer, parsed)
+      : '';
 
-    const device = findDeviceByIdentity(parsed);
-    const equipmentMatch = resolveEquipmentForPacket(parsed, device);
-    const equipment = equipmentMatch.equipment;
-    bindConnection(connection, parsed, equipment);
-
-    const packet = buildPacket({ connection, buffer, parsed, receivedAt, equipment, parseError, tooLarge });
-    if (equipmentMatch.warning) packet.equipmentMatchWarning = equipmentMatch.warning;
-    if (equipmentMatch.strategy) packet.equipmentMatchStrategy = equipmentMatch.strategy;
-    const storedPacket = persistPacket(packet);
-    if (!storedPacket.duplicate && parsed.parseStatus === 'parsed') {
-      updateEquipmentFromPacket(equipment?.id || null, parsed, receivedAt);
-      updateGsmDeviceFromPacket(device, parsed, bufferToReadableText(buffer), receivedAt, equipment, equipmentMatch.warning);
-    }
-
-    if (parsed.ack && connection?.socket && !connection.socket.destroyed) {
-      connection.socket.write(parsed.ack, (error) => {
-        if (error) logger.warn('[GPRS] ACK write error:', error.message);
+    return withActorScope(resolution.scope, () => {
+      const liveResolution = assertTrustedGsmDeviceBindingCurrent({
+        readData: readScopedRecords,
+        binding: authorizedBinding,
       });
-    }
+      const { device, equipment } = liveResolution;
+      const attemptedIngressMode = context.ingressMode
+        || (publicTcpIngress ? GSM_INGRESS_MODE_TCP_DEVICE_CREDENTIAL : null);
+      if (attemptedIngressMode) {
+        assertGsmDeviceIngressMode(device, attemptedIngressMode);
+      }
+      if (publicTcpIngress) {
+        if (connection.gsmAuthenticatedAt) {
+          assertGsmIngressSessionCredentialCurrent({
+            authenticatedAt: connection.gsmAuthenticatedAt,
+            authenticatedCredentialFingerprint: connection.gsmIngressCredentialFingerprint,
+            storedHash: device.ingressSecretHash,
+            deviceRecordId: device.id,
+          });
+        } else {
+          assertGsmIngressCredential({
+            suppliedSecret: suppliedIngressSecret,
+            storedHash: device.ingressSecretHash,
+            deviceRecordId: device.id,
+          });
+        }
+      }
+      const packet = buildPacket({ connection, buffer, parsed, receivedAt, device, equipment, parseError, tooLarge });
+      packet.equipmentMatchStrategy = 'gsm_devices.equipmentId';
+      const { storedPacket, nextPackets } = preparePacketPersistence(packet);
+      if (!storedPacket.duplicate) {
+        const entries = [{ name: 'gsm_packets', value: nextPackets }];
+        if (parsed.parseStatus === 'parsed') {
+          const nextDevices = updateGsmDeviceFromPacket(
+            device,
+            parsed,
+            packet.rawText || redactGsmSecretText(bufferToReadableText(buffer)),
+            receivedAt,
+            equipment,
+          );
+          const nextDevice = nextDevices.find(item => toText(item?.id) === toText(device.id));
+          entries.push(
+            { name: 'equipment', value: updateEquipmentFromPacket(equipment.id, parsed, receivedAt, nextDevice) },
+            { name: 'gsm_devices', value: nextDevices },
+          );
+        }
+        writeDataBatch(entries);
+        recordPersistedInboundPacket(packet);
+      }
 
-    return storedPacket;
+      // Publish runtime connection state only after the scoped transaction has
+      // committed (or the packet was safely identified as a duplicate).
+      if (connection) {
+        connection.lastSeenAt = receivedAt;
+        connection.packetsReceived = (connection.packetsReceived || 0) + 1;
+        connection.bytesReceived = (connection.bytesReceived || 0) + buffer.byteLength;
+        if (publicTcpIngress && !connection.gsmAuthenticatedAt) {
+          connection.gsmAuthenticatedAt = receivedAt;
+          connection.gsmIngressCredentialFingerprint = fingerprintGsmIngressCredentialHash(device.ingressSecretHash);
+        }
+      }
+      bindConnection(connection, parsed, liveResolution);
+
+      if (parsed.ack && connection?.socket && !connection.socket.destroyed) {
+        connection.socket.write(parsed.ack, (error) => {
+          if (error) logger.warn('[GPRS] ACK write error:', error.message);
+        });
+      }
+
+      return storedPacket;
+    });
   }
 
   function findConnectionByIdentity(identity = {}) {
     const deviceKey = toText(identity.deviceId) || toText(identity.imei);
     if (!deviceKey) return null;
     const connectionId = deviceToConnectionId.get(deviceKey);
-    return connectionId ? connections.get(connectionId) || null : null;
+    const connection = connectionId ? connections.get(connectionId) || null : null;
+    return connection && scopeMatches(connection, currentScope()) ? connection : null;
   }
 
   function cleanupStaleConnections() {
@@ -630,24 +857,34 @@ function createGprsGateway({
       if (Number.isFinite(lastSeenAt) && now - lastSeenAt <= ONLINE_WINDOW_MS) continue;
       try {
         connection.socket.destroy();
-      } catch {
-        // ignore cleanup errors
+      } catch (error) {
+        logger.warn('[GPRS] Failed to close stale connection:', error?.message || error);
       }
     }
   }
 
   function start() {
-    ensureStorage();
-    if (tcpServer) return tcpServer;
     if (!enabled) {
       gatewayStartedAt = null;
       startError = '';
       logger.log(`[GPRS] Gateway disabled by GPRS_ENABLED=0, TCP ${host}:${port} is not listening`);
-      return null;
+      return Promise.resolve(null);
     }
+    if (startPromise) return startPromise;
+    if (tcpServer?.listening) return Promise.resolve(tcpServer);
+    tcpServer = null;
 
-    tcpServer = net.createServer((socket) => {
+    const server = net.createServer((socket) => {
       const sourceIp = normalizeRemoteAddress(socket.remoteAddress);
+      const admission = admissionController.admitConnection(sourceIp);
+      if (!admission.ok) {
+        logger.warn('[GPRS] TCP connection rejected by ingress admission', {
+          sourceIp,
+          code: admission.code,
+        });
+        socket.destroy();
+        return;
+      }
       const connection = {
         id: generateId('GCONN'),
         socket,
@@ -667,16 +904,28 @@ function createGprsGateway({
         imei: null,
         equipmentId: null,
         equipmentLabel: null,
+        gsmDeviceRecordId: null,
+        companyId: null,
+        tenantId: null,
       };
 
       connections.set(connection.id, connection);
+      const preAuthTimer = setTimeout(() => {
+        if (connection.gsmAuthenticatedAt || socket.destroyed) return;
+        logger.warn('[GPRS] TCP pre-authentication deadline exceeded', {
+          sourceIp: connection.sourceIp,
+          code: 'GSM_TCP_PREAUTH_TIMEOUT',
+        });
+        socket.destroy();
+      }, admissionController.limits.preAuthTimeoutMs);
+      preAuthTimer.unref?.();
       logger.log('[GPRS] Device connected', {
         sourceIp: connection.sourceIp,
         remotePort: connection.remotePort,
         connectedAt: connection.connectedAt,
       });
 
-      socket.setTimeout(connectionTimeoutMs, () => {
+      socket.setTimeout(connectionIdleTimeoutMs, () => {
         logger.warn('[GPRS] Connection timeout', { sourceIp: connection.sourceIp, remotePort: connection.remotePort });
         socket.destroy();
       });
@@ -691,21 +940,50 @@ function createGprsGateway({
         connection.packetsInWindow += 1;
         connection.bytesInWindow += buffer.byteLength;
 
-        if (connection.packetsInWindow > maxPacketsPerMinute) {
-          processRawPacket(buffer, { connection, forceError: 'rate_limit_exceeded' });
+        if (connection.packetsInWindow > connectionPacketRateLimit) {
+          logger.warn('[GPRS] Per-connection packet rate limit exceeded', {
+            sourceIp: connection.sourceIp,
+            code: 'GSM_TCP_CONNECTION_PACKET_RATE_LIMIT',
+          });
+          socket.destroy();
+          return;
+        }
+
+        if (!connection.gsmAuthenticatedAt) {
+          const authAdmission = admissionController.consumeAuthAttempt(connection.sourceIp);
+          if (!authAdmission.ok) {
+            logger.warn('[GPRS] TCP authentication rejected by ingress admission', {
+              sourceIp: connection.sourceIp,
+              code: authAdmission.code,
+            });
+            socket.destroy();
+            return;
+          }
+        }
+
+        const telemetryAdmission = admissionController.consumeTelemetry(connection.sourceIp, {
+          byteLength: buffer.byteLength,
+        });
+        if (!telemetryAdmission.ok) {
+          logger.warn('[GPRS] TCP telemetry rejected by shared ingress admission', {
+            sourceIp: connection.sourceIp,
+            code: telemetryAdmission.code,
+          });
           socket.destroy();
           return;
         }
 
         try {
           processRawPacket(buffer, { connection });
+          if (connection.gsmAuthenticatedAt) clearTimeout(preAuthTimer);
         } catch (error) {
-          logger.error('[GPRS] Incoming packet error:', error.message);
-          try {
-            processRawPacket(buffer, { connection, forceError: error.message });
-          } catch {
-            // The gateway must never crash the backend because of a tracker packet.
-          }
+          logger.warn('[GPRS] Incoming packet rejected:', {
+            code: error.code || 'GSM_PACKET_REJECTED',
+            message: error.message,
+          });
+            if (error.code?.startsWith('GSM_DEVICE_') || error.code?.startsWith('GSM_CONNECTION_')) {
+              socket.destroy();
+            }
         }
       });
 
@@ -714,6 +992,8 @@ function createGprsGateway({
       });
 
       socket.on('close', () => {
+        clearTimeout(preAuthTimer);
+        admission.release();
         connection.closedAt = nowIso();
         connection.disconnectedAt = connection.closedAt;
         logger.log('[GPRS] Device disconnected', {
@@ -728,26 +1008,69 @@ function createGprsGateway({
       });
     });
 
-    tcpServer.on('error', (error) => {
+    tcpServer = server;
+    let startSettled = false;
+    let resolveStart;
+    let rejectStart;
+    const pendingStart = new Promise((resolve, reject) => {
+      resolveStart = resolve;
+      rejectStart = reject;
+    });
+    startPromise = pendingStart;
+
+    const failStart = (error) => {
+      if (startSettled) return;
+      startSettled = true;
+      if (tcpServer === server) tcpServer = null;
+      if (startPromise === pendingStart) startPromise = null;
+      if (cancelPendingStart === failStart) cancelPendingStart = null;
+      gatewayStartedAt = null;
+      startError = error?.message || String(error);
+      rejectStart(error);
+    };
+    cancelPendingStart = failStart;
+
+    server.on('error', (error) => {
+      if (stoppingServers.has(server)) {
+        logger.warn('[GPRS] Gateway server error during shutdown:', error.message);
+        return;
+      }
       startError = error.message;
       gatewayStartedAt = null;
       logger.error(`[GPRS] Gateway server error on ${host}:${port}:`, error.message);
+      if (!startSettled) {
+        failStart(error);
+      } else if (tcpServer === server && !server.listening) {
+        tcpServer = null;
+        startPromise = null;
+      }
     });
 
-    tcpServer.listen(port, host, () => {
+    server.once('listening', () => {
+      if (startSettled || tcpServer !== server) return;
+      startSettled = true;
+      if (startPromise === pendingStart) startPromise = null;
+      if (cancelPendingStart === failStart) cancelPendingStart = null;
       gatewayStartedAt = nowIso();
       startError = '';
-      const address = tcpServer.address();
+      const address = server.address();
       const listenPort = typeof address === 'object' && address ? address.port : port;
       logger.log(`[GPRS] Gateway listening on ${host}:${listenPort}`);
+      cleanupTimer = setInterval(cleanupStaleConnections, 60_000);
+      cleanupTimer.unref?.();
+      resolveStart(server);
     });
 
-    cleanupTimer = setInterval(cleanupStaleConnections, 60_000);
-    cleanupTimer.unref?.();
-    return tcpServer;
+    try {
+      server.listen(port, host);
+    } catch (error) {
+      logger.error(`[GPRS] Gateway server error on ${host}:${port}:`, error.message);
+      failStart(error);
+    }
+    return pendingStart;
   }
 
-  function stop() {
+  async function stop() {
     if (cleanupTimer) {
       clearInterval(cleanupTimer);
       cleanupTimer = null;
@@ -755,18 +1078,35 @@ function createGprsGateway({
     for (const connection of connections.values()) {
       try {
         connection.socket.destroy();
-      } catch {
-        // ignore cleanup errors
+      } catch (error) {
+        logger.warn('[GPRS] Failed to close connection during shutdown:', error?.message || error);
       }
     }
     connections.clear();
     deviceToConnectionId.clear();
-    if (!tcpServer) return Promise.resolve();
     const server = tcpServer;
     tcpServer = null;
-    if (!server.listening) return Promise.resolve();
-    return new Promise((resolve) => {
-      server.close(() => resolve());
+    gatewayStartedAt = null;
+    if (!server) return;
+    stoppingServers.add(server);
+    if (cancelPendingStart) {
+      const cancellation = new Error('GPRS gateway startup was cancelled during shutdown.');
+      cancellation.code = 'GPRS_GATEWAY_START_CANCELLED';
+      cancelPendingStart(cancellation);
+      startError = '';
+    } else {
+      startPromise = null;
+    }
+    await new Promise((resolve, reject) => {
+      try {
+        server.close((error) => {
+          if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') reject(error);
+          else resolve();
+        });
+      } catch (error) {
+        if (error?.code === 'ERR_SERVER_NOT_RUNNING') resolve();
+        else reject(error);
+      }
     });
   }
 
@@ -777,24 +1117,37 @@ function createGprsGateway({
   }
 
   function getStatus() {
-    ensureStorage();
     const packets = trimCollection('gsm_packets', MAX_PACKET_LOG);
-    const commands = trimCollection('gsm_commands', MAX_COMMAND_LOG);
-    const onlineConnections = [...connections.values()].filter(item => !item.closedAt);
-    const todayStart = new Date();
+    const commands = trimCollection('gsm_commands', MAX_COMMAND_LOG)
+      .filter(item => trustedStoredGsmBinding(item, { currentOnly: true }));
+    const scope = currentScope();
+    const onlineConnections = visibleConnections().filter(item => !item.closedAt);
+    const observedAtMs = Date.now();
+    const todayStart = new Date(observedAtMs);
     todayStart.setHours(0, 0, 0, 0);
     const todayStartMs = todayStart.getTime();
-    const lastPacketAt = packets[0] ? getPacketTime(packets[0]) : null;
+    const nonFuturePackets = packets.filter(packet => hasNonFutureGsmServerTime(packet, observedAtMs));
+    const currentTrustedInboundPackets = nonFuturePackets.filter(packet => (
+      packet.direction !== 'outbound'
+      && trustedStoredGsmBinding(packet, { currentOnly: true })
+    ));
+    const lastPacketAt = currentTrustedInboundPackets
+      .map(getPacketTime)
+      .filter(Boolean)
+      .sort((left, right) => Date.parse(right) - Date.parse(left))[0] || null;
     const uptimeSeconds = gatewayStartedAt
       ? Math.max(0, Math.floor((Date.now() - Date.parse(gatewayStartedAt)) / 1000))
       : 0;
 
-    return {
+    return sanitizeGsmRecordForRead({
       gatewayEnabled: Boolean(enabled && gatewayStartedAt && !startError),
       tcpPort: currentTcpPort(),
       uptimeSeconds,
       connectionsActive: onlineConnections.length,
-      packetsReceivedTotal: Math.max(packetsReceivedTotal, packets.filter(item => item.direction !== 'outbound').length),
+      packetsReceivedTotal: Math.max(
+        packetsReceivedByScope.get(scopeKey(scope)) || 0,
+        packets.filter(item => item.direction !== 'outbound').length,
+      ),
       lastPacketAt,
       enabled: Boolean(enabled && gatewayStartedAt && !startError),
       disabled: !enabled,
@@ -802,26 +1155,37 @@ function createGprsGateway({
       port: currentTcpPort(),
       startedAt: gatewayStartedAt,
       startError,
+      ingressProtection: admissionController.getStatus(),
+      transportLimits: {
+        maxPacketBytes: packetByteLimit,
+        maxPacketsPerConnectionPerMinute: connectionPacketRateLimit,
+        connectionIdleTimeoutMs,
+      },
       onlineConnections: onlineConnections.length,
       onlineDevices: new Set(onlineConnections.map(item => item.deviceId || item.imei).filter(Boolean)).size,
       packetsStored: packets.length,
-      packetsToday: packets.filter(item => {
+      packetsToday: currentTrustedInboundPackets.filter(item => {
         const time = Date.parse(getPacketTime(item) || '');
         return Number.isFinite(time) && time >= todayStartMs;
       }).length,
       queuedCommands: commands.filter(item => item.status === 'queued').length,
-      sentToday: commands.filter(item => item.sentAt && Date.parse(item.sentAt) >= todayStartMs).length,
+      sentToday: commands.filter((item) => {
+        const sentAt = Date.parse(item.sentAt || '');
+        return Number.isFinite(sentAt) && sentAt >= todayStartMs && sentAt <= observedAtMs;
+      }).length,
       failedCommands: commands.filter(item => item.status === 'failed').length,
-    };
+    });
   }
 
   function listConnections() {
-    return [...connections.values()]
-      .map(connection => ({
+    return visibleConnections()
+      .map(connection => sanitizeTrustedGsmRecordForRead({
         id: connection.id,
         deviceId: connection.deviceId || null,
         trackerId: connection.deviceId || null,
         imei: connection.imei || null,
+        gsmDeviceRecordId: connection.gsmDeviceRecordId || null,
+        gsmBindingRevision: Number(connection.gsmBindingRevision) || null,
         equipmentId: connection.equipmentId || null,
         equipmentLabel: connection.equipmentLabel || null,
         sourceIp: connection.sourceIp,
@@ -838,9 +1202,12 @@ function createGprsGateway({
   }
 
   function matchesPacketFilters(packet, filters = {}) {
-    if (filters.equipmentId && !packetMatchesEquipmentFilter(packet, filters.equipmentId)) return false;
-    if (filters.imei && packet.imei !== filters.imei) return false;
-    if (filters.deviceId && ![packet.deviceId, packet.trackerId, packet.imei].filter(Boolean).includes(filters.deviceId)) return false;
+    const bindingFiltered = Boolean(filters.equipmentId || filters.imei || filters.deviceId);
+    const trusted = bindingFiltered ? trustedStoredGsmBinding(packet) : null;
+    if (bindingFiltered && !trusted) return false;
+    if (filters.equipmentId && toText(trusted.binding.equipmentId) !== filters.equipmentId) return false;
+    if (filters.imei && toText(trusted.binding.imei) !== filters.imei) return false;
+    if (filters.deviceId && !bindingIdentityValues(trusted.binding).includes(filters.deviceId)) return false;
     if (filters.parseStatus && packet.parseStatus !== filters.parseStatus) return false;
     const time = Date.parse(getPacketTime(packet) || '');
     if (filters.from && Number.isFinite(time) && time < Date.parse(filters.from)) return false;
@@ -849,10 +1216,9 @@ function createGprsGateway({
   }
 
   function listPackets(filters = {}) {
-    ensureStorage();
     const safeLimit = Math.min(Math.max(Number(filters.limit) || 50, 1), 500);
     const safeOffset = Math.max(Number(filters.offset) || 0, 0);
-    return asArray(readData('gsm_packets'))
+    return readScopedRecords('gsm_packets')
       .filter(item => matchesPacketFilters(item, {
         equipmentId: toText(filters.equipmentId),
         imei: toText(filters.imei),
@@ -863,89 +1229,88 @@ function createGprsGateway({
       }))
       .sort((left, right) => Date.parse(getPacketTime(right) || '') - Date.parse(getPacketTime(left) || ''))
       .slice(safeOffset, safeOffset + safeLimit)
-      .map(enrichPacketEquipment);
+      .map(item => (
+        trustedStoredGsmBinding(item)
+          ? sanitizeTrustedGsmRecordForRead(item)
+          : sanitizeGsmRecordForRead(item)
+      ));
   }
 
   function listCommands({ limit = 50, offset = 0, equipmentId = '', deviceId = '' } = {}) {
-    ensureStorage();
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 500);
     const safeOffset = Math.max(Number(offset) || 0, 0);
-    return asArray(readData('gsm_commands'))
+    return readScopedRecords('gsm_commands')
       .filter((item) => {
-        if (equipmentId && item.equipmentId !== equipmentId) return false;
-        if (deviceId && ![item.deviceId, item.imei].filter(Boolean).includes(deviceId)) return false;
+        const trusted = trustedStoredGsmBinding(item);
+        if (!trusted) return false;
+        if (equipmentId && toText(trusted.binding.equipmentId) !== toText(equipmentId)) return false;
+        if (deviceId && !bindingIdentityValues(trusted.binding).includes(toText(deviceId))) return false;
         return true;
       })
       .sort((left, right) => Date.parse(right.createdAt || '') - Date.parse(left.createdAt || ''))
-      .slice(safeOffset, safeOffset + safeLimit);
+      .slice(safeOffset, safeOffset + safeLimit)
+      .map((item) => {
+        const bindingCurrent = Boolean(trustedStoredGsmBinding(item, { currentOnly: true }));
+        return sanitizeTrustedGsmRecordForRead({
+          ...item,
+          bindingCurrent,
+          effectiveStatus: item.status === 'queued' && !bindingCurrent ? 'superseded' : item.status,
+        });
+      });
   }
 
   function deriveEquipmentGsmStatus(equipment) {
     const explicit = equipment.gsmStatus;
-    if (explicit === 'online' || explicit === 'offline' || explicit === 'unknown') return explicit;
     const lastSeenAt = equipment.gsmLastSeenAt || equipment.gsmLastSignalAt;
-    if (!lastSeenAt) return 'unknown';
-    return Date.now() - Date.parse(lastSeenAt) <= ONLINE_WINDOW_MS ? 'online' : 'offline';
+    const lastSeenMs = Date.parse(lastSeenAt || '');
+    if (Number.isFinite(lastSeenMs)) {
+      const ageMs = Date.now() - lastSeenMs;
+      return ageMs >= 0 && ageMs <= ONLINE_WINDOW_MS ? 'online' : 'offline';
+    }
+    if (explicit === 'offline' || explicit === 'unknown') return explicit;
+    return 'unknown';
   }
 
   function listDevices() {
-    ensureStorage();
-    const onlineEquipmentIds = new Set([...connections.values()].map(item => item.equipmentId).filter(Boolean));
-    const equipment = asArray(readData('equipment'));
-    const legacyDevices = equipment
-      .filter(item => toText(item.gsmImei) || toText(item.gsmDeviceId) || toText(item.gsmTrackerId))
-      .map(item => {
-        const status = onlineEquipmentIds.has(item.id) ? 'online' : deriveEquipmentGsmStatus(item);
-        return {
-          equipmentId: item.id,
-          id: item.id,
-          equipmentName: equipmentLabel(item),
-          manufacturer: item.manufacturer || null,
-          model: item.model || null,
-          serialNumber: item.serialNumber || null,
-          inventoryNumber: item.inventoryNumber || null,
-          imei: item.gsmImei || null,
-          deviceId: item.gsmDeviceId || item.gsmTrackerId || null,
-          simNumber: item.gsmSimNumber || null,
-          protocol: item.gsmProtocol || null,
-          status,
-          lastSeenAt: item.gsmLastSeenAt || item.gsmLastSignalAt || null,
-          lastLat: toNumberOrNull(item.gsmLastLat ?? item.gsmLatitude),
-          lastLng: toNumberOrNull(item.gsmLastLng ?? item.gsmLongitude),
-          lastSpeed: toNumberOrNull(item.gsmLastSpeed ?? item.gsmSpeedKph),
-          lastVoltage: toNumberOrNull(item.gsmLastVoltage ?? item.gsmBatteryVoltage),
-          lastMotoHours: toNumberOrNull(item.gsmLastMotoHours ?? item.gsmHourmeter),
-        };
-      });
-
-    const byEquipmentOrImei = new Map(legacyDevices.map(item => [item.equipmentId || item.imei || item.id, item]));
-    for (const device of asArray(readData('gsm_devices'))) {
-      const equipmentMatch = device.equipmentId
-        ? { equipment: null, warning: null, strategy: 'gsm_devices.equipmentId' }
-        : resolveEquipmentMatchByIdentity(device);
-      const linkedEquipmentId = device.equipmentId || equipmentMatch.equipment?.id || null;
+    const onlineBindings = new Set(visibleConnections().map(item => (
+      `${toText(item.gsmDeviceRecordId)}:${Number(item.gsmBindingRevision) || 0}`
+    )));
+    const equipment = readScopedRecords('equipment');
+    const scopedDevices = readScopedRecords('gsm_devices');
+    const provisionedDevices = [];
+    for (const device of scopedDevices.filter(isActiveGsmDeviceRecord)) {
+      if (gsmCurrentDeviceBindingIssue(device, { devices: scopedDevices, equipment })) continue;
+      const linkedEquipmentId = toText(device.equipmentId);
       const item = equipment.find(eq => eq.id === linkedEquipmentId) || null;
+      if (!linkedEquipmentId || !item) continue;
+      const bindingRevision = gsmDeviceBindingRevision(device);
       const statusAt = device.lastOnlineAt || device.lastPacketAt || null;
-      const status = Date.now() - Date.parse(statusAt || '') <= ONLINE_WINDOW_MS ? 'online' : (device.status || 'unknown');
-      const key = linkedEquipmentId || device.imei || device.deviceId || device.id;
-      byEquipmentOrImei.set(key, {
-        ...(byEquipmentOrImei.get(key) || {}),
-        id: device.id || key,
+      const statusAtMs = Date.parse(statusAt || '');
+      const statusAgeMs = Number.isFinite(statusAtMs) ? Date.now() - statusAtMs : null;
+      const status = onlineBindings.has(`${toText(device.id)}:${bindingRevision}`)
+        || (statusAgeMs !== null && statusAgeMs >= 0 && statusAgeMs <= ONLINE_WINDOW_MS)
+        ? 'online'
+        : (Number.isFinite(statusAtMs) ? 'offline' : 'unknown');
+      provisionedDevices.push(sanitizeTrustedGsmRecordForRead({
+        id: device.id,
         equipmentId: linkedEquipmentId,
         equipmentName: equipmentLabel(item) || device.equipmentLabel || null,
-        equipmentMatchWarning: equipmentMatch.warning || device.equipmentMatchWarning || null,
-        manufacturer: item?.manufacturer || null,
-        model: item?.model || null,
-        serialNumber: item?.serialNumber || null,
-        inventoryNumber: item?.inventoryNumber || null,
-        imei: device.imei || item?.gsmImei || null,
-        deviceId: device.deviceId || device.imei || item?.gsmDeviceId || item?.gsmTrackerId || null,
+        manufacturer: item.manufacturer || null,
+        model: item.model || null,
+        serialNumber: item.serialNumber || null,
+        inventoryNumber: item.inventoryNumber || null,
+        imei: device.imei || null,
+        deviceId: device.deviceId || device.trackerId || device.imei || null,
+        trackerId: device.trackerId || null,
+        bindingRevision,
+        ingressMode: gsmDeviceIngressMode(device),
+        ingressCredentialConfigured: Boolean(device.ingressSecretHash),
         deviceType: device.deviceType || null,
-        simNumber: device.sim1 || item?.gsmSimNumber || null,
-        sim1: device.sim1 || item?.gsmSimNumber || null,
+        simNumber: device.sim1 || null,
+        sim1: device.sim1 || null,
         oldServer: device.oldServer || null,
         targetServer: device.targetServer || null,
-        protocol: device.protocol || item?.gsmProtocol || null,
+        protocol: device.protocol || null,
         status,
         lastSeenAt: statusAt,
         lastPacketAt: device.lastPacketAt || null,
@@ -962,10 +1327,10 @@ function createGprsGateway({
         lastRawPacket: device.lastRawPacket || null,
         createdAt: device.createdAt || null,
         updatedAt: device.updatedAt || null,
-      });
+      }));
     }
 
-    return [...byEquipmentOrImei.values()]
+    return provisionedDevices
       .sort((left, right) => String(right.lastSeenAt || '').localeCompare(String(left.lastSeenAt || '')));
   }
 
@@ -973,7 +1338,7 @@ function createGprsGateway({
     const id = toText(equipmentId);
     if (!id) return [];
     return listPackets({ equipmentId: id, from, to, limit: 500 })
-      .filter(packet => isFiniteNumber(packet.lat) && isFiniteNumber(packet.lng))
+      .filter(packet => packet.direction !== 'outbound' && hasUsableGsmPacketLocation(packet) && hasNonFutureGsmServerTime(packet))
       .map(packet => ({
         receivedAt: packet.receivedAt || packet.createdAt,
         deviceTime: packet.deviceTime || null,
@@ -986,30 +1351,54 @@ function createGprsGateway({
   }
 
   function getAnalytics({ equipmentId = '', deviceId = '' } = {}) {
-    ensureStorage();
     const packets = trimCollection('gsm_packets', MAX_PACKET_LOG);
-    const commands = trimCollection('gsm_commands', MAX_COMMAND_LOG);
-    const equipment = asArray(readData('equipment'));
-    const since24hMs = Date.now() - 24 * 60 * 60 * 1000;
-    const configuredEquipment = equipment.filter(item => toText(item.gsmImei) || toText(item.gsmDeviceId) || toText(item.gsmTrackerId));
-    const onlineEquipmentIds = new Set([...connections.values()].map(item => item.equipmentId).filter(Boolean));
-    const recentPackets = packets.filter(packet => isPacketRecent(packet, since24hMs));
+    const commands = trimCollection('gsm_commands', MAX_COMMAND_LOG)
+      .filter(item => trustedStoredGsmBinding(item, { currentOnly: true }));
+    const equipment = readScopedRecords('equipment');
+    const observedAtMs = Date.now();
+    const since24hMs = observedAtMs - 24 * 60 * 60 * 1000;
+    const provisionedDevices = listDevices();
+    const provisionedEquipmentIds = new Set(provisionedDevices.map(item => item.equipmentId).filter(Boolean));
+    const configuredEquipment = equipment.filter(item => provisionedEquipmentIds.has(item.id));
+    const onlineEquipmentIds = new Set(visibleConnections().map(item => item.equipmentId).filter(Boolean));
+    const recentPackets = packets.filter(packet => isPacketRecent(packet, since24hMs, observedAtMs));
     const filteredPackets = listPackets({ equipmentId, deviceId, limit: 500 });
-    const filteredCommands = listCommands({ equipmentId, deviceId, limit: 500 });
-    const selectedRecentPackets = filteredPackets.filter(packet => isPacketRecent(packet, since24hMs));
+    const filteredCommands = listCommands({ equipmentId, deviceId, limit: 500 })
+      .filter(item => item.bindingCurrent === true);
+    const selectedRecentPackets = filteredPackets.filter(packet => isPacketRecent(packet, since24hMs, observedAtMs));
+    const currentPackets = packets.filter(packet => (
+      packet.direction !== 'outbound'
+      && trustedStoredGsmBinding(packet, { currentOnly: true })
+      && hasNonFutureGsmServerTime(packet, observedAtMs)
+    ));
+    const latestCurrentPacketByEquipmentId = new Map();
+    for (const packet of currentPackets
+      .sort((left, right) => Date.parse(getPacketTime(right) || '') - Date.parse(getPacketTime(left) || ''))) {
+      if (!latestCurrentPacketByEquipmentId.has(packet.equipmentId)) {
+        latestCurrentPacketByEquipmentId.set(packet.equipmentId, packet);
+      }
+    }
     const staleTrackers = configuredEquipment.filter((item) => {
-      const signalAt = Date.parse(item.gsmLastSeenAt || item.gsmLastSignalAt || '');
-      return !Number.isFinite(signalAt) || signalAt < since24hMs;
+      const signalAt = Date.parse(getPacketTime(latestCurrentPacketByEquipmentId.get(item.id)) || '');
+      return !Number.isFinite(signalAt) || signalAt < since24hMs || signalAt > observedAtMs;
     });
-    const lastPacket = filteredPackets[0] || null;
+    const lastPacket = filteredPackets.find(packet => hasNonFutureGsmServerTime(packet, observedAtMs)) || null;
     const lastCommand = filteredCommands[0] || null;
 
-    return {
+    const response = {
       trackedEquipment: equipment.length,
       configuredTrackers: configuredEquipment.length,
-      onlineTrackedEquipment: configuredEquipment.filter(item => onlineEquipmentIds.has(item.id) || deriveEquipmentGsmStatus(item) === 'online').length,
+      onlineTrackedEquipment: configuredEquipment.filter((item) => {
+        if (onlineEquipmentIds.has(item.id)) return true;
+        const signalAt = Date.parse(getPacketTime(latestCurrentPacketByEquipmentId.get(item.id)) || '');
+        return Number.isFinite(signalAt)
+          && signalAt <= observedAtMs
+          && observedAtMs - signalAt <= ONLINE_WINDOW_MS;
+      }).length,
       staleTrackers: staleTrackers.length,
-      unknownPackets24h: recentPackets.filter(packet => packet.direction !== 'outbound' && !packet.equipmentId).length,
+      unknownPackets24h: recentPackets.filter(packet => (
+        packet.direction !== 'outbound' && !trustedStoredGsmBinding(packet)
+      )).length,
       packets24h: recentPackets.length,
       inbound24h: recentPackets.filter(packet => packet.direction !== 'outbound').length,
       outbound24h: recentPackets.filter(packet => packet.direction === 'outbound').length,
@@ -1029,16 +1418,28 @@ function createGprsGateway({
         lastCommandStatus: lastCommand?.status || null,
       },
     };
+    const selectedIdentityTrusted = Boolean((equipmentId || deviceId) && provisionedDevices.some(item => (
+      (!equipmentId || toText(item.equipmentId) === toText(equipmentId))
+      && (!deviceId || [item.deviceId, item.trackerId, item.imei].map(toText).includes(toText(deviceId)))
+    )));
+    response.selected = selectedIdentityTrusted
+      ? sanitizeTrustedGsmRecordForRead(response.selected)
+      : sanitizeGsmRecordForRead(response.selected);
+    const sanitized = sanitizeGsmRecordForRead(response);
+    sanitized.selected = response.selected;
+    return sanitized;
   }
 
   function getDiagnostics() {
-    ensureStorage();
     const packets = trimCollection('gsm_packets', MAX_PACKET_LOG);
+    const rawCommands = trimCollection('gsm_commands', MAX_COMMAND_LOG);
+    const trustedCommands = rawCommands.filter(item => trustedStoredGsmBinding(item));
+    const quarantinedCommands = rawCommands.filter(item => !trustedStoredGsmBinding(item));
     const devices = listDevices();
     const onlineDevices = devices.filter(item => item.status === 'online');
     const offlineDevices = devices.filter(item => item.status !== 'online');
     const inboundPackets = packets.filter(item => item.direction !== 'outbound');
-    const unknownPackets = inboundPackets.filter(item => !item.equipmentId);
+    const unknownPackets = inboundPackets.filter(item => !trustedStoredGsmBinding(item));
     const packetsWithoutCoordinates = inboundPackets.filter(item => !isFiniteNumber(item.lat) || !isFiniteNumber(item.lng));
     const parseErrorPackets = inboundPackets.filter(item => item.parseStatus === 'failed' || item.parseError);
     const unknownDeviceIds = [...new Set(unknownPackets
@@ -1047,39 +1448,40 @@ function createGprsGateway({
       .slice(0, 50);
 
     function sanitizeDiagnosticText(value, maxChars = 600) {
-      const text = String(value || '');
-      if (!text) return null;
-      return text
-        .replace(/(token|secret|password|authorization)\s*[:=]\s*([^,\s;}]+)/gi, '$1:[redacted]')
-        .slice(0, maxChars);
+      const text = redactGsmSecretText(value);
+      return text ? text.slice(0, maxChars) : null;
     }
 
     function sanitizePacket(item) {
       const hex = toText(item.rawHex || item.payloadHex);
-      return {
+      const sanitizer = trustedStoredGsmBinding(item)
+        ? sanitizeTrustedGsmRecordForRead
+        : sanitizeGsmRecordForRead;
+      return sanitizer({
         id: item.id,
         receivedAt: item.receivedAt || item.createdAt || null,
         imei: item.imei || null,
         deviceId: item.deviceId || null,
         equipmentId: item.equipmentId || null,
         parseStatus: item.parseStatus || null,
-        parseError: item.parseError || null,
+        parseError: sanitizeDiagnosticText(item.parseError || null, 600),
         rawText: sanitizeDiagnosticText(item.rawText || item.payload || null, 600),
         rawHex: hex ? `[${Math.floor(hex.length / 2)} bytes]` : null,
-      };
+      });
     }
 
     function sanitizeDevice(item) {
-      return {
+      return sanitizeTrustedGsmRecordForRead({
         ...item,
         lastRawPacket: sanitizeDiagnosticText(item.lastRawPacket || null, 600),
-      };
+      });
     }
 
-    return {
+    const response = {
       totals: {
         packets: inboundPackets.length,
-        commands: asArray(readData('gsm_commands')).length,
+        commands: trustedCommands.length,
+        quarantinedCommands: quarantinedCommands.length,
         devices: devices.length,
         onlineDevices: onlineDevices.length,
         offlineDevices: offlineDevices.length,
@@ -1097,33 +1499,97 @@ function createGprsGateway({
       parseErrors: parseErrorPackets.slice(0, 50).map(sanitizePacket),
       latestRawPackets: inboundPackets.slice(0, 50).map(sanitizePacket),
     };
+    const sanitized = sanitizeGsmRecordForRead(response);
+    for (const key of [
+      'lastPacket',
+      'onlineDevices',
+      'offlineDevices',
+      'packetsWithoutCoordinates',
+      'packetsWithoutLinkedEquipment',
+      'parseErrors',
+      'latestRawPackets',
+    ]) sanitized[key] = response[key];
+    return sanitized;
   }
 
-  function createCommand({ equipmentId = '', command = '', payload = {}, createdBy = 'Оператор' } = {}) {
-    ensureStorage();
+  function createCommand({
+    equipmentId = '',
+    deviceId = '',
+    command = '',
+    payload = {},
+    createdBy = 'Оператор',
+    encoding = 'text',
+    appendNewline = false,
+  } = {}) {
     const safeEquipmentId = toText(equipmentId);
-    const safeCommand = toText(command);
+    const safePayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+    const safeCommand = assertGsmCommandInput(command, safePayload, commandByteLimit);
     if (!safeEquipmentId) throw new Error('Укажите технику для команды');
-    if (!safeCommand) throw new Error('Команда не заполнена');
-    const equipment = asArray(readData('equipment')).find(item => item.id === safeEquipmentId) || null;
+    const scopedEquipment = readScopedRecords('equipment');
+    const scopedDevices = readScopedRecords('gsm_devices');
+    const equipment = scopedEquipment.find(item => item.id === safeEquipmentId) || null;
     if (!equipment) throw new Error('Техника не найдена');
+    const provisionedDevices = scopedDevices
+      .filter(device => isActiveGsmDeviceRecord(device) && toText(device.equipmentId) === safeEquipmentId);
+    if (provisionedDevices.length === 0) {
+      const error = new Error('Для техники не настроено активное GSM-устройство');
+      error.code = 'GSM_COMMAND_DEVICE_NOT_PROVISIONED';
+      error.status = 409;
+      throw error;
+    }
+    if (provisionedDevices.length > 1) {
+      const error = new Error('Для техники найдено несколько активных GSM-устройств');
+      error.code = 'GSM_EQUIPMENT_DEVICE_AMBIGUOUS';
+      error.status = 409;
+      throw error;
+    }
+    const device = provisionedDevices[0];
+    const gsmDeviceRecordId = toText(device.id);
+    if (!gsmDeviceRecordId) {
+      const error = new Error('Активная GSM-привязка не имеет стабильного record ID');
+      error.code = 'GSM_DEVICE_RECORD_INVALID';
+      error.status = 409;
+      throw error;
+    }
+    const currentBindingIssue = gsmCurrentDeviceBindingIssue(device, {
+      devices: scopedDevices,
+      equipment: scopedEquipment,
+    });
+    if (currentBindingIssue) {
+      const error = new Error('Активная GSM-привязка не прошла проверку lifecycle и проекции');
+      error.code = 'GSM_DEVICE_PARENT_INVALID';
+      error.status = 409;
+      error.details = { currentBindingIssue };
+      throw error;
+    }
+    const requestedDeviceId = toText(deviceId);
+    if (requestedDeviceId && !gsmDeviceIdentityValues(device).includes(requestedDeviceId)) {
+      const error = new Error('Указанное GSM-устройство не привязано к выбранной технике');
+      error.code = 'GSM_COMMAND_DEVICE_MISMATCH';
+      error.status = 409;
+      throw error;
+    }
 
     const item = {
       id: generateId('GCMD'),
       equipmentId: safeEquipmentId,
+      gsmDeviceRecordId,
+      gsmBindingRevision: gsmDeviceBindingRevision(device),
+      companyId: equipment.companyId || null,
+      tenantId: equipment.tenantId || null,
       equipmentLabel: equipmentLabel(equipment),
-      imei: equipment.gsmImei || null,
-      deviceId: equipment.gsmDeviceId || equipment.gsmTrackerId || null,
+      imei: device.imei || null,
+      deviceId: device.deviceId || device.trackerId || device.imei || null,
       command: safeCommand,
-      payload: payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {},
+      payload: safePayload,
       status: 'queued',
       createdAt: nowIso(),
       sentAt: null,
       ackAt: null,
       error: null,
       createdBy,
-      encoding: 'text',
-      appendNewline: false,
+      encoding,
+      appendNewline: Boolean(appendNewline),
       connectionId: null,
       remoteAddress: null,
       remotePort: null,
@@ -1133,19 +1599,28 @@ function createGprsGateway({
   }
 
   async function sendCommand({ equipmentId = '', deviceId = '', payload = '', encoding = 'text', appendNewline = true, createdBy = 'Оператор' }) {
+    if (!['text', 'hex'].includes(encoding)) {
+      throw commandInputError('GSM_COMMAND_ENCODING_INVALID', 'encoding должен быть text или hex');
+    }
+    const transportPayload = assertGsmCommandTransportPayload(payload, encoding, commandByteLimit);
     const command = createCommand({
       equipmentId,
-      command: String(payload || '').trim(),
+      deviceId,
+      command: transportPayload,
       payload: {
-        raw: String(payload || '').trim(),
+        raw: transportPayload,
         deviceId: toText(deviceId) || undefined,
         encoding: encoding === 'hex' ? 'hex' : 'text',
         appendNewline: Boolean(appendNewline),
       },
       createdBy,
+      encoding,
+      appendNewline,
     });
 
-    const connection = findConnectionByIdentity({ deviceId: command.deviceId || deviceId, imei: command.imei });
+    const connection = visibleConnections().find(item => (
+      toText(item.gsmDeviceRecordId) === toText(command.gsmDeviceRecordId)
+    )) || null;
     if (!connection || !connection.socket || connection.socket.destroyed) return command;
 
     // First stage keeps commands queued by default; concrete protocol senders can opt in later.
@@ -1171,4 +1646,8 @@ function createGprsGateway({
 
 module.exports = {
   createGprsGateway,
+  hasNonFutureGsmServerTime,
+  hasUsableGsmCoordinates,
+  hasUsableGsmPacketLocation,
+  resolveGsmMaxCommandBytes,
 };

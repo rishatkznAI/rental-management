@@ -1,27 +1,19 @@
 import { api, API_BASE_URL } from '../lib/api';
 import type { PublicSiteCms, PublicSiteContent, PublicSiteLift } from '../types/public-site';
 
-export const PUBLIC_SITE_URL = ((import.meta.env.VITE_PUBLIC_SITE_URL as string | undefined) || 'https://skytech-rent.ru').replace(/\/$/, '');
-
-async function getPublishedDefaults(): Promise<PublicSiteCms> {
-  const response = await fetch(`${PUBLIC_SITE_URL}/api/public/cms`, {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-    credentials: 'omit',
-  });
-  if (!response.ok) throw new Error('Не удалось загрузить текущее содержимое публичного сайта');
-  return response.json() as Promise<PublicSiteCms>;
-}
+export const PUBLIC_SITE_URL = ((import.meta.env.VITE_PUBLIC_SITE_URL as string | undefined) || '').replace(/\/$/, '');
 
 export const publicSiteService = {
   async get(): Promise<PublicSiteCms> {
-    const stored = await api.get<PublicSiteCms>('/api/public-site/cms');
-    if (stored.content && stored.equipment) return stored;
-    return getPublishedDefaults();
+    return api.get<PublicSiteCms>('/api/public-site/cms');
   },
 
-  save: (content: PublicSiteContent, equipment: PublicSiteLift[]): Promise<{ ok: true; updatedAt: string }> =>
-    api.put('/api/public-site/cms', { content, equipment }),
+  save: (
+    content: PublicSiteContent,
+    equipment: PublicSiteLift[],
+    expectedVersion: string,
+  ): Promise<{ ok: true; updatedAt: string; version: string }> =>
+    api.put('/api/public-site/cms', { content, equipment, expectedVersion }),
 
   uploadImage: (file: File): Promise<{ ok: true; url: string }> => new Promise((resolve, reject) => {
     const reader = new FileReader();

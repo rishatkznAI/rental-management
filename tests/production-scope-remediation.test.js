@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import {
   createPlatformIdentityContext,
@@ -14,25 +15,44 @@ const {
   sqliteTotalChanges,
 } = require('../server/lib/production-scope-remediation.js');
 const {
+  buildUsersDirectorySnapshot,
+} = require('../server/lib/platform-identity-bootstrap-validation.js');
+const {
   calculateBootstrapChecksum,
   getSchemaFingerprint,
 } = require('../server/lib/platform-identity-bootstrap.js');
+const {
+  PRODUCTION_SMOKE_READER_EMAIL,
+  PRODUCTION_SMOKE_READER_PRINCIPAL_ID,
+  PRODUCTION_SMOKE_READER_ROLE,
+  PRODUCTION_SMOKE_READER_TEMPLATE_KEY,
+  PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID,
+  getProjectedSmokeIdentityUsers,
+  planProductionSmokeIdentityTransition,
+} = require('../server/lib/production-smoke-identity.js');
+const { deriveCanonicalMembershipId } = require('../server/lib/canonical-authority-id.js');
 const { deriveCanonicalCompanyId } = require('../server/lib/canonical-company-id.js');
 
-const COMPANY_ID = 'company-approved-a';
+const COMPANY_ID = 'cmp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const COLLECTIONS = [
+  'equipment',
   'counterparties',
   'counterparty_role_assignments',
   'clients',
   'client_objects',
+  'documents',
+  'app_settings',
 ];
 
 function seedCollections(db, overrides = {}) {
   const state = {
+    equipment: [],
     counterparties: [{ id: 'CP-1', legalName: 'Approved customer' }],
     counterparty_role_assignments: [{ id: 'CPRA-1', counterpartyId: 'CP-1', role: 'customer' }],
     clients: [{ id: 'C-1', counterpartyId: 'CP-1', company: 'Approved customer' }],
     client_objects: [{ id: 'CO-1', clientId: 'C-1', counterpartyId: 'CP-1', name: 'Site' }],
+    documents: [],
+    app_settings: [],
     ...overrides,
   };
   const insert = db.prepare('INSERT INTO app_data (name, json) VALUES (?, ?)');
@@ -239,6 +259,54 @@ test('dry-run exposes exact explicit diff and performs zero writes', () => {
   }
 });
 
+test('manifest scope updates include equipment, documents, and app settings by exact record id', () => {
+  const context = createPlatformIdentityContext();
+  try {
+    const state = seedCollections(context.db, {
+      equipment: [{ id: 'EQ-1', inventoryNumber: 'INV-1' }],
+      documents: [{ id: 'DOC-1', number: 'DOC-1' }],
+      app_settings: [{ id: 'SET-1', key: 'numbering' }],
+    });
+    const plan = resolvedPlan(context, state);
+    for (const [collection, id] of [
+      ['equipment', 'EQ-1'],
+      ['documents', 'DOC-1'],
+      ['app_settings', 'SET-1'],
+    ]) {
+      plan.recordMappings.push({
+        collection,
+        id,
+        action: 'UPDATE_SCOPE',
+        companyId: COMPANY_ID,
+        tenantId: COMPANY_ID,
+        evidence: 'exact manifest record',
+      });
+    }
+    const preview = planProductionScopeRemediation({ db: context.db, plan });
+    assert.equal(preview.ok, true);
+    assert.deepEqual(
+      preview.plannedDiff.UPDATE
+        .filter(item => ['equipment', 'documents', 'app_settings'].includes(item.collection))
+        .map(item => `${item.collection}:${item.id}`)
+        .sort(),
+      ['app_settings:SET-1', 'documents:DOC-1', 'equipment:EQ-1'],
+    );
+    applyProductionScopeRemediation({
+      db: context.db,
+      plan,
+      explicitApply: true,
+      expectedPlanChecksum: preview.planChecksum,
+    });
+    for (const collection of ['equipment', 'documents', 'app_settings']) {
+      const row = JSON.parse(context.db.prepare('SELECT json FROM app_data WHERE name = ?').get(collection).json)[0];
+      assert.equal(row.companyId, COMPANY_ID);
+      assert.equal(row.tenantId, COMPANY_ID);
+    }
+  } finally {
+    context.close();
+  }
+});
+
 test('successful explicit backfill is transactional and repeated execution makes zero writes', () => {
   const context = createPlatformIdentityContext();
   try {
@@ -276,6 +344,206 @@ test('successful explicit backfill is transactional and repeated execution makes
     assert.equal(repeated.writes, 0);
     assert.equal(repeated.collectionWrites, 0);
     assert.equal(sqliteTotalChanges(context.db), beforeRepeat);
+  } finally {
+    context.close();
+  }
+});
+
+test('smoke-reader replacement, authority bootstrap, and scope updates commit atomically and rerun with zero writes', () => {
+  const context = createPlatformIdentityContext({
+    users: [
+      { id: 'U-admin', status: 'Активен', role: 'Администратор', name: 'Admin' },
+      { id: 'U-finance', status: 'Активен', role: 'Офис-менеджер', name: 'Finance' },
+      {
+        id: PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID,
+        status: 'Активен',
+        role: 'Администратор',
+        name: 'Legacy smoke admin',
+        email: 'legacy-smoke@example.test',
+        password: 'h2:scrypt:c2FsdA:aGFzaA',
+        tokenVersion: 4,
+        allowFrontendLogin: true,
+        frontendAccess: true,
+      },
+    ],
+  });
+  try {
+    const state = seedCollections(context.db);
+    const plan = resolvedPlan(context, state);
+    const branchId = 'branch-approved-head-office';
+    const membershipId = deriveCanonicalMembershipId({
+      companyId: COMPANY_ID,
+      principalId: PRODUCTION_SMOKE_READER_PRINCIPAL_ID,
+    }).membershipId;
+    plan.smokeIdentityTransition = {
+      transitionVersion: 1,
+      status: 'APPROVED',
+      sourcePrincipalId: PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID,
+      expectedSourceRole: 'Администратор',
+      replacement: {
+        id: PRODUCTION_SMOKE_READER_PRINCIPAL_ID,
+        name: 'Production Smoke Reader',
+        email: PRODUCTION_SMOKE_READER_EMAIL,
+        role: PRODUCTION_SMOKE_READER_ROLE,
+      },
+      membership: {
+        id: membershipId,
+        companyId: COMPANY_ID,
+        branchId,
+        roleTemplateKey: PRODUCTION_SMOKE_READER_TEMPLATE_KEY,
+        roleTemplateVersion: 1,
+      },
+    };
+    const bootstrap = plan.authority.identityBootstrap;
+    bootstrap.roleTemplates.push({
+      templateKey: PRODUCTION_SMOKE_READER_TEMPLATE_KEY,
+      templateVersion: 1,
+      displayName: 'Production smoke read-only identity',
+      capabilities: [],
+    });
+    bootstrap.memberships.push({
+      id: membershipId,
+      principalId: PRODUCTION_SMOKE_READER_PRINCIPAL_ID,
+      status: 'active',
+      roleTemplateKey: PRODUCTION_SMOKE_READER_TEMPLATE_KEY,
+      roleTemplateVersion: 1,
+      companyWideBranchAuthority: false,
+      branchIds: [branchId],
+      capabilityAssignments: [],
+    });
+    bootstrap.intentionallyUnmappedUserIds = [PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID];
+    plan.actorMappings.push(
+      {
+        userId: PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID,
+        action: 'NO_MEMBERSHIP',
+        candidateForProductionMembership: false,
+      },
+      {
+        userId: PRODUCTION_SMOKE_READER_PRINCIPAL_ID,
+        action: 'CREATE_MEMBERSHIP',
+        membershipId,
+        companyId: COMPANY_ID,
+        tenantId: COMPANY_ID,
+      },
+    );
+    const originalUsers = context.readUsers();
+    const transitionPreview = planProductionSmokeIdentityTransition({
+      users: originalUsers,
+      config: plan.smokeIdentityTransition,
+    });
+    const projectedUsers = getProjectedSmokeIdentityUsers(transitionPreview);
+    bootstrap.approval.configChecksum = calculateBootstrapChecksum(context.db, bootstrap, {
+      usersDirectorySnapshot: buildUsersDirectorySnapshot(projectedUsers),
+    });
+    plan.expected.collectionCounts.users = [originalUsers.length, projectedUsers.length];
+    plan.expected.collectionFingerprints.users = [
+      collectionFingerprint(originalUsers),
+      collectionFingerprint(projectedUsers),
+    ];
+    plan.expected.identityCounts.company_memberships = [0, 3];
+    plan.expected.identityCounts.membership_branch_access = [0, 3];
+    plan.expected.identityCounts.role_templates = [0, 2];
+    plan.expected.identityCounts.authorization_audit_events = [0, 10];
+
+    const preview = planProductionScopeRemediation({ db: context.db, plan });
+    assert.equal(preview.readyToApply, true, JSON.stringify(preview.blockers));
+    assert.equal(preview.smokeIdentity.status, 'pending');
+    assert.ok(preview.plannedDiff.CREATE.some(item => (
+      item.type === 'User' && item.id === PRODUCTION_SMOKE_READER_PRINCIPAL_ID
+    )));
+    assert.ok(preview.plannedDiff.UPDATE.some(item => (
+      item.type === 'User' && item.id === PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID
+    )));
+
+    const applied = applyProductionScopeRemediation({
+      db: context.db,
+      plan,
+      explicitApply: true,
+      expectedPlanChecksum: preview.planChecksum,
+    });
+    assert.equal(applied.status, 'succeeded');
+    assert.equal(applied.smokeIdentityStatus, 'succeeded');
+    const appliedUsers = context.readUsers();
+    assert.equal(appliedUsers.find(user => user.id === PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID).status, 'Неактивен');
+    assert.equal(appliedUsers.find(user => user.id === PRODUCTION_SMOKE_READER_PRINCIPAL_ID).role, PRODUCTION_SMOKE_READER_ROLE);
+    assert.equal(context.db.prepare(`
+      SELECT COUNT(*) AS count FROM company_memberships WHERE principalId = ? AND status = 'active'
+    `).get(PRODUCTION_SMOKE_READER_PRINCIPAL_ID).count, 1);
+
+    const rerunPreview = planProductionScopeRemediation({ db: context.db, plan });
+    assert.equal(rerunPreview.readyToApply, true, JSON.stringify(rerunPreview.blockers));
+    assert.equal(rerunPreview.smokeIdentity.status, 'already_applied');
+    assert.deepEqual(rerunPreview.plannedDiff.CREATE, []);
+    assert.deepEqual(rerunPreview.plannedDiff.UPDATE, []);
+    const beforeRerun = sqliteTotalChanges(context.db);
+    const rerun = applyProductionScopeRemediation({
+      db: context.db,
+      plan,
+      explicitApply: true,
+      expectedPlanChecksum: rerunPreview.planChecksum,
+    });
+    assert.equal(rerun.status, 'noop');
+    assert.equal(rerun.writes, 0);
+    assert.equal(sqliteTotalChanges(context.db), beforeRerun);
+  } finally {
+    context.close();
+  }
+});
+
+test('failure immediately after smoke identity mutation rolls the replacement back', () => {
+  const context = createPlatformIdentityContext({
+    users: [{
+      id: PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID,
+      status: 'Активен',
+      role: 'Администратор',
+      name: 'Legacy smoke admin',
+      email: 'legacy-smoke@example.test',
+      password: 'h2:scrypt:c2FsdA:aGFzaA',
+      tokenVersion: 1,
+    }],
+  });
+  try {
+    seedCollections(context.db);
+    const before = context.db.prepare("SELECT json FROM app_data WHERE name = 'users'").get().json;
+    const transition = {
+      transitionVersion: 1,
+      status: 'APPROVED',
+      sourcePrincipalId: PRODUCTION_SMOKE_SOURCE_PRINCIPAL_ID,
+      expectedSourceRole: 'Администратор',
+      replacement: {
+        id: PRODUCTION_SMOKE_READER_PRINCIPAL_ID,
+        name: 'Production Smoke Reader',
+        email: PRODUCTION_SMOKE_READER_EMAIL,
+        role: PRODUCTION_SMOKE_READER_ROLE,
+      },
+      membership: {
+        id: deriveCanonicalMembershipId({
+          companyId: COMPANY_ID,
+          principalId: PRODUCTION_SMOKE_READER_PRINCIPAL_ID,
+        }).membershipId,
+        companyId: COMPANY_ID,
+        branchId: 'branch-approved-head-office',
+        roleTemplateKey: PRODUCTION_SMOKE_READER_TEMPLATE_KEY,
+        roleTemplateVersion: 1,
+      },
+    };
+    const smokeOnlyTransaction = context.db.transaction(() => {
+      const smokePlan = planProductionSmokeIdentityTransition({
+        users: context.readUsers(),
+        config: transition,
+        usersRawFingerprint: crypto.createHash('sha256').update(before).digest('hex'),
+      });
+      const { applyProductionSmokeIdentityTransition } = require('../server/lib/production-smoke-identity.js');
+      applyProductionSmokeIdentityTransition({
+        db: context.db,
+        config: transition,
+        expectedTransitionChecksum: smokePlan.transitionChecksum,
+        mutationTimestamp: '2026-08-25T00:00:00.000Z',
+      });
+      throw new Error('forced-after-smoke-transition');
+    });
+    assert.throws(() => smokeOnlyTransaction.immediate(), /forced-after-smoke-transition/);
+    assert.equal(context.db.prepare("SELECT json FROM app_data WHERE name = 'users'").get().json, before);
   } finally {
     context.close();
   }

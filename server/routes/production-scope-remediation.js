@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-const defaultPlan = require('../config/production-scope-remediation-plan');
+const defaultPlan = require('../config/production-scope-remediation-active-plan');
 const defaultEnvironment = require('../config/production-scope-remediation-environment');
 const {
   consumeOperationRequest,
@@ -67,6 +67,9 @@ function registerProductionScopeRemediationRoutes(router, deps) {
       || process.env.PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODE
     ),
     getSigningSecret = () => process.env.PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET,
+    getExpectedExecutionSha = () => (
+      process.env.PRODUCTION_SCOPE_REMEDIATION_EXPECTED_EXECUTION_SHA
+    ),
     getRuntimeIdentity = () => runtimeIdentityFromEnv(),
     getConservationState = () => ({
       appDisabled: process.env.APP_DISABLED === 'true',
@@ -75,6 +78,8 @@ function registerProductionScopeRemediationRoutes(router, deps) {
         || String(process.env.GSM_ENABLED || '').toLowerCase() === 'off',
       storageWriteGuardEnabled:
         process.env.PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE === 'true',
+      schemaCompatibilityDisabled:
+        process.env.PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY !== 'true',
       cleanResetDisabled: process.env.SKYTECH_CLEAN_RESET_ENABLED !== 'true',
       adminResetDisabled: !String(process.env.ADMIN_RESET_PASSWORD || ''),
     }),
@@ -103,6 +108,7 @@ function registerProductionScopeRemediationRoutes(router, deps) {
       fail('REMEDIATION_MODE_NOT_ENABLED', 'Not found', 404);
     }
     const runtime = getRuntimeIdentity() || {};
+    const expectedExecutionSha = String(getExpectedExecutionSha() || '').trim().toLowerCase();
     let exactDatabasePath = false;
     try {
       const stat = fs.lstatSync(dbPath);
@@ -122,6 +128,8 @@ function registerProductionScopeRemediationRoutes(router, deps) {
       && Boolean(String(runtime.replicaId || '').trim())
       && /^[a-f0-9]{40}$/.test(String(runtime.gitCommitSha || ''))
       && runtime.gitCommitSha === actualDeployedSha().toLowerCase()
+      && /^[a-f0-9]{40}$/.test(expectedExecutionSha)
+      && expectedExecutionSha === actualDeployedSha().toLowerCase()
       && exactDatabasePath
       && plan?.sourceDbPath
       && path.resolve(plan.sourceDbPath) === path.resolve(expectedEnvironment.sourceDbPath)

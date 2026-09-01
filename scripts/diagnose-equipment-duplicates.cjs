@@ -11,14 +11,26 @@ const Database = serverRequire('better-sqlite3');
 const args = process.argv.slice(2);
 const jsonOutput = args.includes('--json');
 const dbArgIndex = args.indexOf('--db');
-const dbPath = path.resolve(rootDir, dbArgIndex >= 0 ? args[dbArgIndex + 1] : (process.env.DB_PATH || 'server/data/app.sqlite'));
+if (dbArgIndex < 0 || !args[dbArgIndex + 1]) {
+  console.error('Refusing diagnostics without an explicit --db path.');
+  process.exit(2);
+}
+for (let index = 0; index < args.length; index += 1) {
+  const argument = args[index];
+  if (argument === '--db') index += 1;
+  else if (argument !== '--json') throw new Error(`Unknown argument: ${argument}`);
+}
+const dbPath = path.resolve(rootDir, args[dbArgIndex + 1]);
 
 function readCollection(db, name, fallback) {
   const row = db.prepare('SELECT json FROM app_data WHERE name = ?').get(name);
   if (!row || typeof row.json !== 'string') return fallback;
   try {
     const parsed = JSON.parse(row.json);
-    return Array.isArray(fallback) && !Array.isArray(parsed) ? fallback : parsed;
+    if (Array.isArray(fallback) && !Array.isArray(parsed)) {
+      throw new Error(`app_data.${name} must contain an array.`);
+    }
+    return parsed;
   } catch (error) {
     throw new Error(`Failed to parse app_data.${name}: ${error.message}`);
   }

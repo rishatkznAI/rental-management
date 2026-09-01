@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 
@@ -8,9 +7,16 @@ const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const Database = serverRequire('better-sqlite3');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('../server/lib/sqlite-readonly-statement.js');
+const {
   buildAccidentalReturnRepairPlan,
-  applyAccidentalReturnRepairPlan,
 } = require('../server/lib/accidental-return-repair.js');
+const {
+  assertAuditedMaintenanceApplyUnavailable,
+  parseAppDataValue,
+  resolveExplicitDatabasePath,
+} = require('../server/lib/maintenance-script-safety.js');
 
 const COLLECTIONS = [
   'rentals',
@@ -31,7 +37,7 @@ const COLLECTIONS = [
 
 function parseArgs(argv) {
   const args = {
-    db: path.resolve(process.cwd(), 'server/data/app.sqlite'),
+    db: '',
     rentalId: '',
     serviceId: '',
     dryRun: false,
@@ -49,6 +55,7 @@ function parseArgs(argv) {
     else if (arg.startsWith('--service-id=')) args.serviceId = arg.slice('--service-id='.length);
     else if (arg === '--db') args.db = path.resolve(argv[++index] || '');
     else if (arg.startsWith('--db=')) args.db = path.resolve(arg.slice('--db='.length));
+    else throw new Error(`Unknown argument: ${arg}`);
   }
   if (!args.apply) args.dryRun = true;
   return args;
@@ -57,34 +64,15 @@ function parseArgs(argv) {
 function readCollections(dbPath) {
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
-    const rows = db.prepare(`SELECT name, json FROM app_data WHERE name IN (${COLLECTIONS.map(() => '?').join(',')})`).all(...COLLECTIONS);
+    const rows = prepareSqliteReadonlyStatement(db, `SELECT name, json FROM app_data WHERE name IN (${COLLECTIONS.map(() => '?').join(',')})`).all(...COLLECTIONS);
     const collections = Object.fromEntries(COLLECTIONS.map(name => [name, []]));
     for (const row of rows) {
-      try {
-        collections[row.name] = row.json ? JSON.parse(row.json) : [];
-      } catch {
-        collections[row.name] = [];
-      }
+      collections[row.name] = parseAppDataValue(row, row.name, { expected: 'array', missing: [] });
     }
     return collections;
   } finally {
     db.close();
   }
-}
-
-function writeCollection(db, name, value) {
-  db.prepare(`
-    INSERT INTO app_data (name, json, updated_at)
-    VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(name) DO UPDATE SET json = excluded.json, updated_at = CURRENT_TIMESTAMP
-  `).run(name, JSON.stringify(value));
-}
-
-function createBackup(dbPath) {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupPath = `${dbPath}.backup-${stamp}`;
-  fs.copyFileSync(dbPath, backupPath);
-  return backupPath;
 }
 
 function printJson(payload) {
@@ -144,16 +132,10 @@ function main() {
     console.error('Usage: node scripts/repair-accidental-return.js --rental-id <id> [--dry-run|--apply] [--db path]');
     process.exit(2);
   }
-  if (args.apply && args.dryRun) {
-    console.error('Choose either --dry-run or --apply.');
-    process.exit(2);
-  }
-  if (!fs.existsSync(args.db)) {
-    console.error(`DB not found: ${args.db}`);
-    process.exit(2);
-  }
+  const dbPath = resolveExplicitDatabasePath(args.db);
+  assertAuditedMaintenanceApplyUnavailable(args.apply, 'accidental-return repair');
 
-  const collections = readCollections(args.db);
+  const collections = readCollections(dbPath);
   const plan = buildAccidentalReturnRepairPlan(collections, {
     rentalId: args.rentalId,
     serviceId: args.serviceId,
@@ -167,32 +149,6 @@ function main() {
     backupPath: null,
     plan,
   };
-
-  if (args.apply) {
-    if (!plan.ok) {
-      if (args.json) printJson(payload);
-      else printPlan(plan, payload);
-      process.exit(3);
-    }
-    const backupPath = createBackup(args.db);
-    const result = applyAccidentalReturnRepairPlan(collections, plan, {
-      backupVerified: fs.existsSync(backupPath),
-    });
-    const db = new Database(args.db, { fileMustExist: true });
-    try {
-      db.transaction(() => {
-        writeCollection(db, 'rentals', result.collections.rentals);
-        writeCollection(db, 'gantt_rentals', result.collections.gantt_rentals);
-        writeCollection(db, 'service', result.collections.service);
-        writeCollection(db, 'equipment', result.collections.equipment);
-        writeCollection(db, 'audit_logs', result.collections.audit_logs);
-      })();
-    } finally {
-      db.close();
-    }
-    payload.productionDataChanged = true;
-    payload.backupPath = backupPath;
-  }
 
   if (args.json) printJson(payload);
   else printPlan(plan, payload);

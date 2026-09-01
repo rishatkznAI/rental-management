@@ -40,6 +40,8 @@ import {
   useUpdateKnowledgeBaseModule,
   useUpdateKnowledgeBaseProgress,
 } from '../hooks/useKnowledgeBase';
+import { usePermissions } from '../lib/permissions';
+import { TECHNICAL_AUDITOR_ROLE } from '../lib/userStorage';
 import { cn } from '../lib/utils';
 import { staffService } from '../services/staff.service';
 import type {
@@ -185,6 +187,7 @@ function getAudienceLabel(audience: KnowledgeBaseModule['audience']) {
 
 function moduleMatchesRole(module: KnowledgeBaseModule, role?: string | null) {
   if (!role) return false;
+  if (role === TECHNICAL_AUDITOR_ROLE) return true;
   if (isReviewerRole(role)) return true;
   if (role === 'Менеджер по аренде') return module.audience === 'rental' || module.audience === 'all';
   if (role === 'Менеджер по продажам') return module.audience === 'sales' || module.audience === 'all';
@@ -368,11 +371,17 @@ function FieldLabel({ children }: React.PropsWithChildren) {
 
 export default function KnowledgeBase() {
   const { user } = useAuth();
-  const { data: modules = [] } = useKnowledgeBaseModulesList();
-  const { data: progress = [] } = useKnowledgeBaseProgressList();
+  const { canReadCollection } = usePermissions();
+  const { data: modules = [] } = useKnowledgeBaseModulesList({
+    enabled: canReadCollection('knowledge_base_modules'),
+  });
+  const { data: progress = [] } = useKnowledgeBaseProgressList({
+    enabled: canReadCollection('knowledge_base_progress'),
+  });
   const { data: users = [] } = useQuery<TrainingUser[]>({
     queryKey: ['knowledge-base-users'],
     queryFn: staffService.getManagerOptions,
+    enabled: isReviewerRole(user?.role),
     staleTime: 1000 * 60 * 5,
   });
   const createProgress = useCreateKnowledgeBaseProgress();

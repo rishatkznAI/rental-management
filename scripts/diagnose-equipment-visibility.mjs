@@ -5,7 +5,18 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const Database = require('../server/node_modules/better-sqlite3');
 
-const dbPath = process.argv[2] || process.env.DB_PATH || 'server/data/app.sqlite';
+function parseArgs(argv) {
+  const args = { db: '' };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--db') args.db = argv[++index] || '';
+    else throw new Error(`Unknown argument: ${argument}`);
+  }
+  if (!args.db) throw new Error('Refusing diagnostics without an explicit --db path.');
+  return args;
+}
+
+const { db: dbPath } = parseArgs(process.argv.slice(2));
 
 function text(value) {
   return String(value ?? '').trim();
@@ -19,7 +30,8 @@ function parseCollection(db, name, fallback = []) {
   const row = db.prepare('select json from app_data where name = ?').get(name);
   if (!row) return fallback;
   const parsed = JSON.parse(row.json);
-  return Array.isArray(parsed) ? parsed : fallback;
+  if (!Array.isArray(parsed)) throw new Error(`Collection ${name} must contain an array.`);
+  return parsed;
 }
 
 function countBy(list, field) {

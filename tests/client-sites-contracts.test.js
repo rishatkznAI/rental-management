@@ -5,20 +5,26 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../server/package.json', import.meta.url));
 const express = serverRequire('express');
+const Database = serverRequire('better-sqlite3');
 
 const { createAccessControl } = require('../server/lib/access-control.js');
+const { createBusinessNumberingService } = require('../server/lib/business-numbering.js');
+const { createNumberSequenceAllocator } = require('../server/lib/number-sequences.js');
 const { isTenantOwnedCollection } = require('../server/lib/tenant-data-boundary.js');
 const { registerCrudRoutes } = require('../server/routes/crud.js');
 const { registerClientMasterDataRoutes } = require('../server/routes/client-master-data.js');
 const { createClientMasterDataLifecycleService } = require('../server/lib/client-master-data-lifecycle.js');
 const { ensureClientCounterpartyFoundation } = require('../server/lib/counterparty.js');
+const { createRequestIdempotencyService } = require('../server/lib/request-idempotency.js');
+const { createAuditLogger } = require('../server/lib/security-audit.js');
+const { createServiceAuditLog } = require('../server/lib/service-audit-log.js');
 const {
   buildClientObjectDebtBreakdown,
   enrichRecordFromRentalLinks,
   normalizeClientRelationLinks,
 } = require('../server/lib/client-relations.js');
 
-function makeCrudApp(initial = {}) {
+function makeCrudApp(initial = {}, options = {}) {
   const state = {
     counterparties: [],
     clients: [],
@@ -50,6 +56,18 @@ function makeCrudApp(initial = {}) {
   }
   const app = express();
   app.use(express.json());
+  const idempotencyDb = new Database(':memory:');
+  idempotencyDb.exec(`
+    CREATE TABLE app_data (
+      name TEXT PRIMARY KEY,
+      json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  const requestIdempotency = createRequestIdempotencyService({
+    db: idempotencyDb,
+    nowIso: () => '2026-05-07T12:00:00.000Z',
+  });
   const readData = name => {
     const rows = state[name] || [];
     if ([
@@ -68,7 +86,9 @@ function makeCrudApp(initial = {}) {
     }
     return rows;
   };
-  const writeData = (name, value) => {
+  let persistNumberedBatch = null;
+  let nextBatchFailure = null;
+  const applyWriteData = (name, value) => {
     state[name] = isTenantOwnedCollection(name) && Array.isArray(value)
       ? value.map(record => ({
           ...record,
@@ -78,15 +98,58 @@ function makeCrudApp(initial = {}) {
       : value;
   };
   const writeDataBatch = entries => {
-    for (const entry of entries || []) writeData(entry.name, entry.value);
+    if (persistNumberedBatch) return persistNumberedBatch.immediate(entries);
+    for (const entry of entries || []) applyWriteData(entry.name, entry.value);
   };
+  const writeData = (name, value) => writeDataBatch([{ name, value }]);
   ensureClientCounterpartyFoundation({
     readData,
     writeDataBatch,
     logger: { log() {}, warn() {} },
     nowIso: () => '2026-05-07T12:00:00.000Z',
   });
+  const businessNumbering = options.businessNumbering ? createBusinessNumberingService({
+    allocator: createNumberSequenceAllocator({
+      db: idempotencyDb,
+      scope: { scopeType: 'company', scopeId: 'COMPANY-A' },
+      nowIso: () => '2026-05-07T12:00:00.000Z',
+    }),
+    readData,
+    nowIso: () => '2026-05-07T12:00:00.000Z',
+  }) : null;
+  if (businessNumbering) {
+    const upsertAppData = idempotencyDb.prepare(`
+      INSERT INTO app_data (name, json)
+      VALUES (?, ?)
+      ON CONFLICT(name) DO UPDATE SET json = excluded.json, updated_at = CURRENT_TIMESTAMP
+    `);
+    persistNumberedBatch = idempotencyDb.transaction(entries => {
+      businessNumbering.preparePersistenceEntries(entries);
+      if (nextBatchFailure) {
+        const error = nextBatchFailure;
+        nextBatchFailure = null;
+        throw error;
+      }
+      for (const entry of entries || []) {
+        upsertAppData.run(entry.name, JSON.stringify(entry.value));
+        applyWriteData(entry.name, entry.value);
+      }
+    });
+  }
   const accessControl = createAccessControl({ readData });
+  let auditSequence = 0;
+  const serviceAuditLog = createServiceAuditLog({
+    readData,
+    writeData,
+    generateId: prefix => `${prefix}-test-${++auditSequence}`,
+    nowIso: () => '2026-05-07T12:00:00.000Z',
+  });
+  const auditLog = createAuditLogger({
+    readData,
+    writeData,
+    generateId: prefix => `${prefix}-test-${++auditSequence}`,
+    nowIso: () => '2026-05-07T12:00:00.000Z',
+  });
   const requireAuth = (req, _res, next) => {
     req.user = {
       userId: 'U-admin',
@@ -132,6 +195,7 @@ function makeCrudApp(initial = {}) {
     readData,
     writeData,
     writeDataBatch,
+    writeServiceDataBatch: writeDataBatch,
     deleteSessionsForUserIds: () => {},
     requireAuth,
     requireRead: requirePass,
@@ -151,12 +215,24 @@ function makeCrudApp(initial = {}) {
     nowIso: () => '2026-05-07T12:00:00.000Z',
     applyServiceTicketCreationEffects: () => {},
     accessControl,
-    auditLog: () => {},
-    serviceAuditLog: () => {},
+    auditLog,
+    serviceAuditLog,
     normalizeRecordClientLink: item => item,
     normalizeClientLinks: () => {},
+    requestIdempotency,
+    businessNumbering,
   }));
-  return { app, state };
+  return {
+    app,
+    state,
+    idempotencyDb,
+    failNextBatch() {
+      const error = new Error('Injected client contract batch failure');
+      error.code = 'INJECTED_CLIENT_CONTRACT_BATCH_FAILURE';
+      error.status = 503;
+      nextBatchFailure = error;
+    },
+  };
 }
 
 async function withServer(app, fn) {
@@ -182,7 +258,7 @@ async function request(baseUrl, method, path, body, headers = {}) {
 }
 
 test('inline client relation creation is idempotent across concurrent and unknown-outcome retries', async () => {
-  const { app, state } = makeCrudApp({
+  const { app, state, idempotencyDb } = makeCrudApp({
     clients: [{ id: 'C-1', company: 'Клиент', inn: '7707083893', innNormalized: '7707083893' }],
   });
 
@@ -203,7 +279,7 @@ test('inline client relation creation is idempotent across concurrent and unknow
     assert.equal(first.body.id, doubleClick.body.id);
     assert.equal(first.body.counterpartyId, state.clients[0].counterpartyId);
     assert.equal(state.client_objects.length, 1);
-    assert.equal(state.inline_relation_idempotency.length, 1);
+    assert.equal(idempotencyDb.prepare('SELECT COUNT(*) AS count FROM request_idempotency').get().count, 1);
 
     const contractPayload = {
       clientId: 'C-1',
@@ -225,6 +301,92 @@ test('inline client relation creation is idempotent across concurrent and unknow
     assert.equal(mismatchedRetry.status, 409);
     assert.equal(mismatchedRetry.body.code, 'IDEMPOTENCY_KEY_REUSED');
     assert.equal(state.client_contracts.length, 1);
+    assert.equal(idempotencyDb.prepare('SELECT COUNT(*) AS count FROM request_idempotency').get().count, 2);
+  });
+});
+
+test('the same inline relation key is independent across authoritative tenants', async () => {
+  const { app, state, idempotencyDb } = makeCrudApp({
+    clients: [
+      {
+        id: 'C-A',
+        company: 'Клиент A',
+        inn: '7707083893',
+        innNormalized: '7707083893',
+        companyId: 'COMPANY-A',
+        tenantId: 'COMPANY-A',
+      },
+      {
+        id: 'C-B',
+        company: 'Клиент B',
+        inn: '7807083894',
+        innNormalized: '7807083894',
+        companyId: 'COMPANY-B',
+        tenantId: 'COMPANY-B',
+      },
+    ],
+  });
+  const key = 'shared-tenant-key-0001';
+
+  await withServer(app, async baseUrl => {
+    const companyA = await request(baseUrl, 'POST', '/api/client_objects', {
+      clientId: 'C-A',
+      name: 'Склад A',
+      address: 'Казань',
+      status: 'active',
+    }, {
+      'Idempotency-Key': key,
+      'x-company-id': 'COMPANY-A',
+      'x-tenant-id': 'COMPANY-A',
+    });
+    const companyB = await request(baseUrl, 'POST', '/api/client_objects', {
+      clientId: 'C-B',
+      name: 'Склад B',
+      address: 'Москва',
+      status: 'active',
+    }, {
+      'Idempotency-Key': key,
+      'x-company-id': 'COMPANY-B',
+      'x-tenant-id': 'COMPANY-B',
+    });
+
+    assert.equal(companyA.status, 201, JSON.stringify(companyA.body));
+    assert.equal(companyB.status, 201, JSON.stringify(companyB.body));
+    assert.notEqual(companyA.body.id, companyB.body.id);
+    assert.equal(state.client_objects.length, 2);
+    assert.deepEqual(
+      idempotencyDb.prepare('SELECT tenant_id AS tenantId FROM request_idempotency ORDER BY tenant_id').all(),
+      [{ tenantId: 'COMPANY-A' }, { tenantId: 'COMPANY-B' }],
+    );
+  });
+});
+
+test('legacy inline idempotency keys are reserved without exposing historical payload', async () => {
+  const { app, state, idempotencyDb } = makeCrudApp({
+    clients: [{ id: 'C-1', company: 'Клиент', inn: '7707083893', innNormalized: '7707083893' }],
+  });
+  const rawLegacy = JSON.stringify([{
+    collection: 'client_objects',
+    key: 'legacy-object-key-0001',
+    entityId: 'DELETED-OBJECT',
+    historicalSecret: 'must-not-leak',
+  }]);
+  idempotencyDb.prepare('INSERT INTO app_data (name, json) VALUES (?, ?)')
+    .run('inline_relation_idempotency', rawLegacy);
+
+  await withServer(app, async baseUrl => {
+    const response = await request(baseUrl, 'POST', '/api/client_objects', {
+      clientId: 'C-1',
+      name: 'Новый склад',
+      address: 'Казань',
+      status: 'active',
+    }, { 'Idempotency-Key': 'legacy-object-key-0001' });
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.code, 'LEGACY_IDEMPOTENCY_KEY_RESERVED');
+    assert.doesNotMatch(JSON.stringify(response.body), /must-not-leak|DELETED-OBJECT/);
+    assert.equal(state.client_objects.length, 0);
+    assert.equal(idempotencyDb.prepare('SELECT json FROM app_data WHERE name = ?').get('inline_relation_idempotency').json, rawLegacy);
   });
 });
 
@@ -328,12 +490,54 @@ test('counterparty-native object accepts supplier-only identity without creating
       status: 'active',
     });
 
-    assert.equal(created.status, 201);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
     assert.equal(created.body.clientId, undefined);
     assert.equal(created.body.counterpartyId, supplier.id);
     assert.equal(state.clients.length, 0);
     assert.equal(state.counterparties.length, 1);
     assert.equal(state.counterparties[0], supplier);
+  });
+});
+
+test('unkeyed ClientContract numbering is atomic with app_data and preserves the default title', async () => {
+  const customer = {
+    id: 'CP-CUSTOMER',
+    type: 'legal_entity',
+    legalName: 'ООО Клиент',
+    status: 'active',
+    archivedAt: null,
+    roles: ['customer'],
+  };
+  const context = makeCrudApp({
+    counterparties: [customer],
+    counterparty_role_assignments: [{
+      id: 'A-CUSTOMER',
+      counterpartyId: customer.id,
+      roleCode: 'customer',
+      status: 'active',
+      validTo: null,
+    }],
+    clients: [{ id: 'C-1', counterpartyId: customer.id, company: 'ООО Клиент' }],
+  }, { businessNumbering: true });
+
+  await withServer(context.app, async baseUrl => {
+    context.failNextBatch();
+    const failed = await request(baseUrl, 'POST', '/api/client_contracts', { clientId: 'C-1' });
+    assert.equal(failed.status, 503, JSON.stringify(failed.body));
+    assert.equal(failed.body.code, 'INJECTED_CLIENT_CONTRACT_BATCH_FAILURE');
+    assert.equal(context.state.client_contracts.length, 0);
+    assert.equal(context.idempotencyDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 0);
+    assert.equal(context.idempotencyDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 0);
+    assert.equal(context.idempotencyDb.prepare('SELECT COUNT(*) AS count FROM app_data').get().count, 0);
+
+    const created = await request(baseUrl, 'POST', '/api/client_contracts', { clientId: 'C-1' });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    assert.equal(created.body.number, 'CTR-26-000001');
+    assert.equal(created.body.title, created.body.number);
+    assert.equal(context.state.client_contracts[0].title, created.body.number);
+    assert.equal(context.idempotencyDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 1);
+    assert.equal(context.idempotencyDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 1);
+    assert.equal(context.idempotencyDb.prepare("SELECT COUNT(*) AS count FROM app_data WHERE name = 'client_contracts'").get().count, 1);
   });
 });
 
@@ -991,7 +1195,7 @@ test('POST and GET /api/service keep client id and display snapshot', async () =
       status: 'new',
     });
 
-    assert.equal(created.status, 201);
+    assert.equal(created.status, 201, JSON.stringify(created.body));
     assert.equal(created.body.clientId, 'C-1');
     assert.equal(created.body.clientName, 'ООО Клиент');
 

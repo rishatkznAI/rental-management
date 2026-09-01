@@ -61,6 +61,7 @@ export type ReleaseSmokeConfig = {
   expectedFrontendCommit?: string;
   expectedFrontendCommitFull?: string;
   releaseType?: ReleaseType | string;
+  expectedCompanyHealthDirectionLinks?: number;
   readOnlySections?: Array<{ label: string; route: string; nav: RegExp }>;
 };
 
@@ -354,7 +355,7 @@ async function expectAdminLoginSucceeded(
   await expect(nav, 'main navigation should be visible after login').toBeVisible();
 }
 
-async function expectExecutiveCockpitVisible(page: Page) {
+async function expectExecutiveCockpitVisible(page: Page, expectedDirectionLinks = 6) {
   const executiveV2 = page.getByTestId('dashboard-executive-v2');
   const cockpit = page.getByTestId('dashboard-executive-cockpit');
   const keySignals = page.getByTestId('dashboard-key-signals-command').or(page.getByTestId('dashboard-key-signals')).first();
@@ -380,7 +381,7 @@ async function expectExecutiveCockpitVisible(page: Page) {
   await expect(keySignals, 'dashboard key signals should be visible').toBeVisible();
   await expect(keySignals.getByRole('heading', { name: /Требует внимания|Очередь внимания|Главные сигналы сегодня/ }), 'dashboard signal strip should be visible').toBeVisible();
   await expect(monthDynamics.getByRole('heading', { name: 'Динамика месяца' }), 'dashboard cash flow card should be visible').toBeVisible();
-  await expectDashboardCompanyHealthLayout(page, companyHealth);
+  await expectDashboardCompanyHealthLayout(page, companyHealth, expectedDirectionLinks);
   const monthDynamicsText = await monthDynamics.innerText();
   if (/План\s*Не задан/i.test(monthDynamicsText)) {
     await expect(companyHealth, 'company health must not compare revenue to an unavailable plan')
@@ -423,7 +424,11 @@ async function expectExecutiveCockpitVisible(page: Page) {
   expect(companyHealthHeadingsInFirstViewport, 'first viewport should not contain duplicate Здоровье компании headings').toBeLessThanOrEqual(1);
 }
 
-async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Locator) {
+async function expectDashboardCompanyHealthLayout(
+  page: Page,
+  companyHealth: Locator,
+  expectedDirectionLinks: number,
+) {
   await expect(companyHealth, 'dashboard company health region should be visible').toBeVisible();
   await expect(companyHealth.getByRole('heading', { name: 'Здоровье компании', exact: true }), 'dashboard company health heading should be visible').toBeVisible();
   await expect(companyHealth.getByTestId('dashboard-company-health-score'), 'dashboard company health score should be visible').toBeVisible();
@@ -467,7 +472,10 @@ async function expectDashboardCompanyHealthLayout(page: Page, companyHealth: Loc
   expect(layout.health?.visible, `dashboard company health region should have a visible box (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.score?.visible, `dashboard company health score should have a visible box (${JSON.stringify(layout)})`).toBe(true);
   expect(layout.directions?.visible, `dashboard company health directions should have a visible box (${JSON.stringify(layout)})`).toBe(true);
-  expect(layout.directionLinks, 'dashboard company health should include all six direction links for admin').toBe(6);
+  expect(
+    layout.directionLinks,
+    'dashboard company health should include the expected role-authorized direction links',
+  ).toBe(expectedDirectionLinks);
   expect(layout.healthWidthShare, `dashboard company health should fill its 12-column row (${JSON.stringify(layout)})`).toBeGreaterThanOrEqual(0.95);
   expect(layout.overflowX, `dashboard company health layout should not create horizontal overflow (${JSON.stringify(layout)})`).toBe(0);
 }
@@ -535,13 +543,18 @@ async function countVisibleHeadingsInViewport(page: Page, text: string) {
   }, text);
 }
 
-async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: string, testInfo?: TestInfo) {
+async function captureExecutiveCockpitScreenshots(
+  page: Page,
+  frontendUrl: string,
+  expectedDirectionLinks: number,
+  testInfo?: TestInfo,
+) {
   if (!testInfo) return;
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => window.localStorage.setItem('theme', 'dark'));
   await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-  await expectExecutiveCockpitVisible(page);
+  await expectExecutiveCockpitVisible(page, expectedDirectionLinks);
   await expect(page.locator('html')).toHaveClass(/dark/);
   await page.screenshot({
     path: testInfo.outputPath('production-dashboard-cockpit-desktop.png'),
@@ -550,7 +563,7 @@ async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: strin
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-  await expectExecutiveCockpitVisible(page);
+  await expectExecutiveCockpitVisible(page, expectedDirectionLinks);
   await page.screenshot({
     path: testInfo.outputPath('production-dashboard-cockpit-mobile.png'),
     fullPage: false,
@@ -558,7 +571,7 @@ async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: strin
 
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-  await expectExecutiveCockpitVisible(page);
+  await expectExecutiveCockpitVisible(page, expectedDirectionLinks);
   await page.screenshot({
     path: testInfo.outputPath('production-dashboard-cockpit-tablet.png'),
     fullPage: false,
@@ -567,7 +580,7 @@ async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: strin
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => window.localStorage.setItem('theme', 'light'));
   await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-  await expectExecutiveCockpitVisible(page);
+  await expectExecutiveCockpitVisible(page, expectedDirectionLinks);
   await expect(page.locator('html')).not.toHaveClass(/dark/);
   await page.screenshot({
     path: testInfo.outputPath('production-dashboard-cockpit-light-desktop.png'),
@@ -576,7 +589,7 @@ async function captureExecutiveCockpitScreenshots(page: Page, frontendUrl: strin
 
   await page.evaluate(() => window.localStorage.setItem('theme', 'dark'));
   await page.goto(appUrl(frontendUrl, '/'), { waitUntil: 'domcontentloaded' });
-  await expectExecutiveCockpitVisible(page);
+  await expectExecutiveCockpitVisible(page, expectedDirectionLinks);
 }
 
 async function directLoginSmoke(config: ReleaseSmokeConfig) {
@@ -769,8 +782,14 @@ export async function runReleaseSmoke(page: Page, config: ReleaseSmokeConfig, te
   await expectAdminLoginSucceeded(page, normalizedConfig, frontendBuild, backendBuild, () => loginStatus);
   await expectHealthyMain(page, 'dashboard');
   action = 'dashboard executive cockpit';
-  await expectExecutiveCockpitVisible(page);
-  await captureExecutiveCockpitScreenshots(page, normalizedConfig.frontendUrl, testInfo);
+  const expectedDirectionLinks = normalizedConfig.expectedCompanyHealthDirectionLinks ?? 6;
+  await expectExecutiveCockpitVisible(page, expectedDirectionLinks);
+  await captureExecutiveCockpitScreenshots(
+    page,
+    normalizedConfig.frontendUrl,
+    expectedDirectionLinks,
+    testInfo,
+  );
 
   const token = await page.evaluate(() => window.localStorage.getItem('app_auth_token'));
   expect(token, 'admin login should store auth token').toBeTruthy();

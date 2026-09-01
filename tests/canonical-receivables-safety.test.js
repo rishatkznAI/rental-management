@@ -87,14 +87,22 @@ test('Company Health, Dashboard, Finance, and Risks production reads do not refe
   assert.doesNotMatch(readPathSource, /canonical-receivables-repository/);
 });
 
-test('canonical repository/domain remain unreachable from production backend modules', () => {
+test('production backend modules do not directly import the canonical repository/domain', () => {
   const serverFiles = javascriptFiles('server').filter(file => ![
     'server/lib/canonical-receivable-domain.js',
     'server/lib/canonical-receivables-repository.js',
   ].includes(file));
-  const importSource = serverFiles.map(file => read(file)).join('\n');
-  assert.doesNotMatch(importSource, /canonical-receivables-repository/);
-  assert.doesNotMatch(importSource, /canonical-receivable-domain/);
+  const forbidden = new Set([
+    path.join(root, 'server/lib/canonical-receivable-domain.js'),
+    path.join(root, 'server/lib/canonical-receivables-repository.js'),
+  ]);
+  const offenders = serverFiles.flatMap(file => {
+    const absoluteFile = path.join(root, file);
+    return staticCommonJsDependencies(absoluteFile)
+      .filter(dependency => forbidden.has(dependency))
+      .map(dependency => ({ file, dependency: path.relative(root, dependency) }));
+  });
+  assert.deepEqual(offenders, []);
 });
 
 test('production entrypoint and executable-script import graph cannot reach canonical domain or repository', () => {

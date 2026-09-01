@@ -4,6 +4,9 @@ const os = require('os');
 const path = require('path');
 const Database = require('better-sqlite3');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+const {
   inspectFullBackupArchive,
   readStoredZipEntry,
   validateStoredZipEntry,
@@ -12,21 +15,36 @@ const {
   fileCrc32Sync,
   normalizeZipPath,
 } = require('./zip-store');
+const {
+  ALL_APP_DATA_COLLECTIONS,
+  PLATFORM_DEFAULT_TENANT_OVERLAY_COLLECTIONS,
+} = require('./app-data-scope-registry');
 
 const PRODUCTION_CONFIRMATION = 'SKYTECH_CLEAN_PRODUCTION_RESET';
 const ISOLATED_CONFIRMATION = 'SKYTECH_CLEAN_ISOLATED_RESET';
 const PURGE_CONFIRMATION = 'SKYTECH_PURGE_RESET_QUARANTINE';
 
+const MIXED_CATALOG_RETENTION_REASONS = Object.freeze({
+  knowledge_base_modules: 'Training platform defaults and tenant entries/overrides are retained byte-for-byte.',
+  service_works: 'Service-work platform defaults and tenant entries/overrides are retained byte-for-byte.',
+  spare_parts: 'Parts platform defaults and tenant entries/overrides are retained byte-for-byte.',
+  service_route_norms: 'Route-norm platform defaults and tenant entries/overrides are retained byte-for-byte.',
+  service_work_catalog: 'Legacy work-catalog platform defaults and tenant entries/overrides are retained byte-for-byte.',
+  spare_parts_catalog: 'Legacy parts-catalog platform defaults and tenant entries/overrides are retained byte-for-byte.',
+  service_work_names: 'Legacy work-name platform defaults and tenant entries/overrides are retained byte-for-byte.',
+  spare_part_names: 'Legacy part-name platform defaults and tenant entries/overrides are retained byte-for-byte.',
+});
+
 const RETAINED_COLLECTIONS = Object.freeze({
   users: 'Production user identities, authentication hashes, roles and account state.',
   app_settings: 'Application settings are retained byte-for-byte.',
   bot_users: 'MAX identities and their current role mappings are authentication identity data.',
-  knowledge_base_modules: 'System reference/training catalogue required by the application.',
-  service_works: 'Legacy service work catalogue used as a system reference list.',
-  spare_parts: 'Legacy spare-parts catalogue used as a system reference list.',
-  service_route_norms: 'System service-route reference norms.',
-  service_work_catalog: 'System service work catalogue.',
-  spare_parts_catalog: 'System spare-parts catalogue.',
+  public_site_cms: 'Tenant-owned public-site configuration is retained byte-for-byte; no ownership inference or automatic remediation is permitted.',
+  ...Object.fromEntries(PLATFORM_DEFAULT_TENANT_OVERLAY_COLLECTIONS.map(name => [
+    name,
+    MIXED_CATALOG_RETENTION_REASONS[name]
+      || 'Mixed catalogue partitions and stable IDs are retained byte-for-byte.',
+  ])),
 });
 
 const DELETED_COLLECTIONS = Object.freeze([
@@ -80,6 +98,9 @@ const DELETED_COLLECTIONS = Object.freeze([
   'repair_work_items',
   'repair_part_items',
   'service_audit_log',
+  'client_history',
+  'client_object_history',
+  'domain_history',
   'planner_items',
   'service_vehicles',
   'vehicle_trips',
@@ -92,6 +113,32 @@ const DELETED_COLLECTIONS = Object.freeze([
   'audit_logs',
   'snapshot',
 ]);
+
+const APP_DATA_RESET_DISPOSITIONS = [
+  ...Object.keys(RETAINED_COLLECTIONS),
+  ...DELETED_COLLECTIONS,
+];
+const duplicateResetDispositions = APP_DATA_RESET_DISPOSITIONS.filter(
+  (name, index, names) => names.indexOf(name) !== index,
+);
+const missingResetDispositions = ALL_APP_DATA_COLLECTIONS.filter(
+  name => !APP_DATA_RESET_DISPOSITIONS.includes(name),
+);
+const unknownResetDispositions = APP_DATA_RESET_DISPOSITIONS.filter(
+  name => !ALL_APP_DATA_COLLECTIONS.includes(name),
+);
+if (
+  duplicateResetDispositions.length > 0
+  || missingResetDispositions.length > 0
+  || unknownResetDispositions.length > 0
+) {
+  throw new Error(
+    'Skytech reset app_data disposition mismatch: '
+    + `duplicates=${[...new Set(duplicateResetDispositions)].join(',') || 'none'}; `
+    + `missing=${missingResetDispositions.join(',') || 'none'}; `
+    + `unknown=${unknownResetDispositions.join(',') || 'none'}.`,
+  );
+}
 
 const RETAINED_TABLES = Object.freeze({
   app_data: 'Collection storage; retained and selectively emptied.',
@@ -223,11 +270,11 @@ function parseCollectionRow(row) {
 }
 
 function listCollections(db) {
-  return db.prepare('SELECT name, json, updated_at FROM app_data ORDER BY name').all().map(parseCollectionRow);
+  return prepareSqliteReadonlyStatement(db, 'SELECT name, json, updated_at FROM app_data ORDER BY name').all().map(parseCollectionRow);
 }
 
 function listTables(db) {
-  return db.prepare(`
+  return prepareSqliteReadonlyStatement(db, `
     SELECT name
     FROM sqlite_master
     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
@@ -236,11 +283,11 @@ function listTables(db) {
 }
 
 function tableCount(db, table) {
-  return Number(db.prepare(`SELECT COUNT(*) AS count FROM ${quoteIdentifier(table)}`).get().count) || 0;
+  return Number(prepareSqliteReadonlyStatement(db, `SELECT COUNT(*) AS count FROM ${quoteIdentifier(table)}`).get().count) || 0;
 }
 
 function stableTableRows(db, table) {
-  const rows = db.prepare(`SELECT * FROM ${quoteIdentifier(table)}`).all();
+  const rows = prepareSqliteReadonlyStatement(db, `SELECT * FROM ${quoteIdentifier(table)}`).all();
   return rows.map((row) => JSON.stringify(row)).sort();
 }
 
@@ -249,7 +296,7 @@ function tableDigest(db, table) {
 }
 
 function databaseLogicalDigest(db) {
-  const collections = db.prepare('SELECT name, json, updated_at FROM app_data ORDER BY name').all();
+  const collections = prepareSqliteReadonlyStatement(db, 'SELECT name, json, updated_at FROM app_data ORDER BY name').all();
   const tables = listTables(db)
     .filter((name) => name !== 'app_data')
     .map((name) => ({ name, rowsSha256: tableDigest(db, name) }));
@@ -263,7 +310,7 @@ function databaseLogicalDigest(db) {
 }
 
 function schemaDigest(db) {
-  const rows = db.prepare(`
+  const rows = prepareSqliteReadonlyStatement(db, `
     SELECT type, name, tbl_name, sql
     FROM sqlite_master
     WHERE name NOT LIKE 'sqlite_autoindex_%'
@@ -307,7 +354,8 @@ function findRetainedLocalFileReferences(value, location = '$', found = []) {
   if (typeof value !== 'string') return found;
   const text = value.trim();
   if (/^(?:\/)?(?:uploads|photos|documents|files|attachments)\//i.test(text)
-    || /\/(?:uploads|photos|documents|files|attachments)\//i.test(text)) {
+    || /\/(?:uploads|photos|documents|files|attachments)\//i.test(text)
+    || /\/api\/public-site\/media\/[a-f0-9]{64}\//i.test(text)) {
     found.push(location);
   }
   return found;

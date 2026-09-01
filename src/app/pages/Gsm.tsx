@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Activity,
   AlertTriangle,
@@ -46,6 +46,27 @@ import {
   toGsmCoordinateNumber,
 } from '../lib/gsmEquipmentLabel.js';
 import {
+  deriveGsmPacketSignalState,
+  hasUsableGsmCoordinates,
+  hasUsableGsmPacketCoordinates,
+  isGsmTimestampWithinWindow,
+} from '../lib/gsmSignalState.js';
+import { deriveGsmGatewayOperationalState } from '../lib/gsmGatewayOperationalState.js';
+import {
+  findExactVisibleGsmEquipment,
+  resolveRequestedGsmEquipmentId,
+} from '../lib/gsmNavigationContext.js';
+import {
+  GSM_INGRESS_MODE_HTTP_TOKEN,
+  GSM_INGRESS_MODE_TCP_DEVICE_CREDENTIAL,
+  applyGsmIngressModeSelection,
+  applyGsmProtocolSelection,
+  buildGsmIngressTransportPayload,
+  resolveGsmIngressModeForForm,
+  validateGsmIngressSecretForForm,
+  type GsmIngressMode,
+} from '../lib/gsmIngressMode.js';
+import {
   isPointInsideZone,
   type GsmEquipmentSnapshot,
   type GsmMovementEntry,
@@ -85,6 +106,9 @@ type GsmBindingForm = {
   gsmDeviceId: string;
   gsmSimNumber: string;
   gsmProtocol: string;
+  ingressMode: GsmIngressMode;
+  ingressSecret: string;
+  ingressCredentialConfigured: boolean;
 };
 
 const EMPTY_GSM_BINDING_FORM: GsmBindingForm = {
@@ -93,6 +117,9 @@ const EMPTY_GSM_BINDING_FORM: GsmBindingForm = {
   gsmDeviceId: '',
   gsmSimNumber: '',
   gsmProtocol: '',
+  ingressMode: GSM_INGRESS_MODE_TCP_DEVICE_CREDENTIAL,
+  ingressSecret: '',
+  ingressCredentialConfigured: false,
 };
 
 const DEFAULT_CENTER: [number, number] = [55.796127, 49.106414];
@@ -342,46 +369,6 @@ function formatGatewayState(status: GsmGatewayStatus) {
   return 'Ошибка';
 }
 
-function getGatewayOperationalState(
-  status: GsmGatewayStatus,
-  recentPackets: GsmGatewayPacket[],
-  devices: GsmGatewayDevice[],
-) {
-  if (status.startError) {
-    return {
-      label: 'Ошибка подключения',
-      badge: 'danger' as const,
-      hint: status.startError,
-    };
-  }
-  if (status.disabled || status.gatewayEnabled === false) {
-    return {
-      label: 'Отключено',
-      badge: 'default' as const,
-      hint: 'GPRS-шлюз выключен в настройках или не запущен.',
-    };
-  }
-  if (recentPackets.length > 0 || status.packetsToday > 0 || status.packetsReceivedTotal > 0) {
-    return {
-      label: 'Подключено',
-      badge: 'success' as const,
-      hint: 'Пакеты поступают и сохраняются в журнале.',
-    };
-  }
-  if (status.connectionsActive > 0 || status.onlineConnections > 0 || devices.some(device => device.status === 'online')) {
-    return {
-      label: 'Ожидает пакеты',
-      badge: 'warning' as const,
-      hint: 'Соединение есть, но свежих пакетов ещё нет.',
-    };
-  }
-  return {
-    label: 'Нет данных',
-    badge: 'default' as const,
-    hint: 'Карта и телеметрия будут отображаться после подключения трекеров.',
-  };
-}
-
 function getParseStatusBadge(status?: string | null): 'success' | 'warning' | 'danger' | 'default' {
   if (status === 'parsed') return 'success';
   if (status === 'failed') return 'danger';
@@ -414,6 +401,12 @@ function makeGsmBindingForm(equipment?: Equipment | null): GsmBindingForm {
     gsmDeviceId: String(equipment.gsmDeviceId || equipment.gsmTrackerId || '').trim(),
     gsmSimNumber: String(equipment.gsmSimNumber || '').trim(),
     gsmProtocol: String(equipment.gsmProtocol || '').trim(),
+    ingressMode: resolveGsmIngressModeForForm({
+      ingressMode: equipment.gsmIngressMode,
+      protocol: equipment.gsmProtocol,
+    }),
+    ingressSecret: '',
+    ingressCredentialConfigured: equipment.gsmIngressCredentialConfigured === true,
   };
 }
 
@@ -653,12 +646,14 @@ function GsmLeafletMap({
 function filterRoutePoints(points: GsmRoutePoint[], period: RoutePeriod) {
   const now = Date.now();
   const windowMs = period === 'day' ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
-  return points.filter(point => now - new Date(point.at).getTime() <= windowMs);
+  return points.filter(point => isGsmTimestampWithinWindow(point.at, { nowMs: now, windowMs }));
 }
 
 export default function Gsm() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const rawRequestedEquipmentId = String(searchParams.get('equipmentId') || '').trim();
 
   const [tab, setTab] = React.useState<GsmTab>('overview');
   const [search, setSearch] = React.useState('');
@@ -679,6 +674,7 @@ export default function Gsm() {
   const [gsmBindingOpen, setGsmBindingOpen] = React.useState(false);
   const [gsmBindingForm, setGsmBindingForm] = React.useState<GsmBindingForm>(EMPTY_GSM_BINDING_FORM);
   const [bindingSearch, setBindingSearch] = React.useState('');
+  const appliedRequestedEquipmentIdRef = React.useRef('');
   const canSendGprsCommands = user?.role === 'Администратор' || user?.role === 'Офис-менеджер';
   const canBindGsmEquipment = user?.role === 'Администратор';
 
@@ -704,7 +700,31 @@ export default function Gsm() {
   const gatewayStatus = gsmDashboard.status || DEFAULT_GATEWAY_STATUS;
   const gsmDevices = gsmDashboard.devices || [];
   const recentGatewayPackets = gsmDashboard.recentPackets || [];
+  const dashboardObservedAt = Date.parse(gsmDashboard.generatedAt || '') || Date.now();
   const snapshots = gsmDashboard.snapshots || [];
+  const { data: requestedBindingContext = { items: [], limit: 1 } } = useQuery({
+    queryKey: ['gsmGateway', 'requested-binding', rawRequestedEquipmentId || 'none'],
+    queryFn: () => gsmGatewayService.searchBindings({
+      equipmentId: rawRequestedEquipmentId,
+      limit: 1,
+    }).catch(() => ({ items: [], limit: 1 })),
+    enabled: Boolean(rawRequestedEquipmentId),
+    staleTime: 30_000,
+  });
+  const requestedEquipment = React.useMemo(
+    () => findExactVisibleGsmEquipment(requestedBindingContext.items, rawRequestedEquipmentId),
+    [rawRequestedEquipmentId, requestedBindingContext.items],
+  );
+  const requestedEquipmentId = React.useMemo(
+    () => resolveRequestedGsmEquipmentId(
+      searchParams,
+      [
+        ...snapshots.map(snapshot => snapshot.equipment.id),
+        requestedEquipment?.id,
+      ],
+    ),
+    [requestedEquipment?.id, searchParams, snapshots],
+  );
   const gsmEquipmentLookup = React.useMemo(
     () => buildGsmEquipmentLookup(snapshots, gsmDevices),
     [gsmDevices, snapshots],
@@ -745,6 +765,7 @@ export default function Gsm() {
   const bindingEquipmentOptions = React.useMemo(() => {
     const byId = new Map<string, Equipment>();
     for (const item of equipmentOptions) byId.set(item.id, item);
+    if (requestedEquipment) byId.set(requestedEquipment.id, requestedEquipment);
     for (const item of bindingSearchResult.items) byId.set(item.id, item);
     return [...byId.values()].sort((left, right) => (
       buildEquipmentOptionLabel(left).localeCompare(buildEquipmentOptionLabel(right), 'ru', {
@@ -752,7 +773,7 @@ export default function Gsm() {
         sensitivity: 'base',
       })
     ));
-  }, [bindingSearchResult.items, equipmentOptions]);
+  }, [bindingSearchResult.items, equipmentOptions, requestedEquipment]);
 
   const filteredSnapshots = React.useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -779,21 +800,38 @@ export default function Gsm() {
 
   React.useEffect(() => {
     if (filteredSnapshots.length === 0) {
-      setSelectedId(null);
+      if (!(requestedEquipmentId && selectedId === requestedEquipmentId)) setSelectedId(null);
       return;
     }
     if (!selectedId || !filteredSnapshots.some(item => item.equipment.id === selectedId)) {
+      if (requestedEquipmentId && selectedId === requestedEquipmentId) return;
       setSelectedId(filteredSnapshots[0].equipment.id);
     }
-  }, [filteredSnapshots, selectedId]);
+  }, [filteredSnapshots, requestedEquipmentId, selectedId]);
 
   React.useEffect(() => {
+    if (!requestedEquipmentId) {
+      appliedRequestedEquipmentIdRef.current = '';
+      return;
+    }
+    if (appliedRequestedEquipmentIdRef.current === requestedEquipmentId) return;
+    appliedRequestedEquipmentIdRef.current = requestedEquipmentId;
+    setSearch('');
+    setSignalFilter('all');
+    setStatusFilter('all');
+    setSelectedId(requestedEquipmentId);
+    setRouteEquipmentId(requestedEquipmentId);
+  }, [requestedEquipmentId]);
+
+  React.useEffect(() => {
+    if (requestedEquipmentId) return;
     if (routeEquipmentId || gsmDevices.length === 0) return;
     setRouteEquipmentId(gsmDevices.find(device => device.equipmentId)?.equipmentId || '');
-  }, [gsmDevices, routeEquipmentId]);
+  }, [gsmDevices, requestedEquipmentId, routeEquipmentId]);
 
   const selectedSnapshot = React.useMemo(
-    () => filteredSnapshots.find(item => item.equipment.id === selectedId) || filteredSnapshots[0] || null,
+    () => filteredSnapshots.find(item => item.equipment.id === selectedId)
+      || (selectedId ? null : filteredSnapshots[0] || null),
     [filteredSnapshots, selectedId],
   );
   const selectedTrackerId = React.useMemo(
@@ -822,16 +860,21 @@ export default function Gsm() {
 
   const selectedRoutePoints = React.useMemo(
     () => {
-      const apiPoints = apiRoutePoints.map((point, index) => ({
-        lat: point.lat,
-        lng: point.lng,
-        source: 'gps' as const,
-        address: 'GSM точка',
-        at: point.receivedAt || point.deviceTime || new Date().toISOString(),
-        label: `GSM точка ${index + 1}`,
-      }));
+      const apiPoints = apiRoutePoints
+        .filter(point => hasUsableGsmCoordinates(point.lat, point.lng))
+        .map((point, index) => ({
+          lat: point.lat,
+          lng: point.lng,
+          source: 'gps' as const,
+          address: 'GSM точка',
+          at: point.receivedAt || point.deviceTime || new Date().toISOString(),
+          label: `GSM точка ${index + 1}`,
+        }));
       if (apiPoints.length > 0 && routeEquipmentId === selectedSnapshot?.equipment.id) return apiPoints;
-      return selectedSnapshot ? filterRoutePoints(selectedSnapshot.routePoints, routePeriod) : [];
+      return selectedSnapshot
+        ? filterRoutePoints(selectedSnapshot.routePoints, routePeriod)
+          .filter(point => hasUsableGsmCoordinates(point.lat, point.lng))
+        : [];
     },
     [apiRoutePoints, routeEquipmentId, routePeriod, selectedSnapshot],
   );
@@ -856,6 +899,9 @@ export default function Gsm() {
     const equipmentMarkerIds = new Set(equipmentMarkers.map(marker => marker.id));
     const packetMarkers = recentGatewayPackets
       .map((packet) => {
+        if (packet.direction === 'outbound') return null;
+        if (!hasUsableGsmPacketCoordinates(packet)) return null;
+        if (!isGsmTimestampWithinWindow(packet.receivedAt || packet.createdAt, { nowMs: dashboardObservedAt })) return null;
         const packetEquipment = resolveGsmPacketEquipment(packet, gsmEquipmentLookup);
         if (packetEquipment.equipmentId && equipmentMarkerIds.has(packetEquipment.equipmentId)) return null;
         const coordinates = getGsmCoordinateStatus(packet.lat, packet.lng);
@@ -869,14 +915,14 @@ export default function Gsm() {
             ? packetEquipment.label
             : `Не привязано · deviceId ${tracker}`,
           subtitle: [formatDateTime(packetReceivedAt(packet)), coordinates.warning].filter(Boolean).join(' · '),
-          signalState: 'online' as EquipmentGsmSignalState,
+          signalState: deriveGsmPacketSignalState(packet, { nowMs: dashboardObservedAt }),
           coordinateStatus: coordinates.status,
           coordinateWarning: coordinates.warning,
         };
       })
       .filter((marker): marker is MapMarker => Boolean(marker));
     return [...equipmentMarkers, ...packetMarkers];
-  }, [filteredSnapshots, gsmEquipmentLookup, recentGatewayPackets]);
+  }, [dashboardObservedAt, filteredSnapshots, gsmEquipmentLookup, recentGatewayPackets]);
 
   const suspiciousMapMarkers = React.useMemo(
     () => mapMarkers.filter(marker => marker.coordinateStatus === 'suspicious'),
@@ -948,7 +994,6 @@ export default function Gsm() {
     queryKey: ['gsmGateway', 'packets', selectedSnapshot?.equipment.id || 'all', selectedTrackerId || 'none'],
     queryFn: () => gsmGatewayService.getPacketsPaginated({
       equipmentId: selectedSnapshot?.equipment.id || undefined,
-      deviceId: selectedTrackerId || undefined,
       page: 1,
       pageSize: 50,
     }).then(response => response.items).catch(() => []),
@@ -960,7 +1005,6 @@ export default function Gsm() {
     queryKey: ['gsmGateway', 'commands', selectedSnapshot?.equipment.id || 'all', selectedTrackerId || 'none'],
     queryFn: () => gsmGatewayService.getCommandsPaginated({
       equipmentId: selectedSnapshot?.equipment.id || undefined,
-      deviceId: selectedTrackerId || undefined,
       page: 1,
       pageSize: 50,
     }).then(response => response.items).catch(() => []),
@@ -978,7 +1022,7 @@ export default function Gsm() {
       queryClient.invalidateQueries({ queryKey: ['gsmGateway'] });
     },
     onError: (error: Error) => {
-      toast.error(error.message || 'Не удалось отправить пакет в GPRS канал');
+      toast.error(error.message || 'Не удалось отправить пакет в GSM TCP-канал');
     },
   });
 
@@ -989,6 +1033,12 @@ export default function Gsm() {
       const gsmDeviceId = form.gsmDeviceId.trim();
       const gsmSimNumber = form.gsmSimNumber.trim();
       const gsmProtocol = form.gsmProtocol.trim();
+      const ingressSecret = form.ingressSecret;
+      const ingressTransport = buildGsmIngressTransportPayload({
+        gsmProtocol,
+        ingressMode: form.ingressMode,
+        ingressSecret,
+      });
 
       if (!equipmentId) {
         throw new Error('Выберите технику для привязки GSM-устройства.');
@@ -996,14 +1046,20 @@ export default function Gsm() {
       if (!gsmImei && !gsmDeviceId) {
         throw new Error('Укажите GSM IMEI или Device ID трекера.');
       }
+      validateGsmIngressSecretForForm({
+        ingressMode: form.ingressMode,
+        ingressSecret,
+        credentialConfigured: form.ingressCredentialConfigured,
+      });
 
       return gsmGatewayService.linkDevice({
         equipmentId,
-        imei: gsmImei || gsmDeviceId,
-        deviceType: 'UMKA',
-        protocol: gsmProtocol || 'WIALON IPS TCP',
-        sim1: gsmSimNumber,
-        oldServer: 'gw1.glonasssoft.ru:15050',
+        imei: gsmImei || undefined,
+        deviceId: gsmDeviceId || undefined,
+        protocol: ingressTransport.protocol,
+        ingressMode: ingressTransport.ingressMode,
+        sim1: gsmSimNumber || undefined,
+        ingressSecret: ingressTransport.ingressSecret,
       });
     },
     onSuccess: (result) => {
@@ -1019,21 +1075,30 @@ export default function Gsm() {
   });
 
   const openGsmBinding = React.useCallback((equipmentId?: string) => {
-    const selectedEquipment = bindingEquipmentOptions.find(item => item.id === equipmentId)
+    const preferredEquipmentId = equipmentId || requestedEquipmentId;
+    const selectedEquipment = bindingEquipmentOptions.find(item => item.id === preferredEquipmentId)
       || bindingEquipmentOptions.find(item => !String(item.gsmImei || '').trim() && !String(item.gsmDeviceId || item.gsmTrackerId || '').trim())
       || bindingEquipmentOptions[0]
       || null;
     setGsmBindingForm(makeGsmBindingForm(selectedEquipment));
     setBindingSearch('');
     setGsmBindingOpen(true);
-  }, [bindingEquipmentOptions]);
+  }, [bindingEquipmentOptions, requestedEquipmentId]);
 
   const handleGsmBindingEquipmentChange = React.useCallback((equipmentId: string) => {
     setGsmBindingForm(makeGsmBindingForm(bindingEquipmentOptions.find(item => item.id === equipmentId) || null));
   }, [bindingEquipmentOptions]);
 
-  const updateGsmBindingForm = React.useCallback((field: keyof GsmBindingForm, value: string) => {
+  const updateGsmBindingForm = React.useCallback((field: Exclude<keyof GsmBindingForm, 'ingressCredentialConfigured'>, value: string) => {
     setGsmBindingForm(current => ({ ...current, [field]: value }));
+  }, []);
+
+  const handleGsmProtocolChange = React.useCallback((protocol: string) => {
+    setGsmBindingForm(current => applyGsmProtocolSelection(current, protocol));
+  }, []);
+
+  const handleGsmIngressModeChange = React.useCallback((ingressMode: GsmIngressMode) => {
+    setGsmBindingForm(current => applyGsmIngressModeSelection(current, ingressMode));
   }, []);
 
   const handleSendGprsCommand = React.useCallback(() => {
@@ -1055,13 +1120,26 @@ export default function Gsm() {
     sendCommandMutation,
   ]);
 
-  const gatewayOperationalState = getGatewayOperationalState(gatewayStatus, recentGatewayPackets, gsmDevices);
+  const gatewayOperationalState = deriveGsmGatewayOperationalState(
+    gatewayStatus,
+    recentGatewayPackets,
+    gsmDevices,
+    { nowMs: dashboardObservedAt },
+  );
+  const gatewayRuntimeEndpoints = (gatewayStatus.runtimes || []).map(runtime => ({
+    ...runtime,
+    endpoint: `${runtime.host || '0.0.0.0'}:${runtime.port || runtime.tcpPort || '—'}`,
+    healthy: Boolean(runtime.gatewayEnabled || runtime.enabled) && !runtime.startError,
+  }));
+  const gatewayEndpointSummary = gatewayRuntimeEndpoints.length > 0
+    ? gatewayRuntimeEndpoints.map(runtime => `${runtime.key} ${runtime.endpoint}`).join(' · ')
+    : `${gatewayStatus.host || '0.0.0.0'}:${gatewayStatus.port || gatewayStatus.tcpPort}`;
   const hasLiveTelemetry = mapMarkers.length > 0 || recentGatewayPackets.length > 0 || gsmDevices.length > 0;
   const emptyStateCounters = [
     {
       label: 'Статус шлюза',
       value: gatewayOperationalState.label,
-      detail: `${gatewayStatus.host || '0.0.0.0'}:${gatewayStatus.port || gatewayStatus.tcpPort}`,
+      detail: gatewayEndpointSummary,
       icon: Server,
     },
     {
@@ -1140,7 +1218,7 @@ export default function Gsm() {
                 <div className="min-w-0">
                   <h2 className="break-words text-lg font-bold text-slate-900 dark:text-white">Карта и телеметрия будут отображаться после подключения трекеров</h2>
                   <p className="mt-1 break-words text-sm text-slate-600 dark:text-slate-400">
-                    Пока доступны состояние GPRS-шлюза, последние пакеты, активные устройства и очередь команд без имитации данных.
+                    Пока доступны состояние GSM TCP-шлюзов, последние пакеты, активные устройства и очередь команд без имитации данных.
                   </p>
                 </div>
               </div>
@@ -1265,7 +1343,7 @@ export default function Gsm() {
               История и маршрут
             </TabsTrigger>
             <TabsTrigger value="gateway" className="rounded-xl px-4 py-2 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-50 dark:data-[state=active]:bg-white dark:data-[state=active]:text-slate-950">
-              GPRS канал
+              TCP-шлюзы
             </TabsTrigger>
           </TabsList>
 
@@ -1277,11 +1355,11 @@ export default function Gsm() {
                     <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-cyan-700 dark:text-cyan-300">
                       <Server className="h-5 w-5" />
                     </div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">GPRS-шлюз</div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">GSM TCP-шлюз</div>
                     <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
                       {formatGatewayState(gatewayStatus)}
                     </div>
-                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">TCP :{gatewayStatus.tcpPort}</div>
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">{gatewayEndpointSummary}</div>
                   </CardContent>
                 </Card>
 
@@ -1338,10 +1416,16 @@ export default function Gsm() {
                 </div>
               )}
 
+              {gatewayStatus.partialDegradation && gatewayStatus.runtimeErrors?.length ? (
+                <div className="rounded-2xl border border-amber-200 dark:border-amber-400/20 bg-amber-50 dark:bg-amber-400/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-100">
+                  Часть GSM TCP-шлюзов недоступна: {gatewayStatus.runtimeErrors.map(item => `${item.runtime}: ${item.error}`).join(' · ')}
+                </div>
+              ) : null}
+
               <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
                 <Card className="min-w-0 border-slate-200 bg-white text-slate-900 dark:border-white/10 dark:bg-slate-950/70 dark:text-white">
                   <CardHeader className="min-w-0">
-                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Последние входящие пакеты</CardTitle>
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Последние пакеты · raw-журнал</CardTitle>
                     <CardDescription className="text-slate-600 dark:text-slate-400">
                       Сырые пакеты сохраняются до добавления конкретных парсеров протоколов.
                     </CardDescription>
@@ -1361,6 +1445,7 @@ export default function Gsm() {
                               <th className="px-3 py-2">IMEI / ID</th>
                               <th className="px-3 py-2">Техника</th>
                               <th className="px-3 py-2">Статус</th>
+                              <th className="px-3 py-2">Направление</th>
                               <th className="px-3 py-2">Координаты</th>
                               <th className="px-3 py-2"></th>
                             </tr>
@@ -1382,6 +1467,9 @@ export default function Gsm() {
                                   </td>
                                   <td className="px-3 py-2">
                                     <Badge variant={getParseStatusBadge(packet.parseStatus)}>{packet.parseStatus || 'pending'}</Badge>
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
+                                    {packet.direction === 'outbound' ? 'Исходящий' : 'Входящий'}
                                   </td>
                                   <td className="px-3 py-2 text-slate-700 dark:text-slate-300">
                                     <div>{formatCoordinates(packet.lat, packet.lng)}</div>
@@ -2230,17 +2318,21 @@ export default function Gsm() {
                     <div className="mb-3 inline-flex rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-3 text-cyan-700 dark:text-cyan-300">
                       <Server className="h-5 w-5" />
                     </div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">Шлюз GPRS</div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-slate-500">GSM TCP-шлюзы</div>
                     <div className="mt-2 text-2xl font-black text-slate-900 dark:text-white">
                       {formatGatewayState(gatewayStatus)}
                     </div>
-                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                      {gatewayStatus.host}:{gatewayStatus.port}
+                    <div className="mt-2 space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                      {gatewayRuntimeEndpoints.length > 0 ? gatewayRuntimeEndpoints.map(runtime => (
+                        <div key={runtime.key} className={runtime.healthy ? '' : 'text-rose-700 dark:text-rose-300'}>
+                          {runtime.key}: {runtime.endpoint} · {runtime.healthy ? 'работает' : runtime.startError || 'отключён'}
+                        </div>
+                      )) : <div>{gatewayEndpointSummary}</div>}
                     </div>
                     {gatewayStatus.startError ? (
                       <div className="mt-2 text-xs text-rose-700 dark:text-rose-300">{gatewayStatus.startError}</div>
                     ) : (
-                      <div className="mt-2 text-xs text-slate-500">Запущен: {formatDateTime(gatewayStatus.startedAt)}</div>
+                      <div className="mt-2 text-xs text-slate-500">Первый запуск: {formatDateTime(gatewayStatus.startedAt)}</div>
                     )}
                   </CardContent>
                 </Card>
@@ -2522,7 +2614,7 @@ export default function Gsm() {
                   <CardHeader>
                     <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Онлайн-соединения трекеров</CardTitle>
                     <CardDescription className="text-slate-600 dark:text-slate-400">
-                      Активные GPRS/TCP соединения с сервером. Если техника выбрана, список сужается под неё.
+                      Активные GSM TCP-соединения с сервером. Если техника выбрана, список сужается под неё.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -2570,7 +2662,7 @@ export default function Gsm() {
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_420px]">
                 <Card className="border-slate-200 dark:border-white/10 bg-white dark:bg-slate-950/70 text-slate-900 dark:text-white">
                   <CardHeader>
-                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Последние пакеты GPRS</CardTitle>
+                    <CardTitle className="text-xl font-bold text-slate-900 dark:text-white">Последние пакеты GSM TCP</CardTitle>
                     <CardDescription className="text-slate-600 dark:text-slate-400">
                       Входящие и исходящие сообщения по текущей технике. Для бинарных пакетов сохраняется HEX.
                     </CardDescription>
@@ -2643,7 +2735,9 @@ export default function Gsm() {
                       </div>
                     ) : (
                       <div className="max-h-[760px] space-y-3 overflow-y-auto pr-1">
-                        {gatewayCommands.map((command) => (
+                        {gatewayCommands.map((command) => {
+                          const commandStatus = command.effectiveStatus || command.status;
+                          return (
                           <div key={command.id} className="rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 p-4">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
@@ -2656,16 +2750,24 @@ export default function Gsm() {
                               </div>
                               <Badge
                                 variant={
-                                  command.status === 'sent'
+                                  commandStatus === 'sent'
                                     ? 'success'
-                                    : command.status === 'acknowledged'
+                                    : commandStatus === 'acknowledged'
                                       ? 'success'
-                                    : command.status === 'failed'
+                                    : commandStatus === 'failed' || commandStatus === 'superseded'
                                       ? 'danger'
                                       : 'warning'
                                 }
                               >
-                                {command.status === 'sent' ? 'Отправлено' : command.status === 'acknowledged' ? 'Подтверждено' : command.status === 'failed' ? 'Ошибка' : 'В очереди'}
+                                {commandStatus === 'sent'
+                                  ? 'Отправлено'
+                                  : commandStatus === 'acknowledged'
+                                    ? 'Подтверждено'
+                                    : commandStatus === 'failed'
+                                      ? 'Ошибка'
+                                      : commandStatus === 'superseded'
+                                        ? 'Отменена привязкой'
+                                        : 'В очереди'}
                               </Badge>
                             </div>
 
@@ -2675,11 +2777,13 @@ export default function Gsm() {
 
                             <div className="mt-3 space-y-1 text-xs text-slate-500">
                               <div>Формат: {command.encoding === 'hex' ? 'HEX' : 'Текст'}{command.appendNewline ? ' · с переводом строки' : ''}</div>
+                              {commandStatus === 'superseded' && <div className="text-rose-700 dark:text-rose-300">Команда относится к прежней привязке и больше не будет отправлена.</div>}
                               {command.sentAt && <div>Отправлено: {formatDateTime(command.sentAt)}</div>}
                               {command.error && <div className="text-rose-700 dark:text-rose-300">Ошибка: {command.error}</div>}
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </CardContent>
@@ -2763,16 +2867,48 @@ export default function Gsm() {
                   <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Протокол</span>
                   <Input
                     value={gsmBindingForm.gsmProtocol}
-                    onChange={event => updateGsmBindingForm('gsmProtocol', event.target.value)}
+                    onChange={event => handleGsmProtocolChange(event.target.value)}
                     placeholder="GT06 / Teltonika / Wialon IPS"
+                    className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-500"
+                  />
+                </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Режим приёма</span>
+                  <select
+                    value={gsmBindingForm.ingressMode}
+                    onChange={event => handleGsmIngressModeChange(event.target.value as GsmIngressMode)}
+                    className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 dark:border-white/10 dark:bg-slate-950/80 dark:text-white"
+                  >
+                    <option value={GSM_INGRESS_MODE_TCP_DEVICE_CREDENTIAL}>Публичный TCP · пароль устройства</option>
+                    <option value={GSM_INGRESS_MODE_HTTP_TOKEN}>HTTP/HTTPS · общий ingest token</option>
+                  </select>
+                </label>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200">Пароль TCP-устройства</span>
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={gsmBindingForm.ingressSecret}
+                    onChange={event => updateGsmBindingForm('ingressSecret', event.target.value)}
+                    disabled={gsmBindingForm.ingressMode === GSM_INGRESS_MODE_HTTP_TOKEN}
+                    placeholder={gsmBindingForm.ingressMode === GSM_INGRESS_MODE_HTTP_TOKEN ? 'Не используется в HTTP-режиме' : 'Не менее 8 символов'}
                     className="h-11 rounded-2xl border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 text-slate-900 dark:text-white placeholder:text-slate-500"
                   />
                 </label>
               </div>
 
               <div className="rounded-2xl border border-cyan-200 dark:border-cyan-300/20 bg-cyan-50 dark:bg-cyan-300/10 p-4 text-sm leading-6 text-cyan-900 dark:text-cyan-50">
-                Для автоматической привязки входящих пакетов достаточно, чтобы IMEI или Device ID в карточке техники совпадал с тем,
-                что передаёт трекер в GPRS-пакете.
+                {gsmBindingForm.ingressMode === GSM_INGRESS_MODE_TCP_DEVICE_CREDENTIAL
+                  ? 'Публичный TCP-вход принимает пакеты только после проверки индивидуального пароля устройства.'
+                  : 'HTTP/HTTPS-вход принимает пакеты по серверному ingest token; индивидуальный пароль устройства в этом режиме не хранится.'}
+                {gsmBindingForm.ingressMode === GSM_INGRESS_MODE_TCP_DEVICE_CREDENTIAL && (
+                  gsmBindingForm.ingressCredentialConfigured
+                    ? ' При редактировании оставьте пароль пустым, чтобы сохранить ранее настроенный.'
+                    : ' Для новой TCP-привязки пароль обязателен.'
+                )}
+                GSM-поля в карточке техники обновляются как проекция этой канонической привязки.
               </div>
             </div>
 

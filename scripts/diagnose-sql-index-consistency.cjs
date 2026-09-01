@@ -10,13 +10,14 @@ const Database = serverRequire('better-sqlite3');
 const { diagnoseSqlShadowConsistency } = require('../server/lib/sql-shadow-indexes.js');
 
 function parseArgs(argv) {
-  const args = { db: process.env.DB_PATH || 'server/data/app.sqlite', json: false, strict: false };
+  const args = { db: '', json: false, strict: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--db') args.db = argv[++index] || args.db;
+    if (arg === '--db') args.db = argv[++index] || '';
     else if (arg === '--json') args.json = true;
     else if (arg === '--strict') args.strict = true;
     else if (arg === '--help' || arg === '-h') args.help = true;
+    else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
 }
@@ -65,10 +66,11 @@ if (args.help) {
   process.exit(0);
 }
 
-const dbPath = path.resolve(rootDir, args.db);
 try {
+  if (!args.db) throw new Error('Refusing diagnostics without an explicit --db path.');
+  const dbPath = path.resolve(rootDir, args.db);
   if (!fs.existsSync(dbPath)) throw new Error(`SQLite database not found: ${dbPath}`);
-  const db = new Database(dbPath, { fileMustExist: true });
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     const report = diagnoseSqlShadowConsistency(db);
     const payload = { dbPath, generatedAt: new Date().toISOString(), ...report };

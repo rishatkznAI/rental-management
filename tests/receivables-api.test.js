@@ -64,6 +64,11 @@ function createApp() {
   const writeData = (name, value) => {
     state[name] = value;
   };
+  const writeDataBatch = entries => {
+    const staged = structuredClone(state);
+    for (const entry of entries) staged[entry.name] = structuredClone(entry.value);
+    Object.assign(state, staged);
+  };
   const accessControl = createAccessControl({ readData });
   const app = express();
   const router = express.Router();
@@ -73,6 +78,7 @@ function createApp() {
     const user = users[token];
     if (!user) return res.status(401).json({ ok: false, error: 'Unauthorized' });
     req.user = user;
+    req.actorScope = { companyId: 'COMPANY-FINANCE', tenantId: 'COMPANY-FINANCE' };
     next();
   };
   const requireRead = collection => (req, res, next) => {
@@ -91,6 +97,7 @@ function createApp() {
     requireWrite,
     readData,
     writeData,
+    writeDataBatch,
     accessControl,
     generateId: prefix => `${prefix}-${++idCounter}`,
     idPrefixes: { debt_collection_actions: 'DCA', receivable_payment_plans: 'RPP' },

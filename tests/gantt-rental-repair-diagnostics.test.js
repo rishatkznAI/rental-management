@@ -213,7 +213,7 @@ test('admin diagnostics report finds target gantt row and strips sensitive field
   assert.doesNotMatch(serialized, /Hidden Manager.+\+7999|\+7999|passport|private\.pdf|phone/i);
 });
 
-test('CLI dry-run works and apply stays blocked without backup confirmation', () => {
+test('CLI dry-run works and raw apply stays blocked by the audited-runner boundary', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gantt-repair-'));
   const dbPath = path.join(dir, 'app.sqlite');
   const reportPath = path.join(dir, 'report.json');
@@ -259,6 +259,6 @@ test('CLI dry-run works and apply stays blocked without backup confirmation', ()
       '--apply',
       '--json',
     ], { cwd: path.resolve(new URL('..', import.meta.url).pathname), encoding: 'utf8', stdio: 'pipe' }),
-    /--apply requires --backup-verified/,
+    /raw offline apply is disabled/,
   );
 });

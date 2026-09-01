@@ -4,6 +4,67 @@ const SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE = 'Недостаточно прав. �
 const SERVICE_AUDIT_COLLECTION = 'service_audit_log';
 const SERVICE_AUDIT_SOURCES = new Set(['web', 'api', 'bot', 'sync']);
 
+function normalizeServiceAuditLogList(value) {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) return value;
+  const error = new Error('Stored service audit history is malformed; refusing to overwrite it.');
+  error.code = 'SERVICE_AUDIT_HISTORY_SHAPE_INVALID';
+  error.status = 409;
+  throw error;
+}
+
+function auditedServiceMutationError(message) {
+  const error = new Error(message);
+  error.code = 'SERVICE_ATOMIC_AUDIT_REQUIRED';
+  error.status = 503;
+  return error;
+}
+
+function prepareServiceMutationAuditEntries({
+  reqOrUser,
+  serviceEvents = [],
+  securityEvents = [],
+  serviceAuditLog,
+  auditLog,
+} = {}) {
+  const entries = [];
+  if (serviceEvents.length > 0) {
+    if (typeof serviceAuditLog?.preparePersistenceEntry !== 'function') {
+      throw auditedServiceMutationError('Service semantic audit repository is unavailable.');
+    }
+    const prepared = serviceAuditLog.preparePersistenceEntry(reqOrUser, serviceEvents);
+    if (!prepared) throw auditedServiceMutationError('Service semantic audit event is incomplete.');
+    entries.push({ name: prepared.name, value: prepared.value });
+  }
+  if (securityEvents.length > 0) {
+    if (typeof auditLog?.preparePersistenceEntry !== 'function') {
+      throw auditedServiceMutationError('Security audit repository is unavailable.');
+    }
+    const prepared = auditLog.preparePersistenceEntry(reqOrUser, securityEvents);
+    if (!prepared) throw auditedServiceMutationError('Security audit event is incomplete.');
+    entries.push({ name: prepared.name, value: prepared.value });
+  }
+  return entries;
+}
+
+function prepareAuditedServiceMutationEntries({
+  businessEntries = [],
+  ...auditOptions
+} = {}) {
+  if (!Array.isArray(businessEntries) || businessEntries.length === 0) {
+    throw auditedServiceMutationError('Service mutation requires staged business entries.');
+  }
+  const entries = [
+    ...businessEntries.map(entry => ({ name: entry.name, value: entry.value })),
+    ...prepareServiceMutationAuditEntries(auditOptions),
+  ];
+  const names = entries.map(entry => entry.name);
+  if (new Set(names).size !== names.length) {
+    throw auditedServiceMutationError('Service mutation contains duplicate staged collections.');
+  }
+  return entries;
+}
+
 function isRepairItemCollection(collection) {
   return collection === 'repair_work_items' || collection === 'repair_part_items';
 }
@@ -93,9 +154,12 @@ function assertRepairItemsAdmin(user, context = {}) {
 }
 
 function inferServiceAuditSource(req, fallback = 'api') {
-  const raw = req?.body?.source || req?.query?.source || req?.headers?.['x-skytech-source'] || fallback;
-  const source = String(raw || '').trim().toLowerCase();
-  return SERVICE_AUDIT_SOURCES.has(source) ? source : fallback;
+  // Request payload, query parameters, and headers are attacker-controlled and
+  // therefore cannot choose an audit provenance. Bot/sync callers set their
+  // source explicitly when they build an internal audit event.
+  void req;
+  const trustedFallback = String(fallback || '').trim().toLowerCase();
+  return SERVICE_AUDIT_SOURCES.has(trustedFallback) ? trustedFallback : 'api';
 }
 
 function compactSnapshot(item = {}) {
@@ -107,8 +171,35 @@ function compactSnapshot(item = {}) {
   return snapshot;
 }
 
+function createServiceAuditEntry(reqOrUser, {
+  serviceId,
+  action,
+  entityType,
+  entityId,
+  snapshot,
+  source = 'api',
+}, { generateId, nowIso } = {}) {
+  if (!serviceId || !action || !entityType || !entityId) return null;
+  const user = reqOrUser?.user || reqOrUser || {};
+  return {
+    id: generateId ? generateId('audit') : `audit-${Date.now()}`,
+    serviceId,
+    action,
+    entityType,
+    entityId,
+    snapshot: compactSnapshot(snapshot),
+    actor: {
+      id: user.userId || user.id || null,
+      name: user.userName || user.name || null,
+      role: normalizeRole(user.userRole || user.role || ''),
+    },
+    source: SERVICE_AUDIT_SOURCES.has(source) ? source : 'api',
+    createdAt: nowIso ? nowIso() : new Date().toISOString(),
+  };
+}
+
 function createServiceAuditLog({ readData, writeData, generateId, nowIso }) {
-  return function appendServiceAuditLog(reqOrUser, {
+  function buildEntry(reqOrUser, {
     serviceId,
     action,
     entityType,
@@ -116,27 +207,38 @@ function createServiceAuditLog({ readData, writeData, generateId, nowIso }) {
     snapshot,
     source = 'api',
   }) {
-    if (!serviceId || !action || !entityType || !entityId) return null;
-    const user = reqOrUser?.user || reqOrUser || {};
-    const entry = {
-      id: generateId ? generateId('audit') : `audit-${Date.now()}`,
+    return createServiceAuditEntry(reqOrUser, {
       serviceId,
       action,
       entityType,
       entityId,
-      snapshot: compactSnapshot(snapshot),
-      actor: {
-        id: user.userId || user.id || null,
-        name: user.userName || user.name || null,
-        role: normalizeRole(user.userRole || user.role || ''),
-      },
-      source: SERVICE_AUDIT_SOURCES.has(source) ? source : 'api',
-      createdAt: nowIso ? nowIso() : new Date().toISOString(),
-    };
-    const log = Array.isArray(readData(SERVICE_AUDIT_COLLECTION)) ? readData(SERVICE_AUDIT_COLLECTION) : [];
+      snapshot,
+      source,
+    }, { generateId, nowIso });
+  }
+  function appendServiceAuditLog(reqOrUser, event) {
+    const entry = buildEntry(reqOrUser, event || {});
+    if (!entry) return null;
+    const log = normalizeServiceAuditLogList(readData(SERVICE_AUDIT_COLLECTION));
     writeData(SERVICE_AUDIT_COLLECTION, [...log, entry]);
     return entry;
+  }
+  appendServiceAuditLog.buildEntry = buildEntry;
+  appendServiceAuditLog.preparePersistenceEntry = (reqOrUser, events = []) => {
+    const entries = (Array.isArray(events) ? events : [events])
+      .map(event => buildEntry(reqOrUser, event || {}))
+      .filter(Boolean);
+    if (entries.length === 0) return null;
+    return {
+      name: SERVICE_AUDIT_COLLECTION,
+      value: [
+        ...normalizeServiceAuditLogList(readData(SERVICE_AUDIT_COLLECTION)),
+        ...entries,
+      ],
+      auditEntries: entries,
+    };
   };
+  return appendServiceAuditLog;
 }
 
 module.exports = {
@@ -144,9 +246,13 @@ module.exports = {
   SERVICE_REPAIR_ITEMS_ADMIN_MESSAGE,
   assertRepairItemsAdmin,
   compactSnapshot,
+  createServiceAuditEntry,
   createServiceAuditLog,
   inferServiceAuditSource,
   isRepairItemCollection,
   mechanicCanAppendRepairItemFromBot,
   mechanicCanAddRepairItemToTicket,
+  normalizeServiceAuditLogList,
+  prepareAuditedServiceMutationEntries,
+  prepareServiceMutationAuditEntries,
 };

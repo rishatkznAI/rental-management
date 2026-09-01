@@ -1,5 +1,5 @@
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Globe2, ImagePlus, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -7,7 +7,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { Input } from '../components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { publicSiteService, PUBLIC_SITE_URL } from '../services/public-site.service';
-import type { PublicSiteContent, PublicSiteLift } from '../types/public-site';
+import type { PublicSiteCms, PublicSiteContent, PublicSiteLift } from '../types/public-site';
+import { useAuth } from '../contexts/AuthContext';
 
 const textareaClass = 'min-h-[92px] w-full rounded-md border border-input bg-input-background px-3 py-2 text-sm text-foreground outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40';
 const selectClass = 'h-9 w-full rounded-md border border-input bg-input-background px-3 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40';
@@ -17,6 +18,18 @@ const emptyLift: PublicSiteLift = {
   platformHeight: 8, capacity: 230, platformSize: '', weight: 0, engine: 'Электрический', drive: '2WD',
   use: 'Помещение', surface: 'Ровный твёрдый пол', manufacturer: 'Mantall', availability: 'available',
   price: 0, popularity: 50, image: '', gallery: [], purpose: '', limits: [], benefits: [], published: true,
+};
+
+const emptyContent: PublicSiteContent = {
+  company: { name: '', descriptor: '', phone: '', phoneHref: '', email: '', hours: '', whatsapp: '', telegram: '', address: '', legal: '', cities: [] },
+  demoNotice: '',
+  footerText: '',
+  home: { eyebrow: '', title: '', description: '', categoriesTitle: '', categoriesDescription: '', popularTitle: '', selectionTitle: '', selectionDescription: '', requestTitle: '', requestDescription: '' },
+  catalog: { eyebrow: '', title: '', description: '', helperTitle: '', helperDescription: '' },
+  servicesPage: { eyebrow: '', title: '', description: '', requestTitle: '', requestDescription: '' },
+  about: { eyebrow: '', title: '', description: '', storyTitle: '', storyText: '' },
+  contacts: { eyebrow: '', title: '', description: '', mapTitle: '', mapDescription: '' },
+  services: [],
 };
 
 function Field({ label, value, onChange, wide = false, multiline = false }: { label: string; value: string; onChange: (value: string) => void; wide?: boolean; multiline?: boolean }) {
@@ -36,21 +49,41 @@ const lines = (value: string) => value.split('\n').map(item => item.trim()).filt
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').replace(/-{2,}/g, '-');
 
 export default function PublicSiteAdmin() {
-  const query = useQuery({ queryKey: ['public-site-cms'], queryFn: publicSiteService.get, staleTime: 30_000 });
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const tenantCacheKey = user?.tenantId || user?.companyId || user?.id || 'unresolved';
+  const queryKey = React.useMemo(() => ['public-site-cms', tenantCacheKey] as const, [tenantCacheKey]);
+  const query = useQuery({ queryKey, queryFn: publicSiteService.get, staleTime: 30_000 });
   const [content, setContent] = React.useState<PublicSiteContent | null>(null);
   const [equipment, setEquipment] = React.useState<PublicSiteLift[]>([]);
+  const [version, setVersion] = React.useState('');
   const [selectedSlug, setSelectedSlug] = React.useState('');
   const [dirty, setDirty] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [uploading, setUploading] = React.useState(false);
   const [message, setMessage] = React.useState('');
+  const lastHydratedCms = React.useRef<PublicSiteCms | null>(null);
 
   React.useEffect(() => {
-    if (!query.data?.content || !query.data.equipment || content) return;
-    setContent(query.data.content);
-    setEquipment(query.data.equipment);
-    setSelectedSlug(query.data.equipment[0]?.slug || '');
-  }, [content, query.data]);
+    setContent(null);
+    setEquipment([]);
+    setVersion('');
+    setSelectedSlug('');
+    setDirty(false);
+    setMessage('');
+    lastHydratedCms.current = null;
+  }, [tenantCacheKey]);
+
+  React.useEffect(() => {
+    if (!query.data || dirty || query.data === lastHydratedCms.current) return;
+    const nextContent = query.data.content || structuredClone(emptyContent);
+    const nextEquipment = query.data.equipment || [];
+    setContent(nextContent);
+    setEquipment(nextEquipment);
+    setVersion(query.data.version);
+    setSelectedSlug(nextEquipment[0]?.slug || '');
+    lastHydratedCms.current = query.data;
+  }, [dirty, query.data]);
 
   const selectedIndex = equipment.findIndex(item => item.slug === selectedSlug);
   const selected = selectedIndex >= 0 ? equipment[selectedIndex] : null;
@@ -66,10 +99,18 @@ export default function PublicSiteAdmin() {
   };
 
   async function save() {
-    if (!content) return;
+    if (!content || !version) return;
     setSaving(true); setMessage('');
     try {
-      const result = await publicSiteService.save(content, equipment);
+      const result = await publicSiteService.save(content, equipment, version);
+      const saved: PublicSiteCms = {
+        content,
+        equipment,
+        updatedAt: result.updatedAt,
+        version: result.version,
+      };
+      queryClient.setQueryData(queryKey, saved);
+      setVersion(result.version);
       setDirty(false);
       setMessage(`Опубликовано ${new Date(result.updatedAt).toLocaleString('ru-RU')}`);
     } catch (error) {
@@ -113,8 +154,8 @@ export default function PublicSiteAdmin() {
   const company = content.company;
   return <div className="mx-auto w-full max-w-[1500px] space-y-6 p-4 sm:p-6 lg:p-8">
     <div className="flex flex-col gap-4 rounded-2xl border border-border/80 bg-card p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-start gap-4"><div className="rounded-xl bg-primary/10 p-3 text-primary"><Globe2 className="h-6 w-6" /></div><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-semibold tracking-tight">Управление публичным сайтом</h1><Badge variant="secondary">Только администратор</Badge></div><p className="mt-1 text-sm text-muted-foreground">Контакты, тексты, услуги, каталог и фотографии на skytech-rent.ru.</p>{query.data?.updatedAt && <p className="mt-1 text-xs text-muted-foreground">Последняя публикация: {new Date(query.data.updatedAt).toLocaleString('ru-RU')}</p>}</div></div>
-      <div className="flex flex-wrap gap-2"><Button variant="outline" asChild><a href={PUBLIC_SITE_URL} target="_blank" rel="noreferrer">Открыть сайт <ExternalLink className="ml-2 h-4 w-4" /></a></Button><Button onClick={save} disabled={saving || !dirty}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Опубликовать изменения</Button></div>
+      <div className="flex items-start gap-4"><div className="rounded-xl bg-primary/10 p-3 text-primary"><Globe2 className="h-6 w-6" /></div><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-semibold tracking-tight">Управление публичным сайтом</h1><Badge variant="secondary">Только администратор</Badge></div><p className="mt-1 text-sm text-muted-foreground">Контакты, тексты, услуги, каталог и фотографии публичного сайта текущей компании.</p>{query.data?.updatedAt && <p className="mt-1 text-xs text-muted-foreground">Последняя публикация: {new Date(query.data.updatedAt).toLocaleString('ru-RU')}</p>}</div></div>
+      <div className="flex flex-wrap gap-2">{PUBLIC_SITE_URL && <Button variant="outline" asChild><a href={PUBLIC_SITE_URL} target="_blank" rel="noreferrer">Открыть сайт <ExternalLink className="ml-2 h-4 w-4" /></a></Button>}<Button onClick={save} disabled={saving || !dirty || !version}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Опубликовать изменения</Button></div>
     </div>
     {message && <div className={`rounded-xl border px-4 py-3 text-sm ${message.startsWith('Опубликовано') || message.includes('загружена') ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-border bg-muted/50 text-foreground'}`}>{message}</div>}
 
@@ -156,8 +197,8 @@ export default function PublicSiteAdmin() {
 
       <TabsContent value="equipment">
         <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
-          <Card className="h-fit"><CardHeader className="pb-3"><div className="flex items-center justify-between"><CardTitle className="text-base">Модели</CardTitle><Button size="sm" variant="outline" onClick={addLift}><Plus className="mr-1 h-4 w-4" />Добавить</Button></div></CardHeader><CardContent className="max-h-[70vh] space-y-1 overflow-y-auto">{equipment.map(item => <button key={item.slug} type="button" onClick={() => setSelectedSlug(item.slug)} className={`w-full rounded-lg border px-3 py-2.5 text-left transition ${selectedSlug === item.slug ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}><span className="block text-sm font-medium">{item.name}</span><span className="mt-0.5 block text-xs text-muted-foreground">{item.published === false ? 'Скрыта' : `${item.workingHeight} м · ${item.price.toLocaleString('ru-RU')} ₽/сутки`}</span></button>)}</CardContent></Card>
-          {selected ? <Card><CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><CardTitle>{selected.name || 'Новая модель'}</CardTitle><CardDescription>Характеристики, цена, статус и фотография карточки.</CardDescription></div><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selected.published !== false} onChange={event => updateLift('published', event.target.checked)} /> Опубликована</label></div></CardHeader><CardContent className="space-y-6">
+          <Card className="h-fit"><CardHeader className="pb-3"><div className="flex items-center justify-between"><CardTitle className="text-base">Модели</CardTitle><Button size="sm" variant="outline" onClick={addLift}><Plus className="mr-1 h-4 w-4" />Добавить</Button></div></CardHeader><CardContent className="max-h-[70vh] space-y-1 overflow-y-auto">{equipment.map(item => <button key={item.slug} type="button" onClick={() => setSelectedSlug(item.slug)} className={`w-full rounded-lg border px-3 py-2.5 text-left transition ${selectedSlug === item.slug ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}><span className="block text-sm font-medium">{item.name}</span><span className="mt-0.5 block text-xs text-muted-foreground">{item.published === true ? `${item.workingHeight} м · ${item.price.toLocaleString('ru-RU')} ₽/сутки` : 'Скрыта'}</span></button>)}</CardContent></Card>
+          {selected ? <Card><CardHeader><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><CardTitle>{selected.name || 'Новая модель'}</CardTitle><CardDescription>Характеристики, цена, статус и фотография карточки.</CardDescription></div><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selected.published === true} onChange={event => updateLift('published', event.target.checked)} /> Опубликована</label></div></CardHeader><CardContent className="space-y-6">
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Название" value={selected.name} onChange={value => updateLift('name', value)} />
               <Field label="Адрес страницы" value={selected.slug} onChange={value => updateLift('slug', slugify(value))} />
@@ -186,7 +227,7 @@ export default function PublicSiteAdmin() {
         </div>
       </TabsContent>
     </Tabs>
-    <div className="sticky bottom-4 flex justify-end"><Button size="lg" className="shadow-xl" onClick={save} disabled={saving || !dirty}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Опубликовать изменения</Button></div>
+    <div className="sticky bottom-4 flex justify-end"><Button size="lg" className="shadow-xl" onClick={save} disabled={saving || !dirty || !version}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Опубликовать изменения</Button></div>
   </div>;
 }
 

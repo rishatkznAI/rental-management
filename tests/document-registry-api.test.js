@@ -17,6 +17,9 @@ const { backfillSqlShadowIndexes } = require('../server/lib/sql-shadow-indexes.j
 
 function createApp(options = {}) {
   let idCounter = 0;
+  let nextBatchFailure = null;
+  let appDataUpsert = null;
+  const batchWrites = [];
   const state = {
     users: [
       { id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' },
@@ -84,6 +87,21 @@ function createApp(options = {}) {
   const writeData = (name, value) => {
     state[name] = value;
   };
+  const writeDataBatch = entries => {
+    const staged = structuredClone(entries);
+    batchWrites.push(staged);
+    if (nextBatchFailure) {
+      const error = nextBatchFailure;
+      nextBatchFailure = null;
+      throw error;
+    }
+    if (appDataUpsert) {
+      staged.forEach(entry => appDataUpsert.run(entry.name, JSON.stringify(entry.value)));
+    }
+    staged.forEach(entry => {
+      state[entry.name] = entry.value;
+    });
+  };
   const accessControl = createAccessControl({ readData });
   const numberingDb = options.businessNumbering ? new Database(':memory:') : null;
   const businessNumbering = numberingDb ? createBusinessNumberingService({
@@ -94,6 +112,22 @@ function createApp(options = {}) {
     readData,
     nowIso: () => '2026-05-09T10:00:00.000Z',
   }) : null;
+  if (numberingDb) {
+    numberingDb.exec(`
+      CREATE TABLE app_data (
+        name TEXT PRIMARY KEY,
+        json TEXT NOT NULL
+      )
+    `);
+    appDataUpsert = numberingDb.prepare(`
+      INSERT INTO app_data (name, json)
+      VALUES (?, ?)
+      ON CONFLICT(name) DO UPDATE SET json = excluded.json
+    `);
+  }
+  const executeAppDataWriteTransaction = numberingDb
+    ? numberingDb.transaction(operation => operation())
+    : null;
   const requireAuth = (req, res, next) => {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const user = users[token];
@@ -113,6 +147,7 @@ function createApp(options = {}) {
   registerDocumentRoutes(router, {
     readData,
     writeData,
+    writeDataBatch,
     requireAuth,
     requireRead,
     requireWrite,
@@ -124,9 +159,23 @@ function createApp(options = {}) {
     normalizeRecordClientLink: item => item,
     getDb: options.getDb,
     businessNumbering,
+    runInAppDataWriteTransaction: operation => executeAppDataWriteTransaction
+      ? executeAppDataWriteTransaction.immediate(operation)
+      : operation(),
   });
   app.use('/api', router);
-  return { app, state, numberingDb };
+  return {
+    app,
+    state,
+    numberingDb,
+    batchWrites,
+    failNextBatch() {
+      const error = new Error('Injected document batch failure');
+      error.code = 'INJECTED_DOCUMENT_BATCH_FAILURE';
+      error.status = 503;
+      nextBatchFailure = error;
+    },
+  };
 }
 
 function makeSqlDb(seed) {
@@ -573,6 +622,113 @@ test('SQL-backed document routes enforce sequences, immutability, and master own
   assert.equal(numberingDb.prepare("SELECT COUNT(*) AS count FROM business_numbers WHERE entity_type = 'CLIENT_CONTRACT'").get().count, 0);
   assert.equal(numberingDb.prepare("SELECT COUNT(*) AS count FROM business_numbers WHERE entity_type = 'VEHICLE_TRIP'").get().count, 0);
   numberingDb.close();
+});
+
+test('SQL-backed document create rolls numbering and app_data back on downstream batch failure', async () => {
+  const context = createApp({ businessNumbering: true });
+  const payload = {
+    type: 'invoice',
+    counterpartyId: 'CP-1',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    date: '2026-05-09',
+    status: 'draft',
+  };
+
+  await withServer(context.app, async baseUrl => {
+    context.failNextBatch();
+    const failed = await request(baseUrl, 'POST', '/api/documents', 'office', payload);
+    assert.equal(failed.response.status, 503, JSON.stringify(failed.json));
+    assert.equal(failed.json.code, 'INJECTED_DOCUMENT_BATCH_FAILURE');
+    assert.equal(context.state.documents.length, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM app_data').get().count, 0);
+
+    const created = await request(baseUrl, 'POST', '/api/documents', 'office', payload);
+    assert.equal(created.response.status, 201, JSON.stringify(created.json));
+    assert.equal(created.json.number, 'INV-26-000001');
+    assert.equal(context.state.documents[0].number, created.json.number);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 1);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 1);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM app_data').get().count, 2);
+  });
+});
+
+test('SQL-backed document generate rolls numbering and app_data back on downstream batch failure', async () => {
+  const context = createApp({ businessNumbering: true });
+  const payload = {
+    type: 'invoice',
+    counterpartyId: 'CP-1',
+    clientId: 'C-1',
+    client: 'ООО Клиент',
+    date: '2026-05-09',
+    status: 'draft',
+  };
+
+  await withServer(context.app, async baseUrl => {
+    context.failNextBatch();
+    const failed = await request(baseUrl, 'POST', '/api/documents/generate', 'office', payload);
+    assert.equal(failed.response.status, 503, JSON.stringify(failed.json));
+    assert.equal(failed.json.code, 'INJECTED_DOCUMENT_BATCH_FAILURE');
+    assert.equal(context.state.documents.length, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 0);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM app_data').get().count, 0);
+
+    const generated = await request(baseUrl, 'POST', '/api/documents/generate', 'office', payload);
+    assert.equal(generated.response.status, 201, JSON.stringify(generated.json));
+    assert.equal(generated.json.number, 'INV-26-000001');
+    assert.equal(context.state.documents[0].number, generated.json.number);
+  });
+});
+
+test('SQL-backed document duplicate preserves its source allocation when downstream persistence fails', async () => {
+  const context = createApp({ businessNumbering: true });
+
+  await withServer(context.app, async baseUrl => {
+    const source = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'invoice',
+      counterpartyId: 'CP-1',
+      clientId: 'C-1',
+      client: 'ООО Клиент',
+      date: '2026-05-09',
+      status: 'draft',
+    });
+    assert.equal(source.response.status, 201, JSON.stringify(source.json));
+    assert.equal(source.json.number, 'INV-26-000001');
+    const beforeState = documentNumberingState(context.state);
+    const beforeSqlDocumentJson = context.numberingDb
+      .prepare("SELECT json FROM app_data WHERE name = 'documents'")
+      .get().json;
+
+    context.failNextBatch();
+    const failed = await request(
+      baseUrl,
+      'POST',
+      `/api/documents/${source.json.id}/duplicate`,
+      'office',
+    );
+    assert.equal(failed.response.status, 503, JSON.stringify(failed.json));
+    assert.equal(failed.json.code, 'INJECTED_DOCUMENT_BATCH_FAILURE');
+    assert.deepEqual(documentNumberingState(context.state), beforeState);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM number_sequences').get().count, 1);
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 1);
+    assert.equal(
+      context.numberingDb.prepare("SELECT json FROM app_data WHERE name = 'documents'").get().json,
+      beforeSqlDocumentJson,
+    );
+
+    const duplicate = await request(
+      baseUrl,
+      'POST',
+      `/api/documents/${source.json.id}/duplicate`,
+      'office',
+    );
+    assert.equal(duplicate.response.status, 201, JSON.stringify(duplicate.json));
+    assert.equal(duplicate.json.number, 'INV-26-000002');
+    assert.equal(context.numberingDb.prepare('SELECT COUNT(*) AS count FROM business_numbers').get().count, 2);
+  });
 });
 
 test('customer Documents accept CP-only identity and reject mismatch, inactive role, and name-only identity', async () => {
@@ -1329,5 +1485,167 @@ test('documents generate API rejects missing required data and supports status e
     const deleted = await request(baseUrl, 'DELETE', `/api/documents/${duplicate.json.id}`, 'admin');
     assert.equal(deleted.response.status, 200);
     assert.equal(deleted.json.ok, true);
+  });
+});
+
+function documentNumberingState(state) {
+  return structuredClone({
+    documents: state.documents,
+    app_settings: state.app_settings,
+  });
+}
+
+function assertUniqueStoredDocumentNumbers(state) {
+  const numbers = state.documents
+    .map(document => String(document.number || document.documentNumber || '').trim())
+    .filter(Boolean);
+  assert.equal(new Set(numbers).size, numbers.length);
+}
+
+function assertNumberingBatch(entries) {
+  assert.deepEqual(entries.map(entry => entry.name), ['documents', 'app_settings']);
+}
+
+test('document create rolls back document and numbering settings together when the batch fails', async () => {
+  const context = createApp();
+  const payload = {
+    type: 'contract',
+    clientId: 'C-1',
+    date: '2026-05-09',
+    status: 'draft',
+  };
+
+  await withServer(context.app, async baseUrl => {
+    const before = documentNumberingState(context.state);
+    context.failNextBatch();
+    const failed = await request(baseUrl, 'POST', '/api/documents', 'office', payload);
+    assert.equal(failed.response.status, 503);
+    assert.equal(failed.json.code, 'INJECTED_DOCUMENT_BATCH_FAILURE');
+    assert.deepEqual(documentNumberingState(context.state), before);
+    assertNumberingBatch(context.batchWrites.at(-1));
+
+    const first = await request(baseUrl, 'POST', '/api/documents', 'office', payload);
+    const second = await request(baseUrl, 'POST', '/api/documents', 'office', payload);
+    assert.equal(first.response.status, 201, JSON.stringify(first.json));
+    assert.equal(second.response.status, 201, JSON.stringify(second.json));
+    assert.equal(first.json.number, 'CONTRACT-2026-0001');
+    assert.equal(second.json.number, 'CONTRACT-2026-0002');
+    assertUniqueStoredDocumentNumbers(context.state);
+  });
+});
+
+test('document generate rolls back document and numbering settings together when the batch fails', async () => {
+  const context = createApp();
+  const payload = {
+    type: 'commercial_offer',
+    clientId: 'C-1',
+    date: '2026-05-09',
+    status: 'draft',
+  };
+
+  await withServer(context.app, async baseUrl => {
+    const before = documentNumberingState(context.state);
+    context.failNextBatch();
+    const failed = await request(baseUrl, 'POST', '/api/documents/generate', 'office', payload);
+    assert.equal(failed.response.status, 503);
+    assert.equal(failed.json.code, 'INJECTED_DOCUMENT_BATCH_FAILURE');
+    assert.deepEqual(documentNumberingState(context.state), before);
+    assertNumberingBatch(context.batchWrites.at(-1));
+
+    const first = await request(baseUrl, 'POST', '/api/documents/generate', 'office', payload);
+    const second = await request(baseUrl, 'POST', '/api/documents/generate', 'office', payload);
+    assert.equal(first.response.status, 201, JSON.stringify(first.json));
+    assert.equal(second.response.status, 201, JSON.stringify(second.json));
+    assert.equal(first.json.number, 'KP-2026-0001');
+    assert.equal(second.json.number, 'KP-2026-0002');
+    assertUniqueStoredDocumentNumbers(context.state);
+  });
+});
+
+test('document duplicate rolls back document and numbering settings together when the batch fails', async () => {
+  const context = createApp();
+
+  await withServer(context.app, async baseUrl => {
+    const source = await request(baseUrl, 'POST', '/api/documents', 'office', {
+      type: 'act',
+      clientId: 'C-1',
+      date: '2026-05-09',
+      status: 'sent',
+    });
+    assert.equal(source.response.status, 201, JSON.stringify(source.json));
+
+    const before = documentNumberingState(context.state);
+    context.failNextBatch();
+    const failed = await request(baseUrl, 'POST', `/api/documents/${source.json.id}/duplicate`, 'office');
+    assert.equal(failed.response.status, 503);
+    assert.equal(failed.json.code, 'INJECTED_DOCUMENT_BATCH_FAILURE');
+    assert.deepEqual(documentNumberingState(context.state), before);
+    assertNumberingBatch(context.batchWrites.at(-1));
+
+    const first = await request(baseUrl, 'POST', `/api/documents/${source.json.id}/duplicate`, 'office');
+    const second = await request(baseUrl, 'POST', `/api/documents/${source.json.id}/duplicate`, 'office');
+    assert.equal(first.response.status, 201, JSON.stringify(first.json));
+    assert.equal(second.response.status, 201, JSON.stringify(second.json));
+    assert.equal(first.json.number, 'ACT-2026-0002');
+    assert.equal(second.json.number, 'ACT-2026-0003');
+    assertUniqueStoredDocumentNumbers(context.state);
+  });
+});
+
+test('assign-number rolls back document and numbering settings together when the batch fails', async () => {
+  const context = createApp();
+  context.state.documents = [{
+    id: 'D-numbered',
+    type: 'upd',
+    documentType: 'upd',
+    number: 'UPD-2026-0001',
+    documentNumber: 'UPD-2026-0001',
+    counterpartyId: 'CP-1',
+    clientId: 'C-1',
+    date: '2026-05-08',
+    documentDate: '2026-05-08',
+    status: 'sent',
+  }, {
+    id: 'D-legacy-1',
+    type: 'upd',
+    documentType: 'upd',
+    number: '',
+    documentNumber: '',
+    counterpartyId: 'CP-1',
+    clientId: 'C-1',
+    date: '2026-05-09',
+    documentDate: '2026-05-09',
+    status: 'sent',
+  }];
+
+  await withServer(context.app, async baseUrl => {
+    const before = documentNumberingState(context.state);
+    context.failNextBatch();
+    const failed = await request(baseUrl, 'POST', '/api/documents/D-legacy-1/assign-number', 'office');
+    assert.equal(failed.response.status, 503);
+    assert.equal(failed.json.code, 'INJECTED_DOCUMENT_BATCH_FAILURE');
+    assert.deepEqual(documentNumberingState(context.state), before);
+    assertNumberingBatch(context.batchWrites.at(-1));
+
+    const first = await request(baseUrl, 'POST', '/api/documents/D-legacy-1/assign-number', 'office');
+    assert.equal(first.response.status, 200, JSON.stringify(first.json));
+    assert.equal(first.json.number, 'UPD-2026-0002');
+
+    context.state.documents.push({
+      id: 'D-legacy-2',
+      type: 'upd',
+      documentType: 'upd',
+      number: '',
+      documentNumber: '',
+      counterpartyId: 'CP-1',
+      clientId: 'C-1',
+      date: '2026-05-09',
+      documentDate: '2026-05-09',
+      status: 'sent',
+    });
+    const second = await request(baseUrl, 'POST', '/api/documents/D-legacy-2/assign-number', 'office');
+    assert.equal(second.response.status, 200, JSON.stringify(second.json));
+    assert.equal(second.json.number, 'UPD-2026-0003');
+    assertUniqueStoredDocumentNumbers(context.state);
   });
 });

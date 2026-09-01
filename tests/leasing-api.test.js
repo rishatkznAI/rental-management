@@ -16,13 +16,21 @@ const {
 
 function createApp() {
   let idCounter = 0;
+  let nextBatchError = null;
   const state = {
     leasing_contracts: [],
     leasing_payment_schedule: [],
   };
   const readData = name => state[name] || [];
-  const writeData = (name, value) => {
-    state[name] = value;
+  const writeDataBatch = entries => {
+    if (nextBatchError) {
+      const error = nextBatchError;
+      nextBatchError = null;
+      throw error;
+    }
+    const staged = structuredClone(state);
+    for (const entry of entries || []) staged[entry.name] = structuredClone(entry.value);
+    Object.assign(state, staged);
   };
   const accessControl = createAccessControl({ readData });
   const app = express();
@@ -48,7 +56,7 @@ function createApp() {
 
   registerLeasingRoutes(router, {
     readData,
-    writeData,
+    writeDataBatch,
     requireAuth,
     requireRead,
     accessControl,
@@ -61,7 +69,13 @@ function createApp() {
     buildLeasingSummary,
   });
   app.use('/api', router);
-  return { app, state };
+  return {
+    app,
+    state,
+    failNextBatch(error = Object.assign(new Error('injected leasing batch failure'), { status: 503 })) {
+      nextBatchError = error;
+    },
+  };
 }
 
 async function withServer(app, fn) {
@@ -186,5 +200,84 @@ test('leasing API validates dates and denies non-finance roles', async () => {
     });
     assert.equal(invalid.response.status, 400);
     assert.match(invalid.json.error, /Дата окончания/);
+  });
+});
+
+test('leasing create update and delete persist contract and schedule atomically', async () => {
+  const { app, state } = createApp();
+  await withServer(app, async (baseUrl) => {
+    const created = await request(baseUrl, 'POST', '/api/leasing-contracts', 'office', {
+      contractNumber: 'L-ATOMIC',
+      leasingCompany: 'Лизинг API',
+      startDate: '2026-05-01',
+      endDate: '2026-06-30',
+      termMonths: 2,
+      monthlyPayment: 100000,
+      paymentDay: 10,
+      schedule: [{ dueDate: '2026-05-10', amount: 100000, status: 'planned' }],
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(state.leasing_contracts.length, 1);
+    assert.equal(state.leasing_payment_schedule.length, 1);
+    assert.equal(state.leasing_payment_schedule[0].leasingContractId, created.json.id);
+
+    const updated = await request(baseUrl, 'PATCH', `/api/leasing-contracts/${created.json.id}`, 'office', {
+      monthlyPayment: 120000,
+      schedule: [{ dueDate: '2026-05-10', amount: 120000, status: 'planned' }],
+    });
+    assert.equal(updated.response.status, 200);
+    assert.equal(state.leasing_contracts[0].monthlyPayment, 120000);
+    assert.equal(state.leasing_payment_schedule[0].amount, 120000);
+
+    const deleted = await request(baseUrl, 'DELETE', `/api/leasing-contracts/${created.json.id}`, 'office');
+    assert.equal(deleted.response.status, 200);
+    assert.deepEqual(state.leasing_contracts, []);
+    assert.deepEqual(state.leasing_payment_schedule, []);
+  });
+});
+
+test('leasing batch failures never expose a partial contract or schedule mutation', async () => {
+  const { app, state, failNextBatch } = createApp();
+  await withServer(app, async (baseUrl) => {
+    failNextBatch();
+    const failedCreate = await request(baseUrl, 'POST', '/api/leasing-contracts', 'office', {
+      contractNumber: 'L-FAILED-CREATE',
+      leasingCompany: 'Лизинг API',
+      startDate: '2026-05-01',
+      endDate: '2026-06-30',
+      termMonths: 2,
+      monthlyPayment: 100000,
+      paymentDay: 10,
+      schedule: [{ dueDate: '2026-05-10', amount: 100000, status: 'planned' }],
+    });
+    assert.equal(failedCreate.response.status, 503);
+    assert.deepEqual(state.leasing_contracts, []);
+    assert.deepEqual(state.leasing_payment_schedule, []);
+
+    const created = await request(baseUrl, 'POST', '/api/leasing-contracts', 'office', {
+      contractNumber: 'L-STABLE',
+      leasingCompany: 'Лизинг API',
+      startDate: '2026-05-01',
+      endDate: '2026-06-30',
+      termMonths: 2,
+      monthlyPayment: 100000,
+      paymentDay: 10,
+      schedule: [{ dueDate: '2026-05-10', amount: 100000, status: 'planned' }],
+    });
+    assert.equal(created.response.status, 201);
+    const before = structuredClone(state);
+
+    failNextBatch();
+    const failedUpdate = await request(baseUrl, 'PATCH', `/api/leasing-contracts/${created.json.id}`, 'office', {
+      monthlyPayment: 250000,
+      schedule: [{ dueDate: '2026-05-10', amount: 250000, status: 'planned' }],
+    });
+    assert.equal(failedUpdate.response.status, 503);
+    assert.deepEqual(state, before);
+
+    failNextBatch();
+    const failedDelete = await request(baseUrl, 'DELETE', `/api/leasing-contracts/${created.json.id}`, 'office');
+    assert.equal(failedDelete.response.status, 503);
+    assert.deepEqual(state, before);
   });
 });

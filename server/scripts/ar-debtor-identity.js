@@ -85,7 +85,8 @@ function main(argv = process.argv.slice(2)) {
     printUsage();
     return null;
   }
-  const dbPath = path.resolve(args.dbPath || path.join(__dirname, '..', 'data', 'app.sqlite'));
+  if (!args.dbPath) throw new Error('Refusing diagnostics without an explicit --db path.');
+  const dbPath = path.resolve(args.dbPath);
   if (!fs.existsSync(dbPath)) throw new Error(`SQLite database not found: ${dbPath}`);
 
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });

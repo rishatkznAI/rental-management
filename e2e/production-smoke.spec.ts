@@ -317,5 +317,12 @@ test('production read-only smoke', async ({ page }, testInfo) => {
     expectedFrontendCommit: optionalEnv('EXPECTED_FRONTEND_COMMIT'),
     expectedFrontendCommitFull: optionalEnv('EXPECTED_FRONTEND_COMMIT_FULL'),
     releaseType: optionalEnv('RELEASE_TYPE') || 'full-stack',
+    expectedCompanyHealthDirectionLinks: 3,
+    readOnlySections: [
+      { label: 'Техника', route: '/equipment', nav: /^Техника/ },
+      { label: 'Клиенты', route: '/clients', nav: /^Клиенты/ },
+      { label: 'Сервис', route: '/service', nav: /^Сервис/ },
+      { label: 'База знаний', route: '/knowledge-base', nav: /^База знаний/ },
+    ],
   }, testInfo);
 });

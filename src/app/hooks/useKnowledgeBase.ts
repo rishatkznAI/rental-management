@@ -8,18 +8,20 @@ export const KNOWLEDGE_BASE_KEYS = {
   progress: ['knowledge-base-progress'] as const,
 };
 
-export function useKnowledgeBaseModulesList() {
+export function useKnowledgeBaseModulesList(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: KNOWLEDGE_BASE_KEYS.modules,
     queryFn: knowledgeBaseModulesService.getAll,
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 60 * 5,
   });
 }
 
-export function useKnowledgeBaseProgressList() {
+export function useKnowledgeBaseProgressList(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: KNOWLEDGE_BASE_KEYS.progress,
     queryFn: knowledgeBaseProgressService.getAll,
+    enabled: options.enabled ?? true,
     staleTime: 1000 * 30,
   });
 }

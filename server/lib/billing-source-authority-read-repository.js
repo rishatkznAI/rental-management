@@ -2,6 +2,9 @@ const {
   FORBIDDEN_BRANCH_IDS,
 } = require('./platform-identity-repository');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+const {
   BILLING_SOURCE_AUDIT_EVENTS_TABLE,
   BILLING_SOURCE_COVERAGE_SETS_TABLE,
   BILLING_SOURCE_COVERAGE_SUPERSESSIONS_TABLE,
@@ -62,7 +65,7 @@ function createBillingSourceAuthorityReadRepository(db) {
       fail('BILLING_SOURCE_INSPECTION_SCOPE_REQUIRED', 'A branded internal inspection scope is required.', 'scope');
     }
     const placeholders = scope.branchIds.map(() => '?').join(', ');
-    const known = db.prepare(`
+    const known = prepareSqliteReadonlyStatement(db, `
       SELECT id
       FROM canonical_branches
       WHERE companyId = ? AND id IN (${placeholders}) AND status = 'active'
@@ -84,7 +87,7 @@ function createBillingSourceAuthorityReadRepository(db) {
 
   function one(table, scope, entityId) {
     const query = scoped(scope);
-    return db.prepare(`
+    return prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${table}
       WHERE companyId = ? AND branchId IN (${query.placeholders}) AND id = ?
     `).get(...query.params, requiredId(entityId, 'id')) || null;
@@ -92,7 +95,7 @@ function createBillingSourceAuthorityReadRepository(db) {
 
   function list(table, scope, whereSql, whereParams, orderSql, limit) {
     const query = scoped(scope);
-    return db.prepare(`
+    return prepareSqliteReadonlyStatement(db, `
       SELECT * FROM ${table}
       WHERE companyId = ? AND branchId IN (${query.placeholders})
         ${whereSql ? `AND ${whereSql}` : ''}
@@ -241,7 +244,7 @@ function createBillingSourceAuthorityReadRepository(db) {
 
   function listActiveValidatedCoverage(scope, options = {}) {
     const query = scoped(scope);
-    return db.prepare(`
+    return prepareSqliteReadonlyStatement(db, `
       SELECT coverage.*
       FROM ${BILLING_SOURCE_COVERAGE_SETS_TABLE} coverage
       WHERE coverage.companyId = ?
@@ -274,7 +277,7 @@ function createBillingSourceAuthorityReadRepository(db) {
 
   function inspectOperation(scope, operationType, idempotencyKey) {
     const query = scoped(scope);
-    return db.prepare(`
+    return prepareSqliteReadonlyStatement(db, `
       SELECT *
       FROM ${BILLING_SOURCE_OPERATIONS_TABLE}
       WHERE companyId = ? AND branchId IN (${query.placeholders})
@@ -300,7 +303,7 @@ function createBillingSourceAuthorityReadRepository(db) {
   function listBlockedSourceIntegrity(scope, options = {}) {
     const query = scoped(scope);
     const limit = limitValue(options.limit);
-    return db.prepare(`
+    return prepareSqliteReadonlyStatement(db, `
       SELECT sourceType, sourceId, aggregateId, sourceStatus, blockerReasonCodesJson, createdAt
       FROM (
         SELECT 'snapshot' AS sourceType, id AS sourceId, periodId AS aggregateId,

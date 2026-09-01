@@ -1005,6 +1005,13 @@ function createApprovalApp(options = {}) {
       userName: user.name,
       userRole: user.role,
     };
+    req.actorScope = {
+      companyId: 'COMPANY-A',
+      tenantId: 'COMPANY-A',
+      membershipId: `MEMBERSHIP-${user.id}`,
+      principalId: user.id,
+      source: 'rental-change-request-test',
+    };
     return next();
   }
 
@@ -1027,6 +1034,7 @@ function createApprovalApp(options = {}) {
     accessControl,
     auditLog: () => {},
     writeDataBatch,
+    writeAuditDataBatch: writeDataBatch,
     reconcileEquipmentRentalProjection: reconcileEquipmentRentalProjectionForWrite,
     canonicalizeRentalRelationForWrite: options.canonicalizeRentalRelationForWrite,
   }));
@@ -2499,6 +2507,72 @@ test('approve rejects missing and unknown rentalId without mutating rentals', as
     assert.equal(unknown.status, 404);
     assert.equal(state.rentals.find(item => item.id === 'R-1').startDate, '2026-04-10');
   });
+});
+
+test('document deletion approval atomically updates document, rental history, and request status', async () => {
+  const { app, state, events } = createApprovalApp();
+  state.documents = [{ id: 'D-1', rentalId: 'R-1', rental: 'R-1', name: 'Акт' }];
+  state.rental_change_requests = [{
+    id: 'RCR-document-delete',
+    entityType: 'document',
+    entityId: 'D-1',
+    rentalId: 'R-1',
+    operation: 'delete',
+    type: 'Удаление документов',
+    status: 'pending',
+  }];
+
+  await withServer(app, async baseUrl => {
+    const approved = await request(
+      baseUrl,
+      'POST',
+      '/api/rental_change_requests/RCR-document-delete/approve',
+      'admin-token',
+      {},
+    );
+    assert.equal(approved.status, 200);
+  });
+
+  assert.deepEqual(state.documents, []);
+  assert.equal(state.rental_change_requests[0].status, 'approved');
+  assert.equal(state.rentals.find(item => item.id === 'R-1').history.length, 1);
+  assert.deepEqual(events.batches.at(-1), ['documents', 'rentals', 'rental_change_requests']);
+});
+
+test('document deletion approval batch failure leaves all three collections unchanged', async () => {
+  const options = { failBatch: false };
+  const { app, state } = createApprovalApp(options);
+  state.documents = [{ id: 'D-1', rentalId: 'R-1', rental: 'R-1', name: 'Акт' }];
+  state.rental_change_requests = [{
+    id: 'RCR-document-delete-failure',
+    entityType: 'document',
+    entityId: 'D-1',
+    rentalId: 'R-1',
+    operation: 'delete',
+    type: 'Удаление документов',
+    status: 'pending',
+  }];
+  const before = structuredClone({
+    documents: state.documents,
+    rentals: state.rentals,
+    requests: state.rental_change_requests,
+  });
+  options.failBatch = true;
+
+  await withServer(app, async baseUrl => {
+    const failed = await request(
+      baseUrl,
+      'POST',
+      '/api/rental_change_requests/RCR-document-delete-failure/approve',
+      'admin-token',
+      {},
+    );
+    assert.equal(failed.status, 500);
+  });
+
+  assert.deepEqual(state.documents, before.documents);
+  assert.deepEqual(state.rentals, before.rentals);
+  assert.deepEqual(state.rental_change_requests, before.requests);
 });
 
 test('approve detects stale old values and does not overwrite newer rental dates', async () => {

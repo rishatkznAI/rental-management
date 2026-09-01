@@ -21,6 +21,7 @@ function runSeed(dbPath, extraEnv = {}) {
       DEMO_MODE: 'true',
       DEMO_ENV: 'true',
       ALLOW_DEMO_SEED: 'true',
+      DEMO_DATABASE_DISPOSABLE: 'true',
       NODE_ENV: 'test',
       DEMO_DEFAULT_PASSWORD: 'unit-test-demo-password',
       ...extraEnv,
@@ -175,7 +176,7 @@ test('seed script refuses production DB path', () => {
   try {
     assert.throws(
       () => runSeed(dbPath),
-      /clearly named demo database/,
+      /clearly named demo database|refuse app\.sqlite/,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -223,7 +224,7 @@ test('demo public flag and frontend indicator are wired without exposing secrets
   assert.match(routesSource, /requireAuth, requireAdmin/);
   assert.match(serverSource, /DEMO_MODE \? '' : \(process\.env\.BOT_TOKEN \|\| ''\)/);
   assert.match(serverSource, /enabled: !DEMO_MODE/);
-  assert.match(packageSource, /"demo:reset": "DEMO_ENV=true DEMO_MODE=true ALLOW_DEMO_SEED=true DB_PATH=server\/data\/demo\.sqlite/);
+  assert.match(packageSource, /"demo:reset": "DEMO_ENV=true DEMO_MODE=true ALLOW_DEMO_SEED=true DEMO_DATABASE_DISPOSABLE=true DB_PATH=server\/data\/demo\.sqlite/);
   assert.doesNotMatch(packageSource, /demo:reset[^"]*app\.sqlite/);
   assert.doesNotMatch(badgeSource, /password|token|secret/i);
 });

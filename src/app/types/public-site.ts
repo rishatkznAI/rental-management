@@ -65,4 +65,5 @@ export type PublicSiteCms = {
   content: PublicSiteContent | null;
   equipment: PublicSiteLift[] | null;
   updatedAt: string | null;
+  version: string;
 };

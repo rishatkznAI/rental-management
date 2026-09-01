@@ -34,7 +34,11 @@ const {
   validateRentalLifecycleAvailability,
   validateTerminalRentalTransition,
 } = require('../lib/rental-lifecycle');
-const { LEGACY_AUDIT_COLLECTION, redactAuditValue } = require('../lib/security-audit');
+const {
+  LEGACY_AUDIT_COLLECTION,
+  createAuditEntry,
+  redactAuditValue,
+} = require('../lib/security-audit');
 const {
   cancelRentalDowntime,
   createRentalDowntime,
@@ -61,7 +65,6 @@ const {
 const { assertBusinessNumberNotProvided } = require('../lib/business-numbering');
 
 const AUDIT_COLLECTION = 'audit_logs';
-const RENTAL_CREATE_IDEMPOTENCY_COLLECTION = 'rental_create_idempotency';
 const RENTAL_AUDIT_LIMIT = 20;
 const CLOSED_RENTAL_STATUSES = new Set(['closed', 'returned', 'cancelled', 'canceled', 'completed']);
 const RENTAL_PLANNER_SYNC_FIELDS = new Set([
@@ -458,10 +461,12 @@ function registerRentalRoutes(deps) {
     auditLog,
     botNotifications = null,
     businessNumbering = null,
+    requestIdempotency = null,
     reconcileEquipmentRentalProjection: reconcileEquipmentRentalProjectionForWrite = reconcileEquipmentRentalProjection,
     writeDataBatch: persistDataBatchUnsafe = entries => {
       for (const entry of entries || []) writeData(entry.name, entry.value);
     },
+    writeAuditDataBatch: persistAuditDataBatchUnsafe = null,
     nowIso = () => new Date().toISOString(),
   } = deps;
 
@@ -476,6 +481,35 @@ function registerRentalRoutes(deps) {
     return persistDataBatchUnsafe(entries);
   }
 
+  function persistDataBatchWithSemanticAudit(req, entries, auditEvents) {
+    if (typeof persistAuditDataBatchUnsafe !== 'function') {
+      const error = new Error('Atomic rental semantic-audit persistence is unavailable.');
+      error.code = 'RENTAL_AUDIT_REPOSITORY_REQUIRED';
+      error.status = 500;
+      throw error;
+    }
+    const currentAudit = readData(AUDIT_COLLECTION);
+    if (currentAudit !== null && currentAudit !== undefined && !Array.isArray(currentAudit)) {
+      const error = new Error('Stored audit history is malformed; refusing to overwrite it.');
+      error.code = 'AUDIT_HISTORY_SHAPE_INVALID';
+      error.status = 409;
+      throw error;
+    }
+    const semanticEntries = (auditEvents || []).map(event => createAuditEntry(req, event, {
+      generateId,
+      nowIso,
+    }));
+    const batch = [
+      ...(entries || []),
+      {
+        name: AUDIT_COLLECTION,
+        value: [...(Array.isArray(currentAudit) ? currentAudit : []), ...semanticEntries],
+      },
+    ];
+    assertAllocationSafeEntries(batch);
+    return persistAuditDataBatchUnsafe(batch);
+  }
+
   function sendRentalPersistenceError(res, error, fallbackCode, fallbackMessage) {
     const relationError = String(error?.code || '').startsWith('COUNTERPARTY_RELATION_');
     return res.status(error?.status || (relationError ? 409 : 500)).json({
@@ -484,6 +518,48 @@ function registerRentalRoutes(deps) {
       error: error?.message || fallbackMessage,
       ...(error?.details ? { details: error.details } : {}),
     });
+  }
+
+  function requireRequestIdempotency() {
+    if (
+      !requestIdempotency
+      || typeof requestIdempotency.inspect !== 'function'
+      || typeof requestIdempotency.execute !== 'function'
+    ) {
+      const error = new Error('Сервис серверной идемпотентности недоступен.');
+      error.status = 503;
+      error.code = 'IDEMPOTENCY_SERVICE_UNAVAILABLE';
+      throw error;
+    }
+    return requestIdempotency;
+  }
+
+  function rentalIdempotencyInput(req, key, fingerprint) {
+    return {
+      scope: req.actorScope,
+      operation: 'rentals.create',
+      clientKey: key,
+      requestFingerprint: fingerprint,
+      resultType: 'rentals',
+      createdByUserId: String(req.user?.userId || ''),
+    };
+  }
+
+  function sendRentalIdempotencyReplay(req, res, resultId, enrichRental) {
+    const existing = (readData('rentals') || [])
+      .find(item => String(item?.id || '') === String(resultId || ''));
+    if (!existing) {
+      return res.status(409).json({
+        ok: false,
+        code: 'IDEMPOTENCY_RESULT_UNAVAILABLE',
+        error: 'Результат предыдущего создания аренды больше недоступен.',
+      });
+    }
+    if (!accessControl.canAccessEntity('rentals', existing, req.user)) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    res.setHeader('Idempotency-Replayed', 'true');
+    return res.status(200).json(enrichRental(existing));
   }
   const requiredAccessMethods = ['filterCollectionByScope', 'canAccessEntity', 'assertCanUpdateEntity', 'assertSafeAdminBulkReplaceInput', 'splitForbiddenRentalManagerPatch'];
   const missingAccessMethods = !accessControl
@@ -1836,37 +1912,23 @@ function registerRentalRoutes(deps) {
           creditRiskAcknowledged,
         })
         : '';
-      const actorUserId = String(req.user?.userId || '');
-      const idempotencyRecords = idempotencyKey
-        ? readData(RENTAL_CREATE_IDEMPOTENCY_COLLECTION) || []
-        : [];
-      const previousAttempt = idempotencyKey
-        ? idempotencyRecords.find(item => item?.key === idempotencyKey)
+      const idempotencyInput = idempotencyKey
+        ? rentalIdempotencyInput(req, idempotencyKey, idempotencyFingerprint)
         : null;
-      if (previousAttempt) {
-        if (
-          previousAttempt.fingerprint !== idempotencyFingerprint
-          || String(previousAttempt.actorUserId || '') !== actorUserId
-        ) {
-          return res.status(409).json({
-            ok: false,
-            code: 'IDEMPOTENCY_KEY_REUSED',
-            error: 'Idempotency-Key уже использован с другим содержимым запроса или пользователем.',
-          });
+      if (idempotencyKey) {
+        try {
+          const inspected = requireRequestIdempotency().inspect(idempotencyInput);
+          if (inspected.status === 'replayed') {
+            return sendRentalIdempotencyReplay(req, res, inspected.resultId, enrichRentalForRead);
+          }
+        } catch (error) {
+          return sendRentalPersistenceError(
+            res,
+            error,
+            'RENTAL_IDEMPOTENCY_CHECK_FAILED',
+            'Не удалось проверить повтор создания аренды.',
+          );
         }
-        const existing = data.find(item => String(item?.id || '') === String(previousAttempt.rentalId || ''));
-        if (!existing) {
-          return res.status(409).json({
-            ok: false,
-            code: 'IDEMPOTENCY_RESULT_UNAVAILABLE',
-            error: 'Результат предыдущего создания аренды больше недоступен.',
-          });
-        }
-        if (!accessControl.canAccessEntity(collection, existing, req.user)) {
-          return res.status(403).json({ ok: false, error: 'Forbidden' });
-        }
-        res.setHeader('Idempotency-Replayed', 'true');
-        return res.status(200).json(enrichRentalForRead(existing));
       }
       let newId = req.body?.id || generateId(prefix);
       while ((data || []).some(item => String(item?.id || '') === String(newId || ''))) {
@@ -1941,46 +2003,42 @@ function registerRentalRoutes(deps) {
         newItem = normalizeGanttRentalStatus(newItem);
         newItem = mergeRentalHistory(null, newItem, req.user.userName);
       }
-      if (collection === 'rentals' && businessNumbering) {
-        try {
-          businessNumbering.assignNewRecord('rentals', newItem);
-        } catch (error) {
-          return res.status(error.status || 500).json({ ok: false, code: error.code, error: error.message });
-        }
-      }
       let linkedGanttRental = null;
       try {
-        if (collection === 'rentals') {
-          const linked = buildLinkedGanttRentalIfMissing(newItem, req.user.userName);
-          linkedGanttRental = linked.linkedGanttRental;
-          const lifecycle = reconcileRentalEquipment({
-            rentals: [...data, newItem],
-            ganttRentals: linked.nextGanttRentals,
-            equipmentList: equipment,
-            affectedRentals: [newItem],
-            author: req.user.userName,
-            reason: `Создание аренды ${newItem.id}`,
-          });
-          const writes = [
-            { name: 'rentals', value: [...data, newItem] },
-            { name: 'gantt_rentals', value: linked.nextGanttRentals },
-          ];
-          if (lifecycle.changed) writes.push({ name: 'equipment', value: lifecycle.nextEquipment });
-          if (idempotencyKey) {
-            writes.push({
-              name: RENTAL_CREATE_IDEMPOTENCY_COLLECTION,
-              value: [...idempotencyRecords, {
-                key: idempotencyKey,
-                fingerprint: idempotencyFingerprint,
-                rentalId: newItem.id,
-                actorUserId,
-                createdAt: nowIso(),
-              }],
+        const persistCreate = () => {
+          if (collection === 'rentals') {
+            if (businessNumbering && idempotencyKey) {
+              businessNumbering.assignNewRecord('rentals', newItem);
+            }
+            const linked = buildLinkedGanttRentalIfMissing(newItem, req.user.userName);
+            linkedGanttRental = linked.linkedGanttRental;
+            const lifecycle = reconcileRentalEquipment({
+              rentals: [...data, newItem],
+              ganttRentals: linked.nextGanttRentals,
+              equipmentList: equipment,
+              affectedRentals: [newItem],
+              author: req.user.userName,
+              reason: `Создание аренды ${newItem.id}`,
             });
+            const writes = [
+              { name: 'rentals', value: [...data, newItem] },
+              { name: 'gantt_rentals', value: linked.nextGanttRentals },
+            ];
+            if (lifecycle.changed) writes.push({ name: 'equipment', value: lifecycle.nextEquipment });
+            persistDataBatch(writes);
+          } else {
+            writeData(collection, [...data, newItem]);
           }
-          persistDataBatch(writes);
+          return newItem.id;
+        };
+
+        if (idempotencyKey) {
+          const outcome = requireRequestIdempotency().execute(idempotencyInput, persistCreate);
+          if (outcome.status === 'replayed') {
+            return sendRentalIdempotencyReplay(req, res, outcome.resultId, enrichRentalForRead);
+          }
         } else {
-          writeData(collection, [...data, newItem]);
+          persistCreate();
         }
       } catch (error) {
         return sendRentalPersistenceError(
@@ -2803,15 +2861,29 @@ function registerRentalRoutes(deps) {
                 sourceRentalId: ganttRental?.id || '',
                 reason: reason || 'Продление аренды',
                 comment,
-              }, req)
+              }, req, { persist: false })
             : [];
-          auditLog?.(req, {
-            action: 'rentals.change_request',
-            entityType: 'rentals',
-            entityId: classicRental?.id || ganttRental?.id,
-            after: { rentalId: classicRental?.id, requestIds: createdRequests.map(item => item.id) },
-            metadata: { reason, comment, invoiceSentToClient, conflict: conflictDto(conflict) },
-          });
+          try {
+            persistDataBatchWithSemanticAudit(req, [
+              ...(createdRequests.length > 0 ? [{
+                name: 'rental_change_requests',
+                value: [...(readData('rental_change_requests') || []), ...createdRequests],
+              }] : []),
+            ], [{
+              action: 'rentals.change_request',
+              entityType: 'rentals',
+              entityId: classicRental?.id || ganttRental?.id,
+              after: { rentalId: classicRental?.id, requestIds: createdRequests.map(item => item.id) },
+              metadata: { reason, comment, invoiceSentToClient, conflict: conflictDto(conflict) },
+            }]);
+          } catch (error) {
+            return sendRentalPersistenceError(
+              res,
+              error,
+              'RENTAL_EXTENSION_APPROVAL_PERSISTENCE_FAILED',
+              'Не удалось атомарно создать запрос согласования продления.',
+            );
+          }
           return res.status(202).json({
             ok: true,
             applied: false,
@@ -2927,17 +2999,6 @@ function registerRentalRoutes(deps) {
           reason: `Продление аренды ${nextClassic?.id || classicRental?.id || ganttRental?.id}`,
         });
         if (lifecycle.changed) extensionWrites.push({ name: 'equipment', value: lifecycle.nextEquipment });
-        try {
-          persistDataBatch(extensionWrites);
-        } catch (error) {
-          return sendRentalPersistenceError(
-            res,
-            error,
-            'RENTAL_EXTENSION_PERSISTENCE_FAILED',
-            'Не удалось атомарно продлить аренду.',
-          );
-        }
-
         const auditMetadata = {
           oldPlannedReturnDate: currentEnd,
           newPlannedReturnDate,
@@ -2950,8 +3011,9 @@ function registerRentalRoutes(deps) {
           ganttRentalId: nextGantt?.id || ganttRental?.id || '',
           equipmentId: nextClassic?.equipmentId || nextGantt?.equipmentId || '',
         };
+        const extensionAuditEvents = [];
         if (nextClassic) {
-          auditLog?.(req, {
+          extensionAuditEvents.push({
             action: 'rentals.extend',
             entityType: 'rentals',
             entityId: nextClassic.id,
@@ -2959,7 +3021,7 @@ function registerRentalRoutes(deps) {
             after: { id: nextClassic.id, plannedReturnDate: newPlannedReturnDate, equipmentId: nextClassic.equipmentId },
             metadata: auditMetadata,
           });
-          auditLog?.(req, {
+          extensionAuditEvents.push({
             action: 'rentals.planned_return_date_change',
             entityType: 'rentals',
             entityId: nextClassic.id,
@@ -2969,7 +3031,7 @@ function registerRentalRoutes(deps) {
           });
         }
         if (nextGantt) {
-          auditLog?.(req, {
+          extensionAuditEvents.push({
             action: 'gantt_rentals.extend',
             entityType: 'gantt_rentals',
             entityId: nextGantt.id,
@@ -2977,6 +3039,17 @@ function registerRentalRoutes(deps) {
             after: { id: nextGantt.id, endDate: newPlannedReturnDate, plannedReturnDate: newPlannedReturnDate, equipmentId: nextGantt.equipmentId },
             metadata: auditMetadata,
           });
+        }
+
+        try {
+          persistDataBatchWithSemanticAudit(req, extensionWrites, extensionAuditEvents);
+        } catch (error) {
+          return sendRentalPersistenceError(
+            res,
+            error,
+            'RENTAL_EXTENSION_PERSISTENCE_FAILED',
+            'Не удалось атомарно продлить аренду.',
+          );
         }
 
         if (nextClassic) await emitRentalNotification(classicRental, nextClassic);

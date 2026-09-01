@@ -21,6 +21,14 @@ const { registerBotRoutes } = require('../server/routes/bot.js');
 const { registerStaffRoutes } = require('../server/routes/staff.js');
 const { registerManagerMyPlanRoutes } = require('../server/routes/manager-my-plan.js');
 const { TENANT_OWNED_ARRAY_COLLECTIONS } = require('../server/lib/tenant-data-boundary.js');
+const {
+  createTenantCatalogEntry: createPhysicalTenantCatalogEntry,
+  deleteEffectiveTenantCatalogRecord: deleteLogicalTenantCatalogRecord,
+  isPlatformDefaultTenantOverlayCollection,
+  readEffectiveCatalog,
+  readEffectiveCatalogRecord,
+  updateEffectiveTenantCatalogRecord: updateLogicalTenantCatalogRecord,
+} = require('../server/lib/platform-default-tenant-overlay.js');
 
 const WARRANTY_MECHANIC_ROLE = 'Механик по гарантии';
 const WARRANTY_MECHANIC_ROLE_ALIASES = ['warranty_mechanic', 'mechanic_warranty', 'warrantyMechanic', 'mechanicWarranty', 'warranty-mechanic', 'mechanic-warranty', 'механик по гарантии'];
@@ -171,6 +179,14 @@ function createSecurityApp(state = createState()) {
   ]);
   const readData = name => {
     const rows = state[name] || [];
+    if (isPlatformDefaultTenantOverlayCollection(name)) {
+      return readEffectiveCatalog({
+        collection: name,
+        records: rows,
+        scope: catalogScope,
+        catalogState: state,
+      });
+    }
     if (TENANT_OWNED_ARRAY_COLLECTIONS.includes(name)) {
       return rows.map(record => ({
         ...record,
@@ -182,7 +198,69 @@ function createSecurityApp(state = createState()) {
   };
   const writeData = (name, value) => { state[name] = value; };
   const writeDataBatch = entries => {
-    for (const entry of entries || []) writeData(entry.name, entry.value);
+    const nextState = structuredClone(state);
+    for (const entry of entries || []) nextState[entry.name] = structuredClone(entry.value);
+    for (const key of Object.keys(state)) delete state[key];
+    Object.assign(state, nextState);
+    for (const entry of entries || []) auditEntries.push(...(entry.auditEntries || []));
+  };
+  const catalogScope = Object.freeze({ companyId: 'COMPANY-A', tenantId: 'COMPANY-A' });
+  let catalogIdSequence = 0;
+  const catalogLifecycle = {
+    createTenantCatalogEntry(collection, input) {
+      const outcome = createPhysicalTenantCatalogEntry({
+        collection,
+        records: state[collection] || [],
+        scope: catalogScope,
+        input,
+        generateId: prefix => `${prefix}-${++catalogIdSequence}`,
+        catalogState: state,
+      });
+      writeData(collection, outcome.records);
+      return readEffectiveCatalogRecord({
+        collection,
+        records: state[collection],
+        scope: catalogScope,
+        id: outcome.record.id,
+        catalogState: state,
+      });
+    },
+    updateEffectiveTenantCatalogRecord(collection, logicalId, patch) {
+      const outcome = updateLogicalTenantCatalogRecord({
+        collection,
+        records: state[collection] || [],
+        scope: catalogScope,
+        logicalId,
+        patch,
+        generateId: prefix => `${prefix}-${++catalogIdSequence}`,
+        catalogState: state,
+      });
+      writeData(collection, outcome.records);
+      return readEffectiveCatalogRecord({
+        collection,
+        records: state[collection],
+        scope: catalogScope,
+        id: logicalId,
+        catalogState: state,
+      });
+    },
+    deleteEffectiveTenantCatalogRecord(collection, logicalId) {
+      const outcome = deleteLogicalTenantCatalogRecord({
+        collection,
+        records: state[collection] || [],
+        scope: catalogScope,
+        logicalId,
+        catalogState: state,
+      });
+      writeData(collection, outcome.records);
+      return readEffectiveCatalogRecord({
+        collection,
+        records: state[collection],
+        scope: catalogScope,
+        id: logicalId,
+        catalogState: state,
+      });
+    },
   };
   const accessControl = createAccessControl({ readData });
   const serviceAuditLog = createServiceAuditLog({
@@ -192,6 +270,64 @@ function createSecurityApp(state = createState()) {
     nowIso: () => '2026-04-28T12:00:00.000Z',
   });
   const auditEntries = [];
+  const auditLog = (_req, entry) => {
+    auditEntries.push(entry);
+    return entry;
+  };
+  auditLog.preparePersistenceEntry = (_req, events = []) => {
+    const prepared = structuredClone(Array.isArray(events) ? events : [events]);
+    return {
+      name: 'audit_logs',
+      value: [...(state.audit_logs || []), ...prepared],
+      auditEntries: prepared,
+    };
+  };
+  const persistUserAuthorityTransition = ({ entries, expectedUsers }) => {
+    assert.deepEqual(state.users, expectedUsers);
+    const nextState = structuredClone(state);
+    for (const entry of entries || []) nextState[entry.name] = structuredClone(entry.value);
+    const nextUsers = nextState.users || [];
+    const nextById = new Map(nextUsers.map(user => [user.id, user]));
+    const affectedUserIds = (expectedUsers || [])
+      .filter(previous => {
+        const next = nextById.get(previous.id);
+        return !next || JSON.stringify(previous) !== JSON.stringify(next);
+      })
+      .map(user => user.id);
+    for (const [token, session] of sessions.entries()) {
+      if (affectedUserIds.includes(session.userId)) sessions.delete(token);
+    }
+    for (const key of Object.keys(state)) delete state[key];
+    Object.assign(state, nextState);
+    const auditEntry = (entries || []).find(entry => entry.name === 'audit_logs');
+    auditEntries.push(...(auditEntry?.auditEntries || []));
+    return {
+      affectedUserCount: affectedUserIds.length,
+      disconnectedBotCount: 0,
+      revokedSessions: affectedUserIds.length,
+    };
+  };
+  const persistServiceTicketUpdate = (ticket, _userName, options) => {
+    const nextTickets = (state.service || []).map(item => item.id === ticket.id ? ticket : item);
+    options.writeDataBatch([
+      { name: 'service', value: nextTickets },
+      ...(options.buildExtraEntries?.(ticket) || []),
+    ]);
+    return ticket;
+  };
+  const persistServiceTicketDeletion = (ticket, _userName, options) => {
+    options.writeDataBatch([
+      { name: 'service', value: (state.service || []).filter(item => item.id !== ticket.id) },
+      ...(options.extraEntries || []),
+    ]);
+  };
+  const persistServiceTicketBulkReplace = (tickets, _userName, options) => {
+    const previousTickets = structuredClone(state.service || []);
+    options.writeDataBatch([
+      { name: 'service', value: tickets },
+      ...(options.buildExtraEntries?.(tickets, previousTickets) || []),
+    ]);
+  };
 
   function requireAuth(req, res, next) {
     const auth = req.headers.authorization || '';
@@ -314,6 +450,7 @@ function createSecurityApp(state = createState()) {
   apiRouter.use(registerRentalChangeRequestRoutes({
     readData,
     writeData,
+    writeDataBatch,
     requireAuth,
     requireRead,
     validateRentalPayload: () => ({ ok: true }),
@@ -379,6 +516,8 @@ function createSecurityApp(state = createState()) {
     readData,
     writeData,
     writeDataBatch,
+    writeServiceDataBatch: writeDataBatch,
+    persistUserAuthorityTransition,
     deleteSessionsForUserIds: ids => ids.length,
     requireAuth,
     requireRead,
@@ -397,9 +536,13 @@ function createSecurityApp(state = createState()) {
     generateId: prefix => `${prefix}-new`,
     nowIso: () => '2026-04-28T12:00:00.000Z',
     applyServiceTicketCreationEffects: () => {},
+    persistServiceTicketUpdate,
+    persistServiceTicketDeletion,
+    persistServiceTicketBulkReplace,
     accessControl,
-    auditLog: (_req, entry) => auditEntries.push(entry),
+    auditLog,
     serviceAuditLog,
+    catalogLifecycle,
   }));
   app.use('/api', apiRouter);
   registerBotRoutes(app, {

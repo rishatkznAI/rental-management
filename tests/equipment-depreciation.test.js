@@ -101,6 +101,11 @@ function createFinanceRouteApp() {
   ]);
   const readData = name => state[name] || [];
   const writeData = (name, value) => { state[name] = value; };
+  const writeDataBatch = entries => {
+    const staged = structuredClone(state);
+    for (const entry of entries) staged[entry.name] = structuredClone(entry.value);
+    Object.assign(state, staged);
+  };
   const accessControl = createAccessControl({ readData });
 
   function requireAuth(req, res, next) {
@@ -114,6 +119,7 @@ function createFinanceRouteApp() {
       userRole: normalizeRole(user.role),
       ownerId: user.ownerId || null,
     };
+    req.actorScope = { companyId: 'COMPANY-FINANCE', tenantId: 'COMPANY-FINANCE' };
     return next();
   }
 
@@ -140,6 +146,7 @@ function createFinanceRouteApp() {
     requireWrite,
     readData,
     writeData,
+    writeDataBatch,
     accessControl,
     generateId: prefix => `${prefix}-new`,
     idPrefixes: { equipment_finance: 'EF', app_settings: 'APS' },

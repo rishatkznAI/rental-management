@@ -8,7 +8,11 @@ const {
   boundaryState,
   deactivateCounterpartyRole,
 } = require('./counterparty-role-profiles');
-const { AUDIT_COLLECTION, LEGACY_AUDIT_COLLECTION, redactAuditValue } = require('./security-audit');
+const {
+  AUDIT_COLLECTION,
+  LEGACY_AUDIT_COLLECTION,
+  createAuditEntry: createSecurityAuditEntry,
+} = require('./security-audit');
 const { normalizeRole } = require('./role-groups');
 
 const TERMINAL_STATUSES = new Set([
@@ -497,20 +501,26 @@ function assertEntityOwnerScope({ actor, entityType, entity, readData }) {
 }
 
 function createAuditEntry({ generateId, nowIso, actor, action, entityType, entityId, before, after, metadata = null }) {
-  return {
-    id: generateId('AUD'),
-    userId: actor?.userId || actor?.id || null,
-    userName: actor?.userName || actor?.name || null,
-    role: actorRole(actor) || null,
+  const companyId = relationId(actor?.companyId);
+  const tenantId = relationId(actor?.tenantId);
+  if (!companyId || tenantId !== companyId) {
+    throw lifecycleError(
+      'MASTER_DATA_SCOPE_UNKNOWN',
+      'Semantic audit requires exact trusted company/tenant scope.',
+      403,
+    );
+  }
+  return createSecurityAuditEntry({
+    ...actor,
+    actorScope: { companyId, tenantId },
+  }, {
     action,
     entityType,
     entityId,
-    description: `${action}: ${entityType} ${entityId}`,
-    before: redactAuditValue(before),
-    after: redactAuditValue(after),
-    metadata: redactAuditValue(metadata),
-    createdAt: nowIso(),
-  };
+    before,
+    after,
+    metadata,
+  }, { generateId, nowIso });
 }
 
 function createClientMasterDataLifecycleService({
@@ -526,7 +536,7 @@ function createClientMasterDataLifecycleService({
   function appendAudit(entries, input) {
     const logs = [...readCollection(readData, AUDIT_COLLECTION)];
     logs.push(createAuditEntry({ generateId, nowIso, ...input }));
-    return [...entries, { name: AUDIT_COLLECTION, value: logs.slice(-10000) }];
+    return [...entries, { name: AUDIT_COLLECTION, value: logs }];
   }
 
   function findEntity(collection, id, notFoundCode, message) {

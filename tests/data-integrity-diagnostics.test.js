@@ -37,8 +37,8 @@ function baseState() {
     ],
     owners: [],
     mechanics: [],
-    bot_users: [],
-    bot_sessions: [],
+    bot_users: {},
+    bot_sessions: {},
     bot_activity: [],
     repair_work_items: [],
     repair_part_items: [],
@@ -136,11 +136,12 @@ test('data integrity diagnostics endpoint requires admin', async () => {
 
 test('admin gets safe data integrity summary', async () => {
   const state = baseState();
-  state.bot_sessions = [{
-    id: 'GLOBAL-PREAUTH-SESSION',
-    pendingAction: 'login_password',
-    password: 'must-not-cross-tenant-diagnostics',
-  }];
+  state.bot_sessions = {
+    'GLOBAL-PREAUTH-SESSION': {
+      pendingAction: 'login_password',
+      password: 'must-not-cross-tenant-diagnostics',
+    },
+  };
   const app = createApp({
     state,
     requireAuth: (req, _res, next) => {
@@ -206,6 +207,23 @@ test('diagnostics detects stale delivery', () => {
   const issue = findIssue(diagnostics, 'delivery', 'stale_active_delivery');
   assert.equal(issue.count, 1);
   assert.equal(issue.examples[0].id, 'DL-stale');
+});
+
+test('diagnostics reads tenant bot users from map storage and ignores system bot sessions', () => {
+  const state = baseState();
+  state.bot_users = {
+    '79990000000': { userId: 'U-missing', email: 'missing@example.test' },
+  };
+  state.bot_sessions = {
+    '79990000000': { password: 'never-inspect-session-secret', verificationCode: '123456' },
+  };
+
+  const diagnostics = buildDataIntegrityDiagnostics(state, { today: '2026-05-26' });
+  const issue = findIssue(diagnostics, 'usersBot', 'bot_user_without_frontend_user');
+  assert.equal(issue.count, 1);
+  assert.equal(diagnostics.domains.usersBot.botUsers, 1);
+  assert.equal(diagnostics.domains.usersBot.botSessions, undefined);
+  assert.doesNotMatch(JSON.stringify(diagnostics), /never-inspect-session-secret|123456|79990000000/);
 });
 
 test('diagnostics detects duplicate names in service_works', () => {

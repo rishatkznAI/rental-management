@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 
-const { DB_PATH, getData, setData } = require('../db');
-const { assertStagingFixtureSeedAllowed } = require('./seed-staging-readiness-fixtures.cjs');
+const { DB_PATH, setDataBatchCompareAndSwap } = require('../db');
+const {
+  assertStagingFixtureSeedAllowed,
+  planFixtureReplacement,
+} = require('./seed-staging-readiness-fixtures.cjs');
 
 const EQUIPMENT_PREFIX = 'STG-REPEAT-';
 const SERVICE_PREFIX = 'STG-SERVICE-REPEAT-';
-
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 function daysAgo(now, days) {
   return new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -22,19 +21,6 @@ function hasRepeatFixtureId(record) {
 function hasRepeatFixtureServiceLink(record) {
   const repairId = String(record?.repairId || record?.serviceTicketId || '');
   return hasRepeatFixtureId(record) || repairId.startsWith(SERVICE_PREFIX);
-}
-
-function replaceRepeatFixtures(collectionName, fixtures, predicate = hasRepeatFixtureId) {
-  const current = asArray(getData(collectionName));
-  const kept = current.filter(item => !predicate(item));
-  const next = [...kept, ...fixtures];
-  setData(collectionName, next);
-  return {
-    collection: collectionName,
-    removed: current.length - kept.length,
-    upserted: fixtures.length,
-    total: next.length,
-  };
 }
 
 function buildRepeatBreakdownFixtures(now = new Date()) {
@@ -143,12 +129,16 @@ function buildRepeatBreakdownFixtures(now = new Date()) {
 function seedStagingRepeatBreakdownFixtures({ env = process.env, now = new Date() } = {}) {
   assertStagingFixtureSeedAllowed(env);
   const fixtures = buildRepeatBreakdownFixtures(now);
-  const results = [
-    replaceRepeatFixtures('equipment', fixtures.equipment),
-    replaceRepeatFixtures('service', fixtures.service),
-    replaceRepeatFixtures('repair_work_items', fixtures.repairWorkItems, hasRepeatFixtureServiceLink),
-    replaceRepeatFixtures('repair_part_items', fixtures.repairPartItems, hasRepeatFixtureServiceLink),
+  const scope = { companyId: String(env.STAGING_COMPANY_ID).trim(), tenantId: String(env.STAGING_TENANT_ID).trim() };
+  const scoped = list => list.map(item => ({ ...item, ...scope }));
+  const plans = [
+    planFixtureReplacement('equipment', scoped(fixtures.equipment), hasRepeatFixtureId),
+    planFixtureReplacement('service', scoped(fixtures.service), hasRepeatFixtureId),
+    planFixtureReplacement('repair_work_items', scoped(fixtures.repairWorkItems), hasRepeatFixtureServiceLink),
+    planFixtureReplacement('repair_part_items', scoped(fixtures.repairPartItems), hasRepeatFixtureServiceLink),
   ];
+  setDataBatchCompareAndSwap(plans.map(plan => plan.entry));
+  const results = plans.map(plan => plan.result);
   return {
     ok: true,
     dbPath: DB_PATH,

@@ -25,7 +25,7 @@ import { usePermissions } from '../lib/permissions';
 import { EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS, normalizeEquipmentList } from '../lib/equipmentClassification';
 import { getSaleOperationHistory, isSaleModeEquipment, saleConditionKind, saleConditionLabel, saleStatusKind, saleStatusLabel } from '../lib/equipmentSaleMode.js';
 import { formatCurrency } from '../lib/utils';
-import { deriveSignalState } from '../lib/gsm';
+import { getEquipmentGsmSaleValue } from '../lib/gsmSignalState.js';
 import { normalizeUserRole } from '../lib/userStorage';
 import {
   DEFAULT_SALES_SETTINGS,
@@ -103,31 +103,6 @@ function formatSaleDate(value?: string | null) {
 function isPastDate(value?: string | null) {
   const parsed = new Date(String(value || ''));
   return Boolean(value && !Number.isNaN(parsed.getTime()) && parsed < new Date());
-}
-
-function getGsmSaleValue(equipment: Partial<Equipment>) {
-  const hasGsmData = Boolean(
-    equipment.gsmImei
-    || equipment.gsmDeviceId
-    || equipment.gsmTrackerId
-    || equipment.gsmStatus
-    || equipment.gsmSignalStatus
-    || equipment.gsmLastSeenAt
-    || equipment.gsmLastSignalAt
-  );
-  if (!hasGsmData) return 'Не указано';
-
-  const signalState = deriveSignalState(equipment as Equipment, equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || null);
-  const statusLabel = signalState === 'online'
-    ? 'Онлайн'
-    : signalState === 'location_only'
-    ? 'Только координаты'
-    : signalState === 'offline'
-    ? 'Офлайн'
-    : 'Неизвестно';
-  const identifier = equipment.gsmImei || equipment.gsmDeviceId || equipment.gsmTrackerId;
-
-  return [identifier ? `IMEI/ID ${identifier}` : '', statusLabel].filter(Boolean).join(' · ');
 }
 
 export default function Sales() {
@@ -1233,7 +1208,7 @@ export default function Sales() {
                   {operationHistory.hasGsm && (
                     <div className="flex justify-between gap-3">
                       <span className="text-gray-500 dark:text-gray-400">GSM</span>
-                      <span className="text-right font-medium text-gray-900 dark:text-white">{getGsmSaleValue(equipment)}</span>
+                      <span className="text-right font-medium text-gray-900 dark:text-white">{getEquipmentGsmSaleValue(equipment)}</span>
                     </div>
                   )}
                   <div className="grid grid-cols-3 gap-2">
@@ -1303,7 +1278,7 @@ export default function Sales() {
                   <p className="text-xs text-gray-500 dark:text-gray-400">Инв. №: {equipment.inventoryNumber || 'Не указано'}</p>
                   {showOperationHistory && (
                     <>
-                      {operationHistory.hasGsm && <p className="max-w-[260px] truncate text-xs text-gray-500 dark:text-gray-400">GSM: {getGsmSaleValue(equipment)}</p>}
+                      {operationHistory.hasGsm && <p className="max-w-[260px] truncate text-xs text-gray-500 dark:text-gray-400">GSM: {getEquipmentGsmSaleValue(equipment)}</p>}
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         ТО: <span className={isPastDate(equipment.nextMaintenance) ? 'text-amber-600 dark:text-amber-300' : ''}>{formatSaleDate(equipment.nextMaintenance)}</span>
                         {' · '}

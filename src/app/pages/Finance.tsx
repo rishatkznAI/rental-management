@@ -149,9 +149,9 @@ type OperationFormState = {
   category: string;
   description: string;
   counterparty: string;
-  account: string;
-  accountFrom: string;
-  accountTo: string;
+  accountId: string;
+  accountFromId: string;
+  accountToId: string;
   relatedEntityType: NonNullable<FinanceOperation['relatedEntityType']>;
   relatedEntityId: string;
   relatedEntityLabel: string;
@@ -169,8 +169,8 @@ type AccountFormState = {
 };
 
 type TransferFormState = {
-  accountFrom: string;
-  accountTo: string;
+  accountFromId: string;
+  accountToId: string;
   amount: string;
   date: string;
   comment: string;
@@ -253,8 +253,8 @@ function createEmptyAccountForm(defaultDate = dateKey(new Date())): AccountFormS
 
 function createEmptyTransferForm(defaultDate = dateKey(new Date())): TransferFormState {
   return {
-    accountFrom: '',
-    accountTo: '',
+    accountFromId: '',
+    accountToId: '',
     amount: '',
     date: defaultDate,
     comment: '',
@@ -269,9 +269,9 @@ function createEmptyOperationForm(defaultDate = dateKey(new Date())): OperationF
     category: '',
     description: '',
     counterparty: '',
-    account: '',
-    accountFrom: '',
-    accountTo: '',
+    accountId: '',
+    accountFromId: '',
+    accountToId: '',
     relatedEntityType: '',
     relatedEntityId: '',
     relatedEntityLabel: '',
@@ -1211,9 +1211,9 @@ export default function Finance() {
       category: operation.category || '',
       description: operation.description || '',
       counterparty: operation.counterparty || '',
-      account: operation.account || '',
-      accountFrom: operation.accountFrom || '',
-      accountTo: operation.accountTo || '',
+      accountId: operation.accountId || '',
+      accountFromId: operation.accountFromId || '',
+      accountToId: operation.accountToId || '',
       relatedEntityType: operation.relatedEntityType || '',
       relatedEntityId: operation.relatedEntityId || '',
       relatedEntityLabel: operation.relatedEntityLabel || '',
@@ -1238,14 +1238,17 @@ export default function Finance() {
       return null;
     }
     if (operationForm.type === 'transfer') {
-      if (!operationForm.accountFrom.trim() || !operationForm.accountTo.trim()) {
+      if (!operationForm.accountFromId || !operationForm.accountToId) {
         setOperationFormError('Для перевода укажите счёт-источник и счёт-получатель.');
         return null;
       }
-      if (operationForm.accountFrom.trim().toLowerCase() === operationForm.accountTo.trim().toLowerCase()) {
+      if (operationForm.accountFromId === operationForm.accountToId) {
         setOperationFormError('Нельзя перевести деньги на тот же счёт.');
         return null;
       }
+    } else if (!operationForm.accountId) {
+      setOperationFormError('Выберите счёт или кассу.');
+      return null;
     }
     return {
       type: operationForm.type,
@@ -1254,9 +1257,9 @@ export default function Finance() {
       category: operationForm.category.trim(),
       description: operationForm.description.trim() || undefined,
       counterparty: operationForm.counterparty.trim() || undefined,
-      account: operationForm.type === 'transfer' ? undefined : operationForm.account.trim() || undefined,
-      accountFrom: operationForm.type === 'transfer' ? operationForm.accountFrom.trim() : undefined,
-      accountTo: operationForm.type === 'transfer' ? operationForm.accountTo.trim() : undefined,
+      accountId: operationForm.type === 'transfer' ? undefined : operationForm.accountId,
+      accountFromId: operationForm.type === 'transfer' ? operationForm.accountFromId : undefined,
+      accountToId: operationForm.type === 'transfer' ? operationForm.accountToId : undefined,
       relatedEntityType: operationForm.relatedEntityType || undefined,
       relatedEntityId: operationForm.relatedEntityId.trim() || undefined,
       relatedEntityLabel: operationForm.relatedEntityLabel.trim() || undefined,
@@ -1367,7 +1370,7 @@ export default function Finance() {
   const openTransferDialog = (account?: FinanceAccount) => {
     setTransferForm({
       ...createEmptyTransferForm(dateKey(new Date())),
-      accountFrom: account?.id || '',
+      accountFromId: account?.id || '',
     });
     setTransferFormError('');
     setTransferDialogOpen(true);
@@ -1376,11 +1379,11 @@ export default function Finance() {
   const handleTransferSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const amount = Number(transferForm.amount);
-    if (!transferForm.accountFrom || !transferForm.accountTo) {
+    if (!transferForm.accountFromId || !transferForm.accountToId) {
       setTransferFormError('Выберите счёт-источник и счёт-получатель.');
       return;
     }
-    if (transferForm.accountFrom === transferForm.accountTo) {
+    if (transferForm.accountFromId === transferForm.accountToId) {
       setTransferFormError('Нельзя переводить на тот же счёт.');
       return;
     }
@@ -1394,8 +1397,8 @@ export default function Finance() {
     }
     try {
       await transferAccount.mutateAsync({
-        accountFrom: transferForm.accountFrom,
-        accountTo: transferForm.accountTo,
+        accountFromId: transferForm.accountFromId,
+        accountToId: transferForm.accountToId,
         amount,
         date: transferForm.date,
         comment: transferForm.comment.trim() || undefined,
@@ -2915,7 +2918,7 @@ export default function Finance() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Счёт-источник</label>
-                <Select value={transferForm.accountFrom} onValueChange={(value) => setTransferField('accountFrom', value)}>
+                <Select value={transferForm.accountFromId} onValueChange={(value) => setTransferField('accountFromId', value)}>
                   <SelectTrigger><SelectValue placeholder="Выберите счёт" /></SelectTrigger>
                   <SelectContent>
                     {activeFinanceAccounts.map(account => (
@@ -2926,7 +2929,7 @@ export default function Finance() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-200">Счёт-получатель</label>
-                <Select value={transferForm.accountTo} onValueChange={(value) => setTransferField('accountTo', value)}>
+                <Select value={transferForm.accountToId} onValueChange={(value) => setTransferField('accountToId', value)}>
                   <SelectTrigger><SelectValue placeholder="Выберите счёт" /></SelectTrigger>
                   <SelectContent>
                     {activeFinanceAccounts.map(account => (
@@ -3108,31 +3111,38 @@ export default function Finance() {
                 <>
                   <div>
                     <FieldLabel required>Счёт-источник</FieldLabel>
-                    <Input
-                      value={operationForm.accountFrom}
-                      onChange={(event) => setOperationField('accountFrom', event.target.value)}
-                      placeholder="Касса"
-                      required
-                    />
+                    <Select value={operationForm.accountFromId} onValueChange={(value) => setOperationField('accountFromId', value)}>
+                      <SelectTrigger><SelectValue placeholder="Выберите счёт" /></SelectTrigger>
+                      <SelectContent>
+                        {activeFinanceAccounts.map(account => (
+                          <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div>
                     <FieldLabel required>Счёт-получатель</FieldLabel>
-                    <Input
-                      value={operationForm.accountTo}
-                      onChange={(event) => setOperationField('accountTo', event.target.value)}
-                      placeholder="Расчётный счёт"
-                      required
-                    />
+                    <Select value={operationForm.accountToId} onValueChange={(value) => setOperationField('accountToId', value)}>
+                      <SelectTrigger><SelectValue placeholder="Выберите счёт" /></SelectTrigger>
+                      <SelectContent>
+                        {activeFinanceAccounts.map(account => (
+                          <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </>
               ) : (
                 <div>
-                  <FieldLabel>Счёт/касса</FieldLabel>
-                  <Input
-                    value={operationForm.account}
-                    onChange={(event) => setOperationField('account', event.target.value)}
-                    placeholder="Расчётный счёт, касса"
-                  />
+                  <FieldLabel required>Счёт/касса</FieldLabel>
+                  <Select value={operationForm.accountId} onValueChange={(value) => setOperationField('accountId', value)}>
+                    <SelectTrigger><SelectValue placeholder="Выберите счёт" /></SelectTrigger>
+                    <SelectContent>
+                      {activeFinanceAccounts.map(account => (
+                        <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
               <div>

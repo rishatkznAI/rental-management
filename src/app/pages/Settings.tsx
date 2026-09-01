@@ -8089,7 +8089,7 @@ function SparePartsReferenceList() {
           onChange={event => void handleImportFile(event)}
         />
         <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
-          Можно загрузить CSV со списком запчастей. Дубли по артикулу будут обновлены; если артикула нет, совпадение ищется по наименованию.
+          Колонка ID необязательна. Точное совпадение ID из выгрузки обновляет эту запись; пустой ID всегда создаёт отдельную запись компании. Артикул и наименование не используются для поиска совпадений. Отсутствующие в CSV и платформенные записи сохраняются.
         </div>
         {importMessage && (
           <div className={`rounded-lg border px-3 py-2 text-sm ${

@@ -1,6 +1,7 @@
 import type { GanttRentalData } from '../../mock-data.ts';
 import { isSaleModeEquipment, saleStatusKind } from '../../lib/equipmentSaleMode.js';
 import { deriveSignalState } from '../../lib/gsm.ts';
+import { hasMeaningfulEquipmentGsmData } from '../../lib/gsmSignalState.js';
 import { formatDate } from '../../lib/utils.ts';
 import type {
   Document,
@@ -426,21 +427,7 @@ export function equipmentMatchesInvestorBinding(
 }
 
 export function hasEquipmentGsmData(equipment: Equipment) {
-  const movementHistory = Array.isArray(equipment.gsmMovementHistory) ? equipment.gsmMovementHistory : [];
-  return Boolean(
-    equipment.gsmImei
-    || equipment.gsmDeviceId
-    || equipment.gsmTrackerId
-    || equipment.gsmStatus
-    || equipment.gsmSignalStatus
-    || equipment.gsmLastSeenAt
-    || equipment.gsmLastSignalAt
-    || typeof equipment.gsmLastLat === 'number'
-    || typeof equipment.gsmLastLng === 'number'
-    || typeof equipment.gsmLatitude === 'number'
-    || typeof equipment.gsmLongitude === 'number'
-    || movementHistory.length > 0
-  );
+  return hasMeaningfulEquipmentGsmData(equipment);
 }
 
 export function getEquipmentGsmDisplay(equipment: Equipment) {
@@ -449,6 +436,14 @@ export function getEquipmentGsmDisplay(equipment: Equipment) {
       label: 'Нет данных',
       className: 'bg-muted text-muted-foreground',
       dotClassName: 'bg-slate-400',
+    };
+  }
+
+  if (equipment.gsmBindingVerified !== true) {
+    return {
+      label: 'Непроверенные данные',
+      className: 'bg-amber-500/12 text-amber-300',
+      dotClassName: 'bg-amber-400',
     };
   }
 

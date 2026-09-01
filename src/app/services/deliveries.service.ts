@@ -23,14 +23,18 @@ export const deliveriesService = {
   getById: (id: string): Promise<Delivery> =>
     api.get<unknown>(`/api/deliveries/${id}`).then((response) => normalizeDeliveryRecord(response) as Delivery),
 
-  create: (payload: CreateDeliveryPayload): Promise<Delivery> =>
-    api.post<unknown>('/api/deliveries', payload).then((response) => normalizeDeliveryRecord(response) as Delivery),
+  create: (payload: CreateDeliveryPayload, idempotencyKey: string): Promise<Delivery> =>
+    api.post<unknown>('/api/deliveries', payload, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    }).then((response) => normalizeDeliveryRecord(response) as Delivery),
 
   update: (id: string, payload: UpdateDeliveryPayload): Promise<Delivery> =>
     api.patch<unknown>(`/api/deliveries/${id}`, payload).then((response) => normalizeDeliveryRecord(response) as Delivery),
 
-  resendToCarrier: (id: string): Promise<Delivery> =>
-    api.post<unknown>(`/api/deliveries/${id}/send`, {}).then((response) => normalizeDeliveryRecord(response) as Delivery),
+  resendToCarrier: (id: string, idempotencyKey: string): Promise<Delivery> =>
+    api.post<unknown>(`/api/deliveries/${id}/send`, {}, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    }).then((response) => normalizeDeliveryRecord(response) as Delivery),
 
   delete: (id: string): Promise<{ ok: boolean }> =>
     api.del<{ ok: boolean }>(`/api/deliveries/${id}`),

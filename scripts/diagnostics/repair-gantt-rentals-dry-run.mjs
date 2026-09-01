@@ -7,12 +7,19 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const serverRequire = createRequire(new URL('../../server/package.json', import.meta.url));
 const Database = serverRequire('better-sqlite3');
+const {
+  prepareSqliteReadonlyStatement,
+} = require('../../server/lib/sqlite-readonly-statement.js');
 
 const {
   buildBrokenGanttRentalsRepairPlan,
   buildDryRunOperations,
-  applyRepairPlan,
 } = require('../../server/lib/gantt-rental-repair-diagnostics.js');
+const {
+  assertAuditedMaintenanceApplyUnavailable,
+  parseAppDataValue,
+  resolveExplicitDatabasePath,
+} = require('../../server/lib/maintenance-script-safety.js');
 
 const COLLECTIONS = [
   'equipment',
@@ -71,34 +78,16 @@ function readCollections(dbPath) {
   const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     const placeholders = COLLECTIONS.map(() => '?').join(',');
-    const rows = db
-      .prepare(`SELECT name, json FROM app_data WHERE name IN (${placeholders})`)
+    const rows = prepareSqliteReadonlyStatement(
+      db,
+      `SELECT name, json FROM app_data WHERE name IN (${placeholders})`,
+    )
       .all(...COLLECTIONS);
     const collections = Object.fromEntries(COLLECTIONS.map(name => [name, []]));
     for (const row of rows) {
-      try {
-        collections[row.name] = row.json ? JSON.parse(row.json) : [];
-      } catch {
-        collections[row.name] = [];
-      }
+      collections[row.name] = parseAppDataValue(row, row.name, { expected: 'array', missing: [] });
     }
     return collections;
-  } finally {
-    db.close();
-  }
-}
-
-function writeGanttRentals(dbPath, ganttRentals) {
-  const db = new Database(dbPath, { fileMustExist: true });
-  try {
-    const tx = db.transaction(() => {
-      db.prepare(`
-        UPDATE app_data
-        SET json = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE name = 'gantt_rentals'
-      `).run(JSON.stringify(ganttRentals));
-    });
-    tx();
   } finally {
     db.close();
   }
@@ -152,11 +141,8 @@ function main() {
     process.exit(2);
   }
 
-  const dbPath = path.resolve(args.db);
-  if (!fs.existsSync(dbPath)) {
-    console.error(`DB not found: ${dbPath}`);
-    process.exit(2);
-  }
+  const dbPath = resolveExplicitDatabasePath(args.db);
+  assertAuditedMaintenanceApplyUnavailable(args.apply, 'gantt-rentals repair');
 
   const collections = readCollections(dbPath);
   const plan = buildBrokenGanttRentalsRepairPlan(collections);
@@ -177,17 +163,6 @@ function main() {
       'Run --apply only with --backup-verified --confirm=APPLY_GANTT_REPAIR.',
     ],
   };
-
-  if (args.apply) {
-    const result = applyRepairPlan(collections, plan, {
-      apply: true,
-      backupVerified: args.backupVerified,
-      confirm: args.confirm === 'APPLY_GANTT_REPAIR',
-    });
-    writeGanttRentals(dbPath, result.collections.gantt_rentals);
-    payload.productionDataChanged = true;
-    payload.applyResult = { applied: true, operations: result.operations };
-  }
 
   if (args.report) {
     ensureReportDirectory(args.report);

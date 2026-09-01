@@ -4,15 +4,46 @@ const path = require('path');
 const CRM_ARCHIVE_SETTING_KEY = 'crm_archive_state';
 const CRM_ARCHIVE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const STARTUP_BUSINESS_MAINTENANCE_ENV = 'STARTUP_BUSINESS_MAINTENANCE';
+// The eight mixed catalogues may contain unscoped platform defaults plus exact-
+// tenant entries/overrides. Process startup is not their provisioning lifecycle:
+// it must neither clone defaults into tenants nor create or rewrite either
+// partition. A future platform-default seed requires explicit trusted platform
+// authority outside normal startup.
+const STARTUP_GLOBAL_REFERENCE_COLLECTIONS = Object.freeze([]);
+const STARTUP_SYSTEM_IDENTITY_COLLECTIONS = Object.freeze(['users']);
 
-function isStartupBusinessMaintenanceEnabled(env = process.env) {
-  return String(env[STARTUP_BUSINESS_MAINTENANCE_ENV] || '').trim().toLowerCase() === 'apply';
+function isStartupBusinessMaintenanceEnabled(_env = process.env) {
+  // Startup is deliberately never a business-data migration runner. Tenant
+  // maintenance requires a verified tenant scope, backup, dry-run manifest,
+  // and an explicit operator-controlled command outside process startup.
+  return false;
 }
 
 function logStartupBusinessMaintenanceDisabled(logger = console) {
   logger.warn?.(
-    `[startup] business data maintenance is disabled. Set ${STARTUP_BUSINESS_MAINTENANCE_ENV}=apply only for a planned, backed-up maintenance run.`,
+    `[startup] business data maintenance is disabled, including when ${STARTUP_BUSINESS_MAINTENANCE_ENV}=apply. `
+    + 'Use the scoped maintenance runner after a verified backup.',
   );
+}
+
+function runStartupPlatformOperation({
+  runWithPlatformSystemScope,
+  reason,
+  writableCollections = [],
+  operation,
+}) {
+  if (typeof runWithPlatformSystemScope !== 'function') {
+    const error = new Error('Startup platform scope runner is required.');
+    error.code = 'STARTUP_PLATFORM_SCOPE_REQUIRED';
+    throw error;
+  }
+  if (typeof operation !== 'function') {
+    throw new TypeError('Startup platform operation must be a function.');
+  }
+  return runWithPlatformSystemScope({
+    reason: String(reason || '').trim(),
+    writableCollections: [...new Set(writableCollections)],
+  }, operation);
 }
 
 function seedServiceWorks({ readData, writeData, normalizeServiceWorkRecord, seedsDir, logger = console }) {
@@ -28,6 +59,7 @@ function seedServiceWorks({ readData, writeData, normalizeServiceWorkRecord, see
     logger.log(`✓ Справочник работ загружен из seed: ${normalized.length} записей`);
   } catch (error) {
     logger.warn('seedServiceWorks error:', error.message);
+    throw error;
   }
 }
 
@@ -43,6 +75,7 @@ function seedKnowledgeBaseModules({ readData, writeData, seedsDir, logger = cons
     logger.log(`✓ База знаний загружена из seed: ${modules.length} модулей`);
   } catch (error) {
     logger.warn('seedKnowledgeBaseModules error:', error.message);
+    throw error;
   }
 }
 
@@ -50,10 +83,6 @@ function ensureKnowledgeBaseProgress({ readData, writeData }) {
   const existing = readData('knowledge_base_progress');
   if (Array.isArray(existing)) return;
   writeData('knowledge_base_progress', []);
-}
-
-function hasSeededSpareParts(existing) {
-  return existing.some(item => String(item.article || item.sku || '').startsWith('GEN-'));
 }
 
 function seedServiceRouteNorms({ readData, writeData, seedsDir, logger = console }) {
@@ -68,24 +97,30 @@ function seedServiceRouteNorms({ readData, writeData, seedsDir, logger = console
     logger.log(`✓ Справочник маршрутов выезда загружен из seed: ${routes.length} записей`);
   } catch (error) {
     logger.warn('seedServiceRouteNorms error:', error.message);
+    throw error;
   }
 }
 
-function seedSpareParts({ readData, writeData, normalizeSparePartRecord, seedsDir, logger = console }) {
+function seedSpareParts({ readData, writeDataBatch, normalizeSparePartRecord, seedsDir, logger = console }) {
   try {
     const existing = readData('spare_parts') || [];
+    const existingCatalog = readData('spare_parts_catalog') || [];
+    // Seed data is a bootstrap default, never an authoritative replacement.
+    // Any existing catalogue (including a small custom legacy catalogue) wins.
+    if (existing.length > 0 || existingCatalog.length > 0) return;
     const seedPath = path.join(seedsDir, 'spare_parts.json');
     if (!fs.existsSync(seedPath)) return;
     const parts = JSON.parse(fs.readFileSync(seedPath, 'utf-8'));
     if (!Array.isArray(parts) || parts.length === 0) return;
-    if (existing.length >= parts.length && hasSeededSpareParts(existing)) return;
-
     const normalized = parts.map(item => normalizeSparePartRecord(item));
-    writeData('spare_parts', normalized);
-    writeData('spare_parts_catalog', normalized);
+    writeDataBatch([
+      { name: 'spare_parts', value: normalized },
+      { name: 'spare_parts_catalog', value: normalized },
+    ]);
     logger.log(`✓ Справочник запчастей загружен из seed: ${normalized.length} записей`);
   } catch (error) {
     logger.warn('seedSpareParts error:', error.message);
+    throw error;
   }
 }
 
@@ -123,6 +158,7 @@ function cleanupArchivedCrm({ readData, writeData, logger = console }) {
     logger.log(`✓ Архив CRM истёк, сделки очищены: ${deals.length}`);
   } catch (error) {
     logger.warn('cleanupArchivedCrm error:', error.message);
+    throw error;
   }
 }
 
@@ -132,9 +168,6 @@ async function startServer({ app, port, deps, logger = console }) {
     cleanupExpiredSessions,
     seedDefaultUsers,
     ensureLegacyDefaultUsers,
-    migrateReferenceCollections,
-    migrateLegacyRepairFacts,
-    backfillPaymentAllocations,
     backfillServiceTicketCreatedAt,
     logGanttRentalLinkDiagnostics,
     applyAdminResetFromEnv,
@@ -143,18 +176,31 @@ async function startServer({ app, port, deps, logger = console }) {
     startBotPolling,
     startGprsGateway,
     startWialonIpsGateway,
+    stopGprsGateway,
+    stopWialonIpsGateway,
     dbPath,
     botToken,
     productionScopeWriteFreezeEnabled = false,
+    productionValidationReadOnlyEnabled = false,
+    runWithPlatformSystemScope,
   } = deps;
+  const startupMutationSuppressed = productionScopeWriteFreezeEnabled
+    || productionValidationReadOnlyEnabled;
 
-  // The factory relation is a strict rollout boundary. Run migration first, then
-  // audit before opening the listening socket so a blocked deployment fails
-  // deterministically without serving partial application traffic.
-  if (!productionScopeWriteFreezeEnabled) migrateJsonFilesToDb();
+  // Legacy JSON import and all business-data migrations are intentionally not
+  // process-start hooks. They can span tenants and therefore belong in the
+  // backed-up, manifest-driven remediation runner.
+  if (!startupMutationSuppressed && typeof migrateJsonFilesToDb === 'function') {
+    logger.warn?.('[startup] automatic legacy JSON migration is disabled; use the scoped migration runner.');
+  }
   let warrantyFactoryPreflight = null;
   if (typeof deps.auditWarrantyClaimFactoryCounterpartyRelations === 'function') {
-    warrantyFactoryPreflight = deps.auditWarrantyClaimFactoryCounterpartyRelations({ readData: deps.readData });
+    warrantyFactoryPreflight = runStartupPlatformOperation({
+      runWithPlatformSystemScope,
+      reason: 'startup-warranty-factory-readonly-preflight',
+      writableCollections: [],
+      operation: () => deps.auditWarrantyClaimFactoryCounterpartyRelations({ readData: deps.readData }),
+    });
     if (warrantyFactoryPreflight?.strictRolloutReady === false) {
       for (const issue of warrantyFactoryPreflight.strictRolloutBlockers || []) {
         logger.error?.(
@@ -171,9 +217,22 @@ async function startServer({ app, port, deps, logger = console }) {
     }
   }
 
-  return app.listen(port, async () => {
-    const startupBusinessMaintenanceEnabled = !productionScopeWriteFreezeEnabled
-      && isStartupBusinessMaintenanceEnabled();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let gprsStartAttempted = false;
+    let wialonStartAttempted = false;
+    const rejectOnce = error => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    const server = app.listen(port, async () => {
+      try {
+    runStartupPlatformOperation({
+      runWithPlatformSystemScope,
+      reason: 'startup-business-integrity-readonly-audit',
+      writableCollections: [],
+      operation: () => {
     if (typeof deps.auditCounterpartyRoleProfiles === 'function') {
       try {
         const result = deps.auditCounterpartyRoleProfiles({ readData: deps.readData });
@@ -193,6 +252,7 @@ async function startServer({ app, port, deps, logger = console }) {
         }
       } catch (error) {
         logger.warn(`[counterparty-role-profiles] integrity audit failed: ${error?.message || String(error)}`);
+        throw error;
       }
     }
     if (typeof deps.auditCounterpartyRelations === 'function') {
@@ -214,6 +274,7 @@ async function startServer({ app, port, deps, logger = console }) {
         }
       } catch (error) {
         logger.warn(`[counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
+        throw error;
       }
     }
     if (typeof deps.auditRentalCounterpartyRelations === 'function') {
@@ -234,6 +295,7 @@ async function startServer({ app, port, deps, logger = console }) {
         }
       } catch (error) {
         logger.warn(`[rental-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
+        throw error;
       }
     }
     if (typeof deps.auditDeliveryCounterpartyRelations === 'function') {
@@ -259,6 +321,7 @@ async function startServer({ app, port, deps, logger = console }) {
         }
       } catch (error) {
         logger.warn(`[delivery-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
+        throw error;
       }
     }
     if (typeof deps.auditServiceCounterpartyRelations === 'function') {
@@ -285,6 +348,7 @@ async function startServer({ app, port, deps, logger = console }) {
         }
       } catch (error) {
         logger.warn(`[service-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
+        throw error;
       }
     }
     if (typeof deps.auditWarrantyClaimCounterpartyRelations === 'function') {
@@ -313,6 +377,7 @@ async function startServer({ app, port, deps, logger = console }) {
         }
       } catch (error) {
         logger.warn(`[warranty-counterparty-relations] integrity audit failed: ${error?.message || String(error)}`);
+        throw error;
       }
     }
     if (typeof deps.auditWarrantyClaimFactoryCounterpartyRelations === 'function') {
@@ -329,142 +394,52 @@ async function startServer({ app, port, deps, logger = console }) {
         + `activeExternalUnresolved=${unresolved} broken=${result?.summary?.broken || 0}`,
       );
     }
-    if (!productionScopeWriteFreezeEnabled) {
+      },
+    });
+    if (!startupMutationSuppressed) {
       cleanupExpiredSessions();
-      seedDefaultUsers();
-      ensureLegacyDefaultUsers();
-      migrateReferenceCollections();
+      runStartupPlatformOperation({
+        runWithPlatformSystemScope,
+        reason: 'startup-system-identity-bootstrap',
+        writableCollections: STARTUP_SYSTEM_IDENTITY_COLLECTIONS,
+        operation: () => {
+          seedDefaultUsers();
+          ensureLegacyDefaultUsers();
+          applyAdminResetFromEnv();
+        },
+      });
     } else {
-      logger.log('[production-scope-remediation] startup mutation paths skipped: write freeze active');
+      logger.log(productionValidationReadOnlyEnabled
+        ? '[production-validation] startup mutation paths skipped: validation read-only mode active'
+        : '[production-scope-remediation] startup mutation paths skipped: write freeze active');
     }
-    if (startupBusinessMaintenanceEnabled) {
-      migrateLegacyRepairFacts();
-    } else {
-      logStartupBusinessMaintenanceDisabled(logger);
-    }
-    if (typeof backfillServiceTicketCreatedAt === 'function') {
-      try {
-        const currentService = deps.readData('service') || [];
-        const result = backfillServiceTicketCreatedAt(currentService, {
-          nowIso: () => new Date().toISOString(),
-        });
-        if (result?.stats?.missingCreatedAt > 0) {
-          logger.warn(`[service] createdAt backfill dry-run: missing=${result.stats.missingCreatedAt}, createdDate=${result.stats.fromCreatedDate}, date=${result.stats.fromDate}, requestedAt=${result.stats.fromRequestedAt}, updatedAt=${result.stats.fromUpdatedAt}, approximate=${result.stats.fromNow}`);
+    logStartupBusinessMaintenanceDisabled(logger);
+    runStartupPlatformOperation({
+      runWithPlatformSystemScope,
+      reason: 'startup-business-diagnostics-readonly',
+      writableCollections: [],
+      operation: () => {
+        if (typeof backfillServiceTicketCreatedAt === 'function') {
+          const currentService = deps.readData('service') || [];
+          const result = backfillServiceTicketCreatedAt(currentService, {
+            nowIso: () => new Date().toISOString(),
+          });
+          if (result?.stats?.missingCreatedAt > 0) {
+            logger.warn(`[service] createdAt backfill dry-run: missing=${result.stats.missingCreatedAt}, createdDate=${result.stats.fromCreatedDate}, date=${result.stats.fromDate}, requestedAt=${result.stats.fromRequestedAt}, updatedAt=${result.stats.fromUpdatedAt}, approximate=${result.stats.fromNow}`);
+          }
+          if (process.env.SERVICE_CREATED_AT_BACKFILL === 'apply') {
+            logger.warn('[service] createdAt backfill startup apply disabled; no DB writes were performed. Run node server/scripts/backfill-service-created-at.js --apply after a verified backup.');
+          }
         }
-        if (process.env.SERVICE_CREATED_AT_BACKFILL === 'apply') {
-          logger.warn('[service] createdAt backfill startup apply disabled; no DB writes were performed. Run node server/scripts/backfill-service-created-at.js --apply after a verified backup.');
+        if (typeof logGanttRentalLinkDiagnostics === 'function') {
+          logGanttRentalLinkDiagnostics({
+            readData: deps.readData,
+            logger,
+            targetId: process.env.GANTT_RENTAL_DIAG_TARGET || '',
+          });
         }
-      } catch (error) {
-        logger.warn(`[service] createdAt backfill skipped: ${error?.message || String(error)}`);
-      }
-    }
-    if (startupBusinessMaintenanceEnabled && typeof backfillPaymentAllocations === 'function') {
-      try {
-        const result = backfillPaymentAllocations({
-          payments: deps.readData('payments') || [],
-          paymentAllocations: deps.readData('payment_allocations') || [],
-          rentals: deps.readData('rentals') || [],
-          ganttRentals: deps.readData('gantt_rentals') || [],
-          documents: deps.readData('documents') || [],
-          clients: deps.readData('clients') || [],
-          counterparties: deps.readData('counterparties') || [],
-          counterpartyRoleAssignments: deps.readData('counterparty_role_assignments') || [],
-          nowIso: () => new Date().toISOString(),
-          generateId: prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        });
-        if (result?.created > 0) {
-          deps.writeData('payment_allocations', result.allocations);
-        }
-        const summary = result?.summary || {};
-        const blocking = [
-          'unresolvedPayment',
-          'unresolvedRental',
-          'ambiguous',
-          'crossCounterparty',
-          'missingEndpoint',
-          'otherBlockers',
-        ].reduce((total, field) => total + Number(summary[field] || 0), 0);
-        const log = blocking > 0 ? logger.warn : logger.log;
-        log?.call(
-          logger,
-          `[payments] payment_allocations backfill summary: created=${Number(summary.created ?? result?.created ?? 0)} `
-          + `alreadyAllocated=${Number(summary.alreadyAllocated || 0)} notEligible=${Number(summary.notEligible || 0)} `
-          + `unresolvedPayment=${Number(summary.unresolvedPayment || 0)} unresolvedRental=${Number(summary.unresolvedRental || 0)} `
-          + `ambiguous=${Number(summary.ambiguous || 0)} crossCounterparty=${Number(summary.crossCounterparty || 0)} `
-          + `missingEndpoint=${Number(summary.missingEndpoint || 0)} otherBlockers=${Number(summary.otherBlockers || 0)}`,
-        );
-      } catch (error) {
-        logger.warn(`[payments] payment_allocations backfill skipped: ${error?.message || String(error)}`);
-      }
-    }
-    if (typeof logGanttRentalLinkDiagnostics === 'function') {
-      try {
-        logGanttRentalLinkDiagnostics({
-          readData: deps.readData,
-          logger,
-          targetId: process.env.GANTT_RENTAL_DIAG_TARGET || '',
-        });
-      } catch (error) {
-        logger.warn(`[rental-links] diagnostics skipped: ${error?.message || String(error)}`);
-      }
-    }
-    if (!productionScopeWriteFreezeEnabled) {
-      seedServiceWorks({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        normalizeServiceWorkRecord: deps.normalizeServiceWorkRecord,
-        seedsDir: deps.seedsDir,
-        logger,
-      });
-      seedKnowledgeBaseModules({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        seedsDir: deps.seedsDir,
-        logger,
-      });
-      ensureKnowledgeBaseProgress({
-        readData: deps.readData,
-        writeData: deps.writeData,
-      });
-      seedSpareParts({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        normalizeSparePartRecord: deps.normalizeSparePartRecord,
-        seedsDir: deps.seedsDir,
-        logger,
-      });
-      seedServiceRouteNorms({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        seedsDir: deps.seedsDir,
-        logger,
-      });
-    }
-    if (startupBusinessMaintenanceEnabled) {
-      cleanupArchivedCrm({
-        readData: deps.readData,
-        writeData: deps.writeData,
-        logger,
-      });
-    }
-    if (!productionScopeWriteFreezeEnabled) applyAdminResetFromEnv();
-    if (!productionScopeWriteFreezeEnabled) {
-      if (typeof startGprsGateway === 'function') startGprsGateway();
-      if (typeof startWialonIpsGateway === 'function') startWialonIpsGateway();
-    } else {
-      logger.log('[production-scope-remediation] GSM/GPRS startup skipped: write freeze active');
-    }
-    if (startupBusinessMaintenanceEnabled) {
-      const crmCleanupTimer = setInterval(() => {
-        cleanupArchivedCrm({
-          readData: deps.readData,
-          writeData: deps.writeData,
-          logger,
-        });
-      }, 60 * 60 * 1000);
-      crmCleanupTimer.unref?.();
-    }
-
+      },
+    });
     logger.log('');
     logger.log('╔══════════════════════════════════════════════════════╗');
     logger.log('║  Rental Management Server — запущен!                 ║');
@@ -511,20 +486,96 @@ async function startServer({ app, port, deps, logger = console }) {
       logger.log('');
     }
 
-    if (!productionScopeWriteFreezeEnabled) {
+    if (!startupMutationSuppressed) {
       await registerWebhook();
       if (typeof startWebhookWatchdog === 'function') startWebhookWatchdog();
       if (typeof startBotPolling === 'function') startBotPolling();
+      const startOptionalGateway = async ({ label, start, markAttempted }) => {
+        if (typeof start !== 'function') return;
+        markAttempted();
+        try {
+          await start();
+        } catch (error) {
+          // A telemetry transport is an optional runtime. Its own status keeps
+          // the startError for readiness/diagnostics, while HTTP and the other
+          // independent transport remain available for operators and clients.
+          logger.error?.(`[startup] ${label} gateway unavailable; continuing in degraded mode`, {
+            code: error?.code || 'GSM_GATEWAY_START_FAILED',
+            message: error?.message || String(error),
+          });
+        }
+      };
+      await Promise.all([
+        startOptionalGateway({
+          label: 'GPRS',
+          start: startGprsGateway,
+          markAttempted: () => { gprsStartAttempted = true; },
+        }),
+        startOptionalGateway({
+          label: 'Wialon IPS',
+          start: startWialonIpsGateway,
+          markAttempted: () => { wialonStartAttempted = true; },
+        }),
+      ]);
     } else {
-      logger.log('[production-scope-remediation] bot transports skipped: write freeze active');
+      logger.log(productionValidationReadOnlyEnabled
+        ? '[production-validation] bot and GSM/GPRS transports skipped: validation read-only mode active'
+        : '[production-scope-remediation] bot and GSM/GPRS transports skipped: write freeze active');
     }
+      settled = true;
+      resolve(server);
+      } catch (error) {
+        const cleanupErrors = [];
+        for (const [attempted, stop, label] of [
+          [wialonStartAttempted, stopWialonIpsGateway, 'Wialon IPS'],
+          [gprsStartAttempted, stopGprsGateway, 'GPRS'],
+        ]) {
+          if (!attempted || typeof stop !== 'function') continue;
+          try {
+            await stop();
+          } catch (cleanupError) {
+            cleanupErrors.push({
+              transport: label,
+              code: cleanupError?.code || 'STARTUP_TRANSPORT_CLEANUP_FAILED',
+              message: cleanupError?.message || String(cleanupError),
+            });
+          }
+        }
+        if (cleanupErrors.length > 0) {
+          error.cleanupErrors = cleanupErrors;
+          logger.error?.('[startup] transport cleanup failed', cleanupErrors);
+        }
+        if (!server.listening) {
+          rejectOnce(error);
+          return;
+        }
+        server.close(closeError => {
+          if (closeError) {
+            error.cleanupErrors = [
+              ...(error.cleanupErrors || []),
+              {
+                transport: 'HTTP',
+                code: closeError?.code || 'STARTUP_HTTP_CLEANUP_FAILED',
+                message: closeError?.message || String(closeError),
+              },
+            ];
+            logger.error?.('[startup] HTTP cleanup failed', error.cleanupErrors.at(-1));
+          }
+          rejectOnce(error);
+        });
+      }
+    });
+    server.once('error', rejectOnce);
   });
 }
 
 module.exports = {
   STARTUP_BUSINESS_MAINTENANCE_ENV,
+  STARTUP_GLOBAL_REFERENCE_COLLECTIONS,
+  STARTUP_SYSTEM_IDENTITY_COLLECTIONS,
   ensureKnowledgeBaseProgress,
   isStartupBusinessMaintenanceEnabled,
+  runStartupPlatformOperation,
   seedKnowledgeBaseModules,
   seedSpareParts,
   seedServiceRouteNorms,

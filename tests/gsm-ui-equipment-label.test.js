@@ -18,11 +18,25 @@ test('linked GSM packet shows equipment label', () => {
         gsmImei: '990000260517062',
       },
     },
+  ], [
+    {
+      id: 'GSM-DEVICE-1',
+      equipmentId: 'EQ-1',
+      bindingRevision: 3,
+      imei: '990000260517062',
+    },
   ]);
 
-  const resolved = resolveGsmPacketEquipment({ equipmentId: 'EQ-1', imei: '990000260517062' }, lookup);
+  const resolved = resolveGsmPacketEquipment({
+    equipmentId: 'EQ-1',
+    gsmDeviceRecordId: 'GSM-DEVICE-1',
+    gsmBindingRevision: 3,
+    imei: '990000260517062',
+  }, lookup);
 
   assert.equal(resolved.linked, true);
+  assert.equal(resolved.equipmentId, 'EQ-1');
+  assert.equal(resolved.badge, 'Привязано');
   assert.equal(resolved.label, 'GSM-SMOKE-20260517T062141Z · INV-260517 · SN-260517');
 });
 
@@ -51,7 +65,7 @@ test('unknown IMEI GSM packet never shows undefined or null labels', () => {
   assert.equal(resolved.label.includes('[object Object]'), false);
 });
 
-test('dashboard snapshot equipmentId resolves packet label', () => {
+test('equipmentId-only packet keeps a defensive label but cannot become trusted or suppress current status', () => {
   const lookup = buildGsmEquipmentLookup([
     {
       equipment: {
@@ -64,6 +78,9 @@ test('dashboard snapshot equipmentId resolves packet label', () => {
 
   const resolved = resolveGsmPacketEquipment({ equipmentId: 'EQ-SNAPSHOT' }, lookup);
 
+  assert.equal(resolved.linked, false);
+  assert.equal(resolved.equipmentId, '');
+  assert.equal(resolved.badge, 'Непроверенная привязка');
   assert.equal(resolved.label, 'Snapshot loader · INV SNAP-1');
 });
 
@@ -85,15 +102,28 @@ test('GSM packet with Mantall equipmentId shows full equipment label', () => {
         gsmDeviceId: '990999260517062',
       },
     },
+  ], [
+    {
+      id: 'GSM-DEVICE-MANTALL',
+      equipmentId: 'EQ-MANTALL-001',
+      bindingRevision: 2,
+      deviceId: '990999260517062',
+    },
   ]);
 
-  const resolved = resolveGsmPacketEquipment({ equipmentId: 'EQ-MANTALL-001', deviceId: '990999260517062' }, lookup);
+  const resolved = resolveGsmPacketEquipment({
+    equipmentId: 'EQ-MANTALL-001',
+    gsmDeviceRecordId: 'GSM-DEVICE-MANTALL',
+    gsmBindingRevision: 2,
+    deviceId: '990999260517062',
+  }, lookup);
 
   assert.equal(resolved.linked, true);
+  assert.equal(resolved.equipmentId, 'EQ-MANTALL-001');
   assert.equal(resolved.label, 'Mantall XE160WCT · INV 001 · SN 03311273');
 });
 
-test('GSM packet label can resolve by deviceId but remains backend-compatible', () => {
+test('tracker, deviceId, and IMEI aliases remain display-only and cannot suppress current status', () => {
   const lookup = buildGsmEquipmentLookup([
     {
       equipment: {
@@ -105,12 +135,54 @@ test('GSM packet label can resolve by deviceId but remains backend-compatible', 
         gsmDeviceId: '990999260517062',
       },
     },
+  ], [
+    {
+      id: 'GSM-DEVICE-MANTALL',
+      equipmentId: 'EQ-MANTALL-001',
+      bindingRevision: 2,
+      imei: 'IMEI-MANTALL',
+      deviceId: 'DEVICE-MANTALL',
+      trackerId: 'TRACKER-MANTALL',
+    },
   ]);
 
-  const resolved = resolveGsmPacketEquipment({ deviceId: '990999260517062' }, lookup);
+  for (const packet of [
+    { deviceId: 'DEVICE-MANTALL' },
+    { trackerId: 'TRACKER-MANTALL' },
+    { imei: 'IMEI-MANTALL' },
+  ]) {
+    const resolved = resolveGsmPacketEquipment(packet, lookup);
+    assert.equal(resolved.linked, false);
+    assert.equal(resolved.equipmentId, '');
+    assert.equal(resolved.badge, 'Непроверенная привязка');
+    assert.equal(resolved.label, 'Mantall XE160WCT · INV 001 · SN 03311273');
+  }
+});
 
-  assert.equal(resolved.equipmentId, 'EQ-MANTALL-001');
-  assert.equal(resolved.label, 'Mantall XE160WCT · INV 001 · SN 03311273');
+test('stable GSM binding must match packet equipment and a positive exact revision', () => {
+  const lookup = buildGsmEquipmentLookup([
+    { equipment: { id: 'EQ-1', model: 'Current loader' } },
+    { equipment: { id: 'EQ-2', model: 'Other loader' } },
+  ], [
+    {
+      id: 'GSM-DEVICE-1',
+      equipmentId: 'EQ-1',
+      bindingRevision: 4,
+      imei: 'IMEI-1',
+    },
+  ]);
+
+  for (const packet of [
+    { equipmentId: 'EQ-1', gsmDeviceRecordId: 'GSM-DEVICE-1' },
+    { equipmentId: 'EQ-1', gsmDeviceRecordId: 'GSM-DEVICE-1', gsmBindingRevision: 0 },
+    { equipmentId: 'EQ-1', gsmDeviceRecordId: 'GSM-DEVICE-1', gsmBindingRevision: 3 },
+    { equipmentId: 'EQ-1', gsmDeviceRecordId: 'OTHER-DEVICE', gsmBindingRevision: 4 },
+    { equipmentId: 'EQ-2', gsmDeviceRecordId: 'GSM-DEVICE-1', gsmBindingRevision: 4 },
+  ]) {
+    const resolved = resolveGsmPacketEquipment(packet, lookup);
+    assert.equal(resolved.linked, false);
+    assert.equal(resolved.equipmentId, '');
+  }
 });
 
 test('near-zero GSM coordinates are valid but suspicious for the map UI', () => {

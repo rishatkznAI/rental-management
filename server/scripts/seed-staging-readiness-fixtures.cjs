@@ -1,9 +1,30 @@
 #!/usr/bin/env node
 
-const { DB_PATH, getData, setData } = require('../db');
+const {
+  appDataValueFingerprint,
+  DB_PATH,
+  ensureDb,
+  setDataBatchCompareAndSwap,
+} = require('../db');
+const {
+  assertDisposableFixtureDatabase,
+  parseAppDataValue,
+  requiredText,
+} = require('../lib/maintenance-script-safety');
+const {
+  applyEquipmentGsmConfigurationProjection,
+} = require('../lib/gsm/trusted-device-scope');
+const {
+  GSM_INGRESS_MODE_TCP_DEVICE_CREDENTIAL,
+  hashGsmIngressSecret,
+} = require('../lib/gsm/device-credential');
 
 const PREFIX = 'STG-READINESS-';
 const ACTION_PREFIX = 'STG-ACTION-';
+const STAGING_FIXTURE_GSM_CREDENTIAL_HASH = hashGsmIngressSecret(
+  'staging-fixture-gsm-credential',
+  { salt: Buffer.from('73746167696e672d67736d2d66697831', 'hex') },
+);
 
 function envText(env = process.env) {
   return [
@@ -41,6 +62,12 @@ function assertStagingFixtureSeedAllowed(env = process.env) {
   if (env.RAILWAY_SERVICE_NAME && env.RAILWAY_SERVICE_NAME !== 'rental-management') {
     throw new Error('Refused: Railway service is not rental-management.');
   }
+  assertDisposableFixtureDatabase({ dbPath: env.DB_PATH, env, kind: 'staging' });
+  const companyId = requiredText(env.STAGING_COMPANY_ID, 'STAGING_COMPANY_ID');
+  const tenantId = requiredText(env.STAGING_TENANT_ID, 'STAGING_TENANT_ID');
+  if (companyId !== tenantId) {
+    throw new Error('Refused: STAGING_COMPANY_ID and STAGING_TENANT_ID must identify the same canonical tenant.');
+  }
 }
 
 function asArray(value) {
@@ -56,12 +83,20 @@ function hasFixtureDocument(record) {
   return hasFixtureId(record) || String(record?.documentNumber || record?.number || '').startsWith(PREFIX);
 }
 
-function replaceFixtures(collectionName, fixtures, predicate = hasFixtureId) {
-  const current = asArray(getData(collectionName));
+function planFixtureReplacement(collectionName, fixtures, predicate = hasFixtureId) {
+  const row = ensureDb().prepare('SELECT json FROM app_data WHERE name = ?').get(collectionName);
+  const stored = parseAppDataValue(row, collectionName, { expected: 'array', missing: [] });
+  const current = asArray(stored);
   const kept = current.filter(item => !predicate(item));
   const next = [...kept, ...fixtures];
-  setData(collectionName, next);
-  return { collection: collectionName, removed: current.length - kept.length, upserted: fixtures.length, total: next.length };
+  return {
+    entry: {
+      name: collectionName,
+      value: next,
+      expectedFingerprint: appDataValueFingerprint(row ? stored : null),
+    },
+    result: { collection: collectionName, removed: current.length - kept.length, upserted: fixtures.length, total: next.length },
+  };
 }
 
 function buildFixtures(now = new Date()) {
@@ -93,7 +128,11 @@ function buildFixtures(now = new Date()) {
       base('RENTED', 'Rental Lift 12', 'rented'),
       base('SERVICE', 'Service Lift 14', 'in_service', { plannedMonthlyRevenue: 210000 }),
       base('DELIVERY', 'Delivery Lift 16', 'available', { plannedMonthlyRevenue: 240000 }),
-      base('GSM', 'GSM Lift 18', 'available', { gsmImei: `${PREFIX}IMEI-0001`, gsmLastSeenAt: staleIso }),
+      base('GSM', 'GSM Lift 18', 'available', {
+        gsmDeviceRecordId: `${PREFIX}GSM-DEVICE-0001`,
+        gsmImei: `${PREFIX}IMEI-0001`,
+        gsmLastSeenAt: staleIso,
+      }),
       base('CHECK', 'Return Check Lift 20', 'available'),
       base('DOC', 'Document Lift 22', 'available', { plannedMonthlyRevenue: 150000 }),
       base('ACTION-LOSS', 'Action Loss Lift 26', 'in_service', { plannedMonthlyRevenue: 900000 }),
@@ -262,13 +301,34 @@ function buildFixtures(now = new Date()) {
       updatedAt: iso,
       fixtureTag: PREFIX,
     }],
+    gsmDevices: [{
+      id: `${PREFIX}GSM-DEVICE-0001`,
+      equipmentId: `${PREFIX}EQ-GSM`,
+      imei: `${PREFIX}IMEI-0001`,
+      deviceId: `${PREFIX}DEVICE-0001`,
+      deviceType: 'STAGING-TEST',
+      protocol: 'GPRS TCP',
+      ingressMode: GSM_INGRESS_MODE_TCP_DEVICE_CREDENTIAL,
+      ingressSecretHash: STAGING_FIXTURE_GSM_CREDENTIAL_HASH,
+      ingressCredentialConfigured: true,
+      ingressCredentialRevision: 1,
+      status: 'offline',
+      lastPacketAt: staleIso,
+      lastOnlineAt: staleIso,
+      createdAt: staleIso,
+      updatedAt: staleIso,
+      fixtureTag: PREFIX,
+    }],
     gsmPackets: [{
       id: `${PREFIX}GSM-STALE`,
       equipmentId: `${PREFIX}EQ-GSM`,
+      gsmDeviceRecordId: `${PREFIX}GSM-DEVICE-0001`,
+      gsmBindingRevision: 1,
       imei: `${PREFIX}IMEI-0001`,
       deviceTime: staleIso,
       receivedAt: staleIso,
-      parseStatus: 'ok',
+      direction: 'inbound',
+      parseStatus: 'parsed',
       rawPreview: 'STAGING TEST FIXTURE',
       fixtureTag: PREFIX,
     }],
@@ -373,18 +433,51 @@ function buildFixtures(now = new Date()) {
   };
 }
 
+function canonicalizeStagingGsmFixtures(fixtures, scope) {
+  const scoped = list => list.map(item => ({ ...item, ...scope }));
+  const scopedGsmDevices = scoped(fixtures.gsmDevices).map(device => ({
+    ...device,
+    bindingRevision: 1,
+    bindingHistory: [{
+      revision: 1,
+      equipmentId: device.equipmentId,
+      companyId: scope.companyId,
+      tenantId: scope.tenantId,
+      imei: device.imei || null,
+      deviceId: device.deviceId || null,
+      linkedAt: device.lastOnlineAt || device.lastPacketAt || null,
+      unlinkedAt: null,
+      reason: 'staging_fixture_provisioned',
+    }],
+  }));
+  const gsmDeviceByEquipmentId = new Map(
+    scopedGsmDevices.map(device => [device.equipmentId, device]),
+  );
+  const scopedEquipment = scoped(fixtures.equipment).map((record) => {
+    const device = gsmDeviceByEquipmentId.get(record.id);
+    return device ? applyEquipmentGsmConfigurationProjection(record, device) : record;
+  });
+  return { equipment: scopedEquipment, gsmDevices: scopedGsmDevices };
+}
+
 function seedStagingReadinessFixtures({ env = process.env, now = new Date() } = {}) {
   assertStagingFixtureSeedAllowed(env);
   const fixtures = buildFixtures(now);
-  const results = [
-    replaceFixtures('equipment', fixtures.equipment),
-    replaceFixtures('rentals', fixtures.rentals),
-    replaceFixtures('service', fixtures.service),
-    replaceFixtures('deliveries', fixtures.deliveries),
-    replaceFixtures('documents', fixtures.documents, hasFixtureDocument),
-    replaceFixtures('gsm_packets', fixtures.gsmPackets),
-    replaceFixtures('management_action_states', fixtures.managementActionStates),
+  const scope = { companyId: String(env.STAGING_COMPANY_ID).trim(), tenantId: String(env.STAGING_TENANT_ID).trim() };
+  const scoped = list => list.map(item => ({ ...item, ...scope }));
+  const canonicalGsm = canonicalizeStagingGsmFixtures(fixtures, scope);
+  const plans = [
+    planFixtureReplacement('equipment', canonicalGsm.equipment),
+    planFixtureReplacement('rentals', scoped(fixtures.rentals)),
+    planFixtureReplacement('service', scoped(fixtures.service)),
+    planFixtureReplacement('deliveries', scoped(fixtures.deliveries)),
+    planFixtureReplacement('documents', scoped(fixtures.documents), hasFixtureDocument),
+    planFixtureReplacement('gsm_devices', canonicalGsm.gsmDevices),
+    planFixtureReplacement('gsm_packets', scoped(fixtures.gsmPackets)),
+    planFixtureReplacement('management_action_states', scoped(fixtures.managementActionStates)),
   ];
+  setDataBatchCompareAndSwap(plans.map(plan => plan.entry));
+  const results = plans.map(plan => plan.result);
   return {
     ok: true,
     dbPath: DB_PATH,
@@ -404,4 +497,11 @@ if (require.main === module) {
   }
 }
 
-module.exports = { PREFIX, assertStagingFixtureSeedAllowed, buildFixtures, seedStagingReadinessFixtures };
+module.exports = {
+  PREFIX,
+  assertStagingFixtureSeedAllowed,
+  buildFixtures,
+  canonicalizeStagingGsmFixtures,
+  planFixtureReplacement,
+  seedStagingReadinessFixtures,
+};

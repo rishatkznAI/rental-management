@@ -88,3 +88,57 @@ test('lifecycle batch rolls back JSON and Rental writes when Gantt SQL shadow sy
     rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('document JSON and companion business writes roll back when document SQL shadow sync fails', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'rental-document-shadow-'));
+  const dbPath = join(tempDir, 'app.sqlite');
+  const dbModule = fileURLToPath(new URL('../server/db.js', import.meta.url));
+  const script = `
+    const db = require(${JSON.stringify(dbModule)});
+    db.setData('documents', [{ id: 'D-before', title: 'Before' }]);
+    db.setData('equipment', [{ id: 'EQ-before' }]);
+    const sqlite = db.ensureDb();
+    sqlite.exec(\`
+      CREATE TRIGGER fail_document_shadow_insert
+      BEFORE INSERT ON documents_sql
+      WHEN NEW.id = 'D-after'
+      BEGIN
+        SELECT RAISE(ABORT, 'document shadow sync unavailable');
+      END;
+    \`);
+    let error = null;
+    try {
+      db.setDataBatch([
+        { name: 'equipment', value: [{ id: 'EQ-after' }] },
+        { name: 'documents', value: [{ id: 'D-after', title: 'After' }] },
+      ]);
+    } catch (caught) {
+      error = { code: caught.code, collection: caught.collection, message: caught.message };
+    }
+    process.stdout.write(JSON.stringify({
+      error,
+      equipment: db.getData('equipment'),
+      documents: db.getData('documents'),
+      shadow: sqlite.prepare('SELECT id, rawJson FROM documents_sql ORDER BY id').all(),
+    }));
+  `;
+
+  try {
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env: { ...process.env, DB_PATH: dbPath },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.error.code, 'DOCUMENT_SQL_SHADOW_SYNC_FAILED');
+    assert.equal(output.error.collection, 'documents');
+    assert.match(output.error.message, /document shadow sync unavailable/);
+    assert.deepEqual(output.equipment, [{ id: 'EQ-before' }]);
+    assert.deepEqual(output.documents, [{ id: 'D-before', title: 'Before' }]);
+    assert.deepEqual(output.shadow.map(item => item.id), ['D-before']);
+    assert.deepEqual(JSON.parse(output.shadow[0].rawJson), output.documents[0]);
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});

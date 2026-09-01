@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
 const Database = require('better-sqlite3');
 const {
   repairCounterpartyRelations,
 } = require('../lib/counterparty-relations');
+const {
+  assertAuditedMaintenanceApplyUnavailable,
+  createStrictReadOnlyStorage,
+  resolveExplicitDatabasePath,
+} = require('../lib/maintenance-script-safety');
 
 function parseArgs(argv) {
   const result = { apply: false, dbPath: '' };
@@ -34,52 +37,25 @@ function printUsage() {
     '  node server/scripts/counterparty-relation-integrity.js --apply [--db /path/to/app.sqlite]',
     '',
     'Default mode is dry-run and performs no relation writes.',
-    '--apply creates a SQLite backup, then fills only deterministic client_objects.counterpartyId links.',
-    'Run --apply only during a maintenance window with application writes stopped.',
+    'Raw --apply is disabled; use an audited tenant-scoped maintenance runner.',
   ].join('\n'));
 }
 
 function createStorage(db) {
-  const readStatement = db.prepare('SELECT json FROM app_data WHERE name = ?');
-  const writeStatement = db.prepare(`
-    INSERT INTO app_data (name, json, updated_at)
-    VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(name) DO UPDATE SET
-      json = excluded.json,
-      updated_at = CURRENT_TIMESTAMP
-  `);
-  const writeBatch = db.transaction(entries => {
-    for (const entry of entries || []) {
-      writeStatement.run(entry.name, JSON.stringify(entry.value));
-    }
-  });
-  return {
-    readData(name) {
-      const row = readStatement.get(name);
-      return row ? JSON.parse(row.json) : [];
-    },
-    writeDataBatch(entries) {
-      writeBatch(entries);
-    },
-  };
+  return createStrictReadOnlyStorage(db);
 }
 
-async function main() {
+function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     printUsage();
     return;
   }
 
-  const dbPath = path.resolve(
-    args.dbPath || path.join(__dirname, '..', 'data', 'app.sqlite'),
-  );
-  if (!fs.existsSync(dbPath)) throw new Error(`SQLite database not found: ${dbPath}`);
+  const dbPath = resolveExplicitDatabasePath(args.dbPath);
+  assertAuditedMaintenanceApplyUnavailable(args.apply, 'counterparty relation repair');
 
-  const db = new Database(dbPath, {
-    readonly: !args.apply,
-    fileMustExist: true,
-  });
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
   try {
     const storage = createStorage(db);
     const preview = repairCounterpartyRelations({
@@ -89,36 +65,16 @@ async function main() {
 
     console.log(`Mode: ${args.apply ? 'apply' : 'dry-run'}`);
     console.log(`DB: ${dbPath}`);
-    if (!args.apply || preview.changed.length === 0) {
-      console.log(JSON.stringify(preview, null, 2));
-      if (!args.apply) console.log('Dry-run only: no relation writes were performed.');
-      else console.log('Apply requested: nothing deterministic to update.');
-      return;
-    }
-
-    console.log('Apply safety: application writes must remain stopped for this maintenance run.');
-    const backupPath = path.join(
-      path.dirname(dbPath),
-      'backups',
-      `pre-counterparty-relation-repair-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`,
-    );
-    fs.mkdirSync(path.dirname(backupPath), { recursive: true });
-    await db.backup(backupPath);
-    console.log(`Backup created: ${backupPath}`);
-
-    const result = repairCounterpartyRelations({
-      readData: storage.readData,
-      writeDataBatch: storage.writeDataBatch,
-      dryRun: false,
-    });
-    console.log(JSON.stringify(result, null, 2));
-    if (result.failed.length > 0) process.exitCode = 1;
+    console.log(JSON.stringify(preview, null, 2));
+    console.log('Dry-run only: no relation writes were performed.');
   } finally {
     db.close();
   }
 }
 
-main().catch(error => {
+try {
+  main();
+} catch (error) {
   console.error(error?.message || String(error));
   process.exitCode = 1;
-});
+}

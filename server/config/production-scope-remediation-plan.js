@@ -39,6 +39,7 @@ function deepFreeze(value) {
 // non-executable until a fresh non-SSH production preflight is reviewed and the
 // authority/identityBootstrap section is replaced by an explicitly approved config.
 module.exports = deepFreeze({
+  productionExecutionAuthorized: false,
   planVersion: 1,
   planId: 'production-scope-remediation-2026-08-25-head-office-memberships-v4',
   sourceDbPath: '/data/app.sqlite',

@@ -46,12 +46,14 @@ The executable authority is `server/lib/skytech-clean-production-reset.js`. An u
 | `app_data.users` | Keep byte-for-byte | Current users, IDs, login hashes, roles, status and user activity fields | Auth, RBAC, MAX identity links |
 | `app_data.app_settings` | Keep byte-for-byte | System/application settings | Runtime configuration; business-ID scan must be empty |
 | `app_data.bot_users` | Keep byte-for-byte | MAX user identity and current role mapping | Bot authentication and authorization |
-| `app_data.knowledge_base_modules` | Keep byte-for-byte | System reference/training catalogue | Knowledge-base UI |
-| `app_data.service_works` | Keep byte-for-byte | Existing legacy service work reference catalogue | Service forms and calculations |
-| `app_data.spare_parts` | Keep byte-for-byte | Existing legacy parts reference catalogue | Service/parts forms |
-| `app_data.service_route_norms` | Keep byte-for-byte | System route norm catalogue | Service route calculation |
-| `app_data.service_work_catalog` | Keep byte-for-byte | System work catalogue | Service forms |
-| `app_data.spare_parts_catalog` | Keep byte-for-byte | System parts catalogue | Service forms |
+| `app_data.knowledge_base_modules` | Keep byte-for-byte | Platform defaults and tenant entries/overrides, including stable physical IDs and optional links | Knowledge-base UI |
+| `app_data.service_works` | Keep byte-for-byte | Platform defaults and tenant entries/overrides, including stable physical IDs and optional links | Service forms and calculations |
+| `app_data.spare_parts` | Keep byte-for-byte | Platform defaults and tenant entries/overrides, including stable physical IDs and optional links | Service/parts forms |
+| `app_data.service_route_norms` | Keep byte-for-byte | Platform defaults and tenant entries/overrides, including stable physical IDs and optional links | Service route calculation |
+| `app_data.service_work_catalog` | Keep byte-for-byte | Legacy mixed platform-default/tenant-overlay source | Service forms/migration compatibility |
+| `app_data.spare_parts_catalog` | Keep byte-for-byte | Legacy mixed platform-default/tenant-overlay source | Service forms/migration compatibility |
+| `app_data.service_work_names` | Keep byte-for-byte | Legacy mixed platform-default/tenant-overlay work-name source | Migration compatibility |
+| `app_data.spare_part_names` | Keep byte-for-byte | Legacy mixed platform-default/tenant-overlay part-name source | Migration compatibility |
 | `app_data` | Keep table/schema; selectively empty values | JSON collection storage | Individual retained collections are separately sealed |
 | `app_sessions` | Keep rows | Current authentication sessions and user activity | Login/token continuity |
 | `sql_shadow_schema_migrations` | Keep rows | Migration state | Startup/schema compatibility |
@@ -62,7 +64,7 @@ The executable authority is `server/lib/skytech-clean-production-reset.js`. An u
 | `authorization_audit_events` | Keep rows | Authorization change history, not business history | Authorization integrity |
 | `identity_bootstrap_runs` | Keep rows | Identity/bootstrap technical history | Startup/schema control |
 
-At the discovered production baseline, the retained reference counts are: `bot_users=3`, `knowledge_base_modules=4`, `service_works=141`, `spare_parts=125`, `service_route_norms=4`, `service_work_catalog=0`, and `spare_parts_catalog=125`. The canonical identity/membership tables currently contain zero rows but remain because they are schema-level authorization foundations.
+At the discovered production baseline, the retained platform-default counts are: `knowledge_base_modules=4`, `service_works=141`, `spare_parts=125`, `service_route_norms=4`, `service_work_catalog=0`, `spare_parts_catalog=125`, `service_work_names=0`, and `spare_part_names=0` (399 rows total). They remain unscoped and are not reassigned to a Company. Existing exact-tenant rows and optional overrides are also retained without relinking or normalization. The baseline also has `bot_users=3`; canonical identity/membership tables currently contain zero rows but remain because they are schema-level authorization foundations.
 
 ### Deleted `app_data` business collections
 
@@ -163,32 +165,46 @@ Production apply additionally requires:
 
 The apply guard parses the stored ZIP structure and CRCs, requires the Skytech full-backup manifest and `database/app.sqlite`, requires `skippedFilesCount=0`, opens the embedded SQLite snapshot, proves its integrity/FKs/schema/migrations and exact logical equality to the current database, and verifies every current business file by archive path, size and CRC-32. A renamed text file, incomplete archive, late database write, changed attachment or skipped/blocked attachment fails before file staging or `BEGIN IMMEDIATE`.
 
-The manual GitHub Actions workflow `.github/workflows/skytech-clean-production-reset.yml` exposes only `dry-run`, `backup`, `verify`, `apply` and `purge-quarantine`. Its reset token is a temporary secret and must be removed from both GitHub and Railway after completion.
+The manual GitHub Actions workflow `.github/workflows/skytech-clean-production-reset.yml` is now a preliminary **backup-only** workflow. It has one input (the exact deployed SHA), sends one fixed POST to `/api/admin/skytech-pre-compatibility-backup`, and uses only `SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN`. It exposes no dry-run, apply, verify, or purge operation. The start wrapper selects a standalone backup-only server whenever `SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED=true`; that process never imports or starts the normal application, bot, GSM gateway, startup migrations, or reset routes. The dedicated route is hidden unless the central write-freeze envelope is exact, `SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA` exactly equals the raw lowercase Railway runtime SHA, compatibility/validation and all legacy remediation modes are disabled, reset/admin/signing credentials are empty, and the exact non-symlink database target is present. The old deployed SHA lacks this dedicated runtime; first use the frozen PR0 release described in `ssh-independent-production-remediation-2026-08-25.md`. A direct live-volume copy is not a coherent substitute for SQLite backup.
+
+The workflow also binds the public API runtime before and after the operation to
+that same control-plane deployment ID and full commit, requires the maintenance
+state reported by `/api/version`, and rejects a changed process start identity.
+Backup plaintext is created under `umask 077`, downloaded only from the exact
+`/backups/<receipt filename>` path on the pinned volume, hash/size checked before
+encryption, and removed by an `always()` cleanup step. Before encryption, the
+runner also tests the ZIP and requires its embedded manifest to bind the same
+full commit, deployment ID and process start time, `database/app.sqlite` from
+`app.sqlite`, response timestamp, and collection/file counts. The non-secret
+evidence records the Railway target, independently observed API runtime, the
+archive runtime identity, and a validated GitHub artifact digest.
 
 ## Backup, restore and apply gate
+
+Only steps 1–6 are currently surfaced by the preliminary backup workflow. Production dry-run/apply/verify/purge require a separate later reviewed authorization mechanism; the backup-only credential and workflow must never be repurposed for them.
 
 The production sequence is fixed:
 
 1. Put the app, MAX bot and GSM writers in maintenance/disabled mode and wait for the exact deployed backend SHA.
 2. Run guarded `backup`; record UTC timestamp, filename, size, SHA-256, manifest collection/file counts and `skippedFilesCount=0`.
-3. Keep the remote backup in `/data/backups` and download that exact stored file to a protected directory outside Git with the authenticated, project-linked Railway CLI. Do not create a different fresh backup and do not upload the archive as a GitHub artifact:
+3. Keep the remote backup in `/data/backups`. Backup mode downloads that exact receipt-named file with the authenticated, project-linked Railway CLI, verifies its SHA-256, byte size, ZIP integrity, and embedded manifest/runtime binding, encrypts it with AES-256 using the protected production backup passphrase, decrypts a transient copy to re-verify the original SHA/size, and uploads **only the encrypted archive** as a protected GitHub Actions artifact. The workflow also stores non-secret machine evidence binding the validated artifact digest, deployed SHA/runtime, receipt, integrity/FK result and `skippedFilesCount=0`. Plaintext copies are removed even on failure. For an additional operator-held copy, download the same receipt-named remote file to a protected directory outside Git:
 
    ```bash
    railway volume files --volume "$RAILWAY_VOLUME_ID" download \
-     "/data/backups/$BACKUP_FILENAME" \
+     "/backups/$BACKUP_FILENAME" \
      "$PROTECTED_BACKUP_DIR/$BACKUP_FILENAME" --json
    shasum -a 256 "$PROTECTED_BACKUP_DIR/$BACKUP_FILENAME"
    ```
 
-   The local SHA-256 must equal the guarded backup receipt before the restore drill starts.
+   The local SHA-256 must equal the guarded backup receipt before the restore drill starts. A newly generated archive is not a substitute for the exact receipt-bound file.
 4. Restore the downloaded archive into an isolated directory; verify archive SHA, manifest, SQLite `integrity_check=ok`, FK count 0, users/settings hashes, original collection counts, backend `/health`, `/health/ready` and `/api/version`.
 5. Apply the reset to a second isolated restore; verify every deleted collection/table is zero, all retention seals match and the backend/UI start in zero-state.
 6. Run unit/build checks and independent pre-reset audit. P0, P1 and reset-related P2 must all be zero.
 7. Re-run production dry-run immediately before apply. Any drift or blocker stops the operation.
-8. Apply once through the workflow. Verify DB health, exact counts and retention hashes before reopening the app.
+8. Apply once through a separately reviewed future apply mechanism (not the preliminary backup workflow). Verify DB health, exact counts and retention hashes before reopening the app.
 9. Temporarily reopen only the web app while MAX bot and GSM writers remain disabled. Run auth/RBAC/UI smokes and a reversible non-financial write smoke limited to Client/Counterparty, Equipment, Rental, Service and Delivery. Do **not** create a production Payment, opening AR or Document: opening AR and Document are proved on isolated copies, and Document numbering would mutate retained `app_settings`. Remove the active test graph through standard endpoints.
-10. Drain active web requests, disable the web app again and prove APP, MAX bot and GSM writers are all blocked. Because Counterparty archival and audit are intentionally historical, create a **second** uniquely named coherent full backup of the current post-smoke state. Record its own SHA-256, require `skippedFilesCount=0`, download that exact `/data/backups/<second-name>` archive with the same explicit `railway volume files --volume "$RAILWAY_VOLUME_ID" download` command, prove the downloaded SHA matches the second receipt, restore-drill it in isolation with integrity/FK/count checks, and run a fresh production dry-run. The original pre-reset backup cannot be reused: exact logical-database validation must and will reject it after smoke writes.
-11. Run the second guarded apply using the second backup filename/SHA. Verify exact zero again and re-check the original users/settings/schema/migration seals. Purge only the first and second reset quarantines after all verification succeeds.
+10. Drain active web requests, disable the web app again and prove APP, MAX bot and GSM writers are all blocked. Because Counterparty archival and audit are intentionally historical, create a **second** uniquely named coherent full backup of the current post-smoke state. Record its own SHA-256, require `skippedFilesCount=0`, download that exact `/backups/<second-name>` path from the pinned `/data` volume with the same explicit `railway volume files --volume "$RAILWAY_VOLUME_ID" download` command, prove the downloaded SHA matches the second receipt, restore-drill it in isolation with integrity/FK/count checks, and run a fresh production dry-run. The original pre-reset backup cannot be reused: exact logical-database validation must and will reject it after smoke writes.
+11. Run the second guarded apply through that separately reviewed mechanism using the second backup filename/SHA. Verify exact zero again and re-check the original users/settings/schema/migration seals. Purge only the first and second reset quarantines after all verification succeeds.
 12. Restore normal writer flags, disable/remove reset credentials, and retain both the original pre-reset backup and the post-smoke cleanup backup in remote and protected downloaded form.
 
 ## Opening receivables

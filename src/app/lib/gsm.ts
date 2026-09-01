@@ -8,6 +8,7 @@ import type {
   ShippingPhoto,
 } from '../types';
 import type { GanttRentalData } from '../mock-data';
+import { deriveEquipmentGsmSignalState } from './gsmSignalState';
 
 export type GsmMovementKind = 'shipping' | 'receiving' | 'movement' | 'service' | 'telemetry';
 export type GsmNotificationType = 'warehouse_exit' | 'jobsite_arrival' | 'signal_loss';
@@ -116,7 +117,6 @@ const CLIENT_OBJECT_TEXT_RE = /объект|строй|цех|площадка|�
 const MOVEMENT_TEXT_RE = /аренд|отгруж|прием|приём|достав|локац|перемещ|выдан|возврат|клиент|склад|база/iu;
 const DEFAULT_CENTER = { lat: 55.796127, lng: 49.106414 };
 const DEFAULT_WAREHOUSE_LABEL = 'Склад / база';
-const GSM_SIGNAL_STATES = new Set<EquipmentGsmSignalState>(['online', 'location_only', 'offline']);
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
@@ -255,14 +255,7 @@ function hasRealTracker(equipment: Equipment) {
 }
 
 export function deriveSignalState(equipment: Equipment, lastSeenAt: string | null): EquipmentGsmSignalState {
-  if (equipment.gsmStatus === 'online') return 'online';
-  if (equipment.gsmStatus === 'offline') return 'offline';
-  if (equipment.gsmSignalStatus && GSM_SIGNAL_STATES.has(equipment.gsmSignalStatus)) return equipment.gsmSignalStatus;
-  if (equipment.gsmLastSeenAt || equipment.gsmLastSignalAt) {
-    const ageHours = Math.max(0, (Date.now() - new Date(equipment.gsmLastSeenAt || equipment.gsmLastSignalAt || '').getTime()) / 36e5);
-    return ageHours <= 24 ? 'online' : 'offline';
-  }
-  return lastSeenAt ? 'location_only' : 'offline';
+  return deriveEquipmentGsmSignalState(equipment, lastSeenAt);
 }
 
 function getTelemetrySummary(equipment: Equipment): GsmTelemetrySummary {

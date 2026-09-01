@@ -3,6 +3,9 @@ const {
   CANONICAL_RECEIVABLE_POSTING_OPERATIONS_TABLE,
 } = require('./canonical-actual-posting-schema');
 const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
+const {
   CANONICAL_RECEIVABLES_TABLE,
 } = require('./canonical-receivables-schema');
 const {
@@ -184,9 +187,17 @@ function createCanonicalActualPostingProductService({
     }
   }
 
+  function prepareReadonly(sql) {
+    return prepareSqliteReadonlyStatement(
+      db,
+      sql,
+      'canonical_actual_posting_product_read',
+    );
+  }
+
   function readEventScope(eventId) {
     assertIdentifier(eventId, 'eventId');
-    const row = db.prepare(`
+    const row = prepareReadonly(`
       SELECT companyId, branchId
       FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
       WHERE id = ?
@@ -197,7 +208,7 @@ function createCanonicalActualPostingProductService({
   function listEligibleEvents(scope) {
     assertCapability(scope, 'receivables.read');
     const predicate = buildScopedPredicate(scope, { alias: 'event' });
-    const rows = db.prepare(`
+    const rows = prepareReadonly(`
       ${previewSelect}
       WHERE ${predicate.where}
       ORDER BY event.createdAt DESC, event.id ASC
@@ -239,7 +250,7 @@ function createCanonicalActualPostingProductService({
         branchId: eventScope.branchId,
       });
       const evidence = result.posting?.evidence || {};
-      const event = db.prepare(`
+      const event = prepareReadonly(`
         SELECT originalAmountMinor, currency
         FROM ${ACTUAL_RECEIVABLE_ELIGIBLE_EVENTS_TABLE}
         WHERE id = ?

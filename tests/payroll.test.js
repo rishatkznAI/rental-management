@@ -11,6 +11,7 @@ const { registerPayrollRoutes } = require('../server/routes/payroll.js');
 function createApp() {
   const counters = {};
   let nowCounter = 0;
+  let nextBatchError = null;
   const state = {
     users: [
       { id: 'U-admin', name: 'Админ', role: 'Администратор', status: 'Активен' },
@@ -36,8 +37,15 @@ function createApp() {
   app.use(express.json());
 
   const readData = name => state[name] || [];
-  const writeData = (name, value) => {
-    state[name] = value;
+  const writeDataBatch = entries => {
+    if (nextBatchError) {
+      const error = nextBatchError;
+      nextBatchError = null;
+      throw error;
+    }
+    const staged = {};
+    for (const entry of entries) staged[entry.name] = entry.value;
+    Object.assign(state, staged);
   };
   const requireAuth = (req, res, next) => {
     const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -57,7 +65,7 @@ function createApp() {
 
   registerPayrollRoutes(router, {
     readData,
-    writeData,
+    writeDataBatch,
     requireAuth,
     generateId,
     idPrefixes: {
@@ -69,11 +77,20 @@ function createApp() {
       app_settings: 'SET',
     },
     nowIso,
-    auditLog: null,
   });
 
   app.use('/api', router);
-  return { app, state, readData, users };
+  return {
+    app,
+    state,
+    readData,
+    users,
+    failNextBatch(message = 'Injected atomic payroll batch failure') {
+      const error = new Error(message);
+      error.status = 503;
+      nextBatchError = error;
+    },
+  };
 }
 
 async function withServer(app, fn) {
@@ -125,6 +142,10 @@ async function calculateMonth(baseUrl, month = '2026-05') {
   return calculated.json;
 }
 
+function snapshotCollections(state, names) {
+  return Object.fromEntries(names.map(name => [name, structuredClone(state[name])]));
+}
+
 test('payroll routes are admin-only and access-control hides payroll collections from non-admins', async () => {
   const { app, readData, users } = createApp();
   const accessControl = createAccessControl({ readData });
@@ -132,6 +153,10 @@ test('payroll routes are admin-only and access-control hides payroll collections
   assert.doesNotThrow(() => accessControl.assertCanReadCollection('payroll_profiles', users.admin));
   assert.throws(() => accessControl.assertCanReadCollection('payroll_profiles', users.manager));
   assert.equal(accessControl.filterCollectionByScope('payroll_records', [{ id: 'PR-1' }], users.manager).length, 0);
+  assert.throws(() => accessControl.assertCanCreateCollection('payroll_audit_events', users.admin, { id: 'PAE-forged' }));
+  assert.throws(() => accessControl.assertCanUpdateEntity('payroll_audit_events', { id: 'PAE-1' }, users.admin));
+  assert.throws(() => accessControl.assertCanDeleteEntity('payroll_audit_events', { id: 'PAE-1' }, users.admin));
+  assert.throws(() => accessControl.assertCanBulkReplace('payroll_audit_events', users.admin));
 
   await withServer(app, async (baseUrl) => {
     const deniedRead = await request(baseUrl, 'GET', '/api/payroll/profiles', 'manager');
@@ -201,6 +226,26 @@ test('calculate month creates payroll period and snapshot records from active pr
     assert.equal(record.netAmount, 115000);
     assert.equal(record.calculationDetails.some(item => item.type === 'base'), true);
     assert.equal(record.calculationDetails.some(item => item.type === 'kpi'), true);
+  });
+});
+
+test('calculate commits period, records, and payroll audit together or leaves all unchanged', async () => {
+  const harness = createApp();
+  await withServer(harness.app, async (baseUrl) => {
+    await createProfile(baseUrl);
+    const names = ['payroll_periods', 'payroll_records', 'payroll_audit_events'];
+    const before = snapshotCollections(harness.state, names);
+
+    harness.failNextBatch();
+    const failed = await request(baseUrl, 'POST', '/api/payroll/periods/calculate', 'admin', { month: '2026-05' });
+    assert.equal(failed.response.status, 503);
+    assert.deepEqual(snapshotCollections(harness.state, names), before);
+
+    const succeeded = await calculateMonth(baseUrl);
+    assert.equal(succeeded.records.length, 1);
+    assert.equal(harness.state.payroll_periods.length, 1);
+    assert.equal(harness.state.payroll_records.length, 1);
+    assert.equal(harness.state.payroll_audit_events.at(-1).action, 'period.calculate');
   });
 });
 
@@ -428,6 +473,29 @@ test('adjustments update totals and preserve payroll history', async () => {
   });
 });
 
+test('adjustment commits adjustment, record totals, and payroll audit together or not at all', async () => {
+  const harness = createApp();
+  await withServer(harness.app, async (baseUrl) => {
+    await createProfile(baseUrl, { kpiSchemeType: 'none', kpiPercent: 0, kpiFixedAmount: 0 });
+    const calculated = await calculateMonth(baseUrl);
+    const recordId = calculated.records[0].id;
+    const names = ['payroll_adjustments', 'payroll_records', 'payroll_audit_events'];
+    const before = snapshotCollections(harness.state, names);
+    const body = { type: 'bonus', amount: 2500, reason: 'Атомарная премия' };
+
+    harness.failNextBatch();
+    const failed = await request(baseUrl, 'POST', `/api/payroll/records/${recordId}/adjustments`, 'admin', body);
+    assert.equal(failed.response.status, 503);
+    assert.deepEqual(snapshotCollections(harness.state, names), before);
+
+    const succeeded = await request(baseUrl, 'POST', `/api/payroll/records/${recordId}/adjustments`, 'admin', body);
+    assert.equal(succeeded.response.status, 201);
+    assert.equal(harness.state.payroll_adjustments.length, 1);
+    assert.equal(harness.state.payroll_records[0].bonusAmount, 2500);
+    assert.equal(harness.state.payroll_audit_events.at(-1).action, 'record.adjustment.bonus');
+  });
+});
+
 test('payroll history keeps previous months and audit captures salary changes', async () => {
   const { app } = createApp();
   await withServer(app, async (baseUrl) => {
@@ -542,6 +610,28 @@ test('approve, mark-paid and close update period and records statuses', async ()
       month: '2026-05',
     });
     assert.equal(deniedCalculate.response.status, 409);
+  });
+});
+
+test('period transition commits period, record statuses, and payroll audit together or not at all', async () => {
+  const harness = createApp();
+  await withServer(harness.app, async (baseUrl) => {
+    await createProfile(baseUrl);
+    const calculated = await calculateMonth(baseUrl);
+    const periodId = calculated.period.id;
+    const names = ['payroll_periods', 'payroll_records', 'payroll_audit_events'];
+    const before = snapshotCollections(harness.state, names);
+
+    harness.failNextBatch();
+    const failed = await request(baseUrl, 'POST', `/api/payroll/periods/${periodId}/approve`);
+    assert.equal(failed.response.status, 503);
+    assert.deepEqual(snapshotCollections(harness.state, names), before);
+
+    const succeeded = await request(baseUrl, 'POST', `/api/payroll/periods/${periodId}/approve`);
+    assert.equal(succeeded.response.status, 200);
+    assert.equal(harness.state.payroll_periods[0].status, 'approved');
+    assert.equal(harness.state.payroll_records[0].status, 'approved');
+    assert.equal(harness.state.payroll_audit_events.at(-1).action, 'period.approved');
   });
 });
 

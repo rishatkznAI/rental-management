@@ -49,6 +49,38 @@ test('sale mode turns on from sales route context and explicit sale fields', () 
   assert.equal(isSaleModeEquipment({ id: 'EQ-8', status: 'available', category: 'own' }), false);
 });
 
+test('retired neutral GSM projection does not create sale operation history', () => {
+  const history = getSaleOperationHistory({
+    id: 'EQ-retired-gsm',
+    gsmStatus: 'unknown',
+    gsmSignalStatus: 'unknown',
+  }, { rentals: [], serviceTickets: [], rentalRevenue: 0 });
+
+  assert.equal(history.hasGsm, false);
+  assert.equal(history.hasAny, false);
+});
+
+test('orphan or dangling GSM projection does not create sale operation history', () => {
+  for (const equipment of [
+    { id: 'EQ-orphan', gsmAddress: 'Legacy tracker address' },
+    {
+      id: 'EQ-dangling',
+      gsmDeviceRecordId: 'GDEV-DANGLING',
+      gsmBindingVerified: false,
+      gsmMovementHistory: [{ at: '2026-08-30T10:00:00.000Z', lat: 55.7, lng: 49.1 }],
+    },
+  ]) {
+    const history = getSaleOperationHistory(equipment, {
+      rentals: [],
+      serviceTickets: [],
+      rentalRevenue: 0,
+    });
+    assert.equal(history.hasGsm, false, equipment.id);
+    assert.equal(history.hasAny, false, equipment.id);
+    assert.equal(saleConditionKind(equipment), 'new', equipment.id);
+  }
+});
+
 test('sale quick actions hide rental and fleet service actions', () => {
   const actions = buildEquipmentQuickActions({
     equipment: { id: 'EQ-sale', inventoryNumber: 'INV-sale', status: 'available', saleMode: true },
@@ -239,6 +271,9 @@ test('sale condition auto-detects used equipment from rental service and revenue
     isForSale: true,
     maintenanceCHTO: '2026-01-10',
     maintenancePTO: '2026-02-10',
+    gsmDeviceRecordId: 'GDEV-used',
+    gsmBindingVerified: true,
+    gsmTelemetryVerified: true,
     gsmImei: '866123456789012',
     hours: 340,
   };
@@ -308,7 +343,7 @@ test('equipment detail editor saves the card through PATCH and keeps modal state
   const fieldSelectEnd = detailSource.indexOf('function getSalePdiBadge', fieldSelectStart);
   const fieldSelectSource = detailSource.slice(fieldSelectStart, fieldSelectEnd);
 
-  assert.match(detailSource, /buildEquipmentEditPatch\(equipment, normalizedUpdated\)/);
+  assert.match(detailSource, /buildEquipmentEditPatch\(equipment, updated\)/);
   assert.match(detailSource, /equipmentService\.update\(equipment\.id, patchWithHistory\)/);
   assert.match(detailSource, /queryClient\.setQueryData<Equipment\[\] \| undefined>\(EQUIPMENT_KEYS\.all/);
   assert.doesNotMatch(detailSource, /const list = allEquipment\.map\(e => e\.id === normalizedUpdated\.id \? withHistory : e\)/);
@@ -515,7 +550,7 @@ test('sale mode uses sale storefront sections without operation-history CRM bloc
   assert.match(salesSource, /showOperationHistory/);
   assert.match(salesSource, /История эксплуатации перед продажей/);
   assert.match(salesSource, /Инв\. №: \{equipment\.inventoryNumber \|\| 'Не указано'\}/);
-  assert.match(salesSource, /GSM: \{getGsmSaleValue\(equipment\)\}/);
+  assert.match(salesSource, /GSM: \{getEquipmentGsmSaleValue\(equipment\)\}/);
   assert.match(salesSource, /ТО:/);
   assert.match(salesSource, /ЧТО:/);
   assert.match(salesSource, /ПТО:/);

@@ -2,12 +2,28 @@ const {
   MECHANIC_ROLES,
   HEAD_ROLE,
   SERVICE_FOREMAN_ROLE,
+  TECHNICAL_AUDITOR_ROLE,
   WARRANTY_MECHANIC_ROLE,
   isWarrantyMechanicRole,
   normalizeRole,
 } = require('./role-groups');
 const { CLIENT_OPENING_AR_FIELDS } = require('./counterparty');
 const { isTenantOwnedCollection } = require('./tenant-data-boundary');
+const {
+  CATALOG_ORIGIN_KINDS,
+  isPlatformDefaultTenantOverlayCollection,
+} = require('./platform-default-tenant-overlay');
+const {
+  canonicalEquipmentGsmConfigurationProjection,
+  gsmCurrentDeviceBindingIssue,
+  gsmDeviceBindingRevision,
+  isActiveGsmDeviceRecord,
+  stripEquipmentGsmProjectionFields,
+} = require('./gsm/trusted-device-scope');
+const {
+  sanitizeGsmRecordForRead,
+  sanitizeTrustedGsmRecordForRead,
+} = require('./gsm/secret-redaction');
 
 const ROLES = {
   ADMIN: 'Администратор',
@@ -19,6 +35,7 @@ const ROLES = {
   CARRIER: 'Перевозчик',
   SERVICE_FOREMAN: SERVICE_FOREMAN_ROLE,
   WARRANTY_MECHANIC: WARRANTY_MECHANIC_ROLE,
+  TECHNICAL_AUDITOR: TECHNICAL_AUDITOR_ROLE,
 };
 
 const REPAIR_ITEMS_ADMIN_MESSAGE = 'Недостаточно прав. Работы и запчасти может изменять только администратор';
@@ -31,6 +48,17 @@ const COUNTERPARTY_RELATION_BULK_COLLECTIONS = new Set([
 ]);
 
 const SYSTEM_FIELD_PATTERN = /^(?:__|_)/;
+
+const MIXED_CATALOG_CLIENT_RESERVED_FIELDS = new Set([
+  'id',
+  'companyId',
+  'tenantId',
+  'platformDefaultId',
+  'catalogOrigin',
+  'physicalId',
+  '_physicalId',
+  '_id',
+]);
 
 const MASS_ASSIGNMENT_BLOCKED_FIELDS = new Set([
   'role',
@@ -226,10 +254,12 @@ const ACCESS_CONTROLLED_COLLECTIONS = new Set([
   'service_route_norms',
   'service_vehicles',
   'service_work_catalog',
+  'service_work_names',
   'service_works',
   'shipping_photos',
   'spare_parts',
   'spare_parts_catalog',
+  'spare_part_names',
   'users',
   'vehicle_trips',
   'warranty_claims',
@@ -240,6 +270,10 @@ const PAYROLL_COLLECTIONS = new Set([
   'payroll_periods',
   'payroll_records',
   'payroll_adjustments',
+  'payroll_audit_events',
+]);
+
+const INTERNAL_APPEND_ONLY_COLLECTIONS = new Set([
   'payroll_audit_events',
 ]);
 
@@ -672,6 +706,9 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'comment',
   ]),
   finance_operations: new Set([
+    'accountId',
+    'accountFromId',
+    'accountToId',
     'type',
     'date',
     'amount',
@@ -750,10 +787,6 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'acceptanceChecklist',
     'acceptanceDefects',
     'photos',
-    'gsmImei',
-    'gsmDeviceId',
-    'gsmProtocol',
-    'gsmSimNumber',
   ]),
   equipment_downtimes: new Set([
     'equipmentId',
@@ -779,7 +812,7 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'isActive',
     'quiz',
   ]),
-  shipping_photos: new Set(['rentalId', 'deliveryId', 'type', 'photo', 'photos', 'comment', 'createdAt']),
+  shipping_photos: new Set(['equipmentId', 'rentalId', 'deliveryId', 'type', 'photo', 'photos', 'comment', 'createdAt']),
   warranty_claims: WARRANTY_CLAIM_MUTATION_FIELDS,
   crm_deals: new Set([
     'title',
@@ -850,7 +883,7 @@ const NON_ADMIN_UPDATE_FIELDS = {
     'paidAmount',
     'comment',
   ]),
-  service_field_trips: new Set(['status', 'routeFrom', 'routeTo', 'distanceKm', 'closedNormHours', 'comment', 'completedAt']),
+  service_field_trips: new Set(['serviceTicketId', 'serviceId', 'repairId', 'status', 'routeFrom', 'routeTo', 'distanceKm', 'closedNormHours', 'comment', 'completedAt']),
   repair_work_items: new Set(['repairId', 'workId', 'quantity']),
   repair_part_items: new Set(['repairId', 'partId', 'quantity', 'priceSnapshot']),
   planner_items: new Set(['rentalId', 'equipmentRef', 'prepStatus', 'priorityOverride', 'riskOverride', 'comment']),
@@ -1133,6 +1166,26 @@ const WARRANTY_MECHANIC_REDACTED_FIELDS = new Set([
   'totalAmount',
 ]);
 
+const TECHNICAL_AUDITOR_REDACTED_FIELDS = new Set([
+  ...WARRANTY_MECHANIC_REDACTED_FIELDS,
+  'bank',
+  'bankAccount',
+  'bankBik',
+  'bankName',
+  'bik',
+  'corrAccount',
+  'creditLimit',
+  'openingAccountsReceivable',
+  'openingAr',
+  'openingBalance',
+  'paidTotal',
+  'paymentTerms',
+  'totalPaid',
+  'totalRevenue',
+  'totalTurnover',
+  'turnover',
+]);
+
 const CLOSED_DELIVERY_STATUSES = new Set(['completed', 'cancelled']);
 
 function normalizeText(value) {
@@ -1209,6 +1262,10 @@ function isCarrier(user) {
 
 function isServiceForeman(user) {
   return roleIs(user, ROLES.SERVICE_FOREMAN);
+}
+
+function isTechnicalAuditor(user) {
+  return roleIs(user, ROLES.TECHNICAL_AUDITOR);
 }
 
 function isMechanic(user) {
@@ -1446,7 +1503,34 @@ function hasTrustedTenantScope(user) {
   return Boolean(companyId && tenantId && companyId === tenantId);
 }
 
+function isEffectiveMixedCatalogEntity(collection, entity) {
+  if (!isPlatformDefaultTenantOverlayCollection(collection)) return false;
+  const origin = entity?.catalogOrigin;
+  const kind = String(origin?.kind || '');
+  const logicalId = String(origin?.logicalId || '').trim();
+  const id = String(entity?.id || '').trim();
+  if (!id || logicalId !== id) return false;
+  if (!Object.values(CATALOG_ORIGIN_KINDS).includes(kind)) return false;
+  return origin.tenantMutable === (kind !== CATALOG_ORIGIN_KINDS.PLATFORM_DEFAULT);
+}
+
+function assertMixedCatalogClientFields(collection, input, { allowId = false, allowOrigin = false } = {}) {
+  if (!isPlatformDefaultTenantOverlayCollection(collection)) return;
+  for (const field of MIXED_CATALOG_CLIENT_RESERVED_FIELDS) {
+    if (allowId && field === 'id') continue;
+    if (allowOrigin && field === 'catalogOrigin') continue;
+    if (!Object.prototype.hasOwnProperty.call(input || {}, field)) continue;
+    const error = forbidden(`Поле ${field} управляется серверным catalog lifecycle.`);
+    error.code = 'CATALOG_CLIENT_RESERVED_FIELD_DENIED';
+    error.status = 409;
+    throw error;
+  }
+}
+
 function isEntityWithinTrustedTenant(collection, entity, user) {
+  if (isPlatformDefaultTenantOverlayCollection(collection)) {
+    return hasTrustedTenantScope(user) && isEffectiveMixedCatalogEntity(collection, entity);
+  }
   if (!isTenantOwnedCollection(collection) || !hasTrustedTenantScope(user)) return true;
   return String(entity?.companyId || '').trim() === String(user.companyId)
     && String(entity?.tenantId || '').trim() === String(user.tenantId);
@@ -1471,6 +1555,7 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isInvestor(user)) return isInvestorRental(entity, user, readData);
       return false;
     case 'equipment':
+      if (isTechnicalAuditor(user)) return true;
       if (isInvestor(user)) return isEquipmentOwnedBy(entity, user);
       if (isOfficeManager(user) || isRentalManager(user) || isSalesManager(user) || isHead(user) || isMechanic(user) || isWarrantyMechanic(user)) return true;
       return false;
@@ -1484,6 +1569,10 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'counterparties':
     case 'clients':
     case 'client_objects':
+      if (isTechnicalAuditor(user)) return true;
+      if (isOfficeManager(user)) return true;
+      if (isRentalManager(user) || isSalesManager(user)) return matchesScopedRental(entity, user, readData) || matchesUserManager(entity, user);
+      return false;
     case 'client_contracts':
     case 'documents':
     case 'payments':
@@ -1502,6 +1591,7 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isMechanic(user)) return isMechanicLinkedEntity(entity, user, readData);
       return false;
     case 'service':
+      if (isTechnicalAuditor(user)) return true;
       if (isOfficeManager(user) || isRentalManager(user) || isServiceForeman(user)) return true;
       if (isWarrantyMechanic(user)) return true;
       if (isMechanic(user)) return isAssignedMechanic(entity, user, readData);
@@ -1537,6 +1627,7 @@ function canAccessEntity(collection, entity, user, readData) {
       if (isCarrier(user)) return isCarrierDelivery(entity, user);
       return false;
     case 'knowledge_base_modules':
+      if (isTechnicalAuditor(user)) return true;
       return isOfficeManager(user) || isRentalManager(user) || isSalesManager(user);
     case 'knowledge_base_progress':
       if (isOfficeManager(user)) return true;
@@ -1564,6 +1655,7 @@ function canAccessEntity(collection, entity, user, readData) {
     case 'service_works':
     case 'spare_parts':
     case 'service_route_norms':
+      if (isTechnicalAuditor(user)) return true;
       return isOfficeManager(user) || isServiceForeman(user) || isMechanic(user) || isWarrantyMechanic(user);
     case 'service_work_catalog':
     case 'spare_parts_catalog':
@@ -1595,7 +1687,13 @@ function canMutateEntity(collection, entity, user, readData) {
   if (!user) return false;
   if (!isKnownRole(user) || !isKnownCollection(collection)) return false;
   if (!isEntityWithinTrustedTenant(collection, entity, user)) return false;
+  if (
+    isPlatformDefaultTenantOverlayCollection(collection)
+    && entity?.catalogOrigin?.kind === CATALOG_ORIGIN_KINDS.PLATFORM_DEFAULT
+  ) return false;
+  if (INTERNAL_APPEND_ONLY_COLLECTIONS.has(collection)) return false;
   if (isAdmin(user)) return true;
+  if (isTechnicalAuditor(user)) return false;
   if (ADMIN_ONLY_MUTATE_COLLECTIONS.has(collection)) {
     return false;
   }
@@ -1679,6 +1777,16 @@ function redactCommercialFields(value) {
   }, {});
 }
 
+function redactTechnicalAuditorFields(value) {
+  if (Array.isArray(value)) return value.map(redactTechnicalAuditorFields);
+  if (!value || typeof value !== 'object') return value;
+  return Object.entries(value).reduce((acc, [key, entryValue]) => {
+    if (TECHNICAL_AUDITOR_REDACTED_FIELDS.has(key)) return acc;
+    acc[key] = redactTechnicalAuditorFields(entryValue);
+    return acc;
+  }, {});
+}
+
 function redactHeadFields(value) {
   if (Array.isArray(value)) return value.map(redactHeadFields);
   if (!value || typeof value !== 'object') return value;
@@ -1689,12 +1797,171 @@ function redactHeadFields(value) {
   }, {});
 }
 
-function sanitizeEntityForRead(collection, entity, user) {
-  if (!entity) return entity;
-  if (isHead(user) && ['deliveries', 'gantt_rentals', 'rentals'].includes(collection)) {
-    return redactHeadFields(entity);
+function canViewEquipmentGsmProjection(user) {
+  return Boolean(
+    isAdmin(user)
+    || isOfficeManager(user)
+    || isRentalManager(user)
+    || isSalesManager(user)
+    || isServiceForeman(user)
+    || isMechanic(user)
+  );
+}
+
+function redactEquipmentGsmProjection(value) {
+  if (Array.isArray(value)) return value.map(redactEquipmentGsmProjection);
+  if (!value || typeof value !== 'object') return value;
+  return Object.entries(value).reduce((acc, [key, entryValue]) => {
+    if (/^gsm/i.test(key)) return acc;
+    acc[key] = redactEquipmentGsmProjection(entryValue);
+    return acc;
+  }, {});
+}
+
+function equipmentWithVerifiedGsmBinding(entity, readData) {
+  const redactedEntity = sanitizeGsmRecordForRead(stripEquipmentGsmProjectionFields(entity));
+  if (Object.prototype.hasOwnProperty.call(entity, 'id')) redactedEntity.id = entity.id;
+  const deviceRecordId = String(entity?.gsmDeviceRecordId || '').trim();
+  let verified = false;
+  let device = null;
+  let equipmentRows = [];
+  if (deviceRecordId && typeof readData === 'function') {
+    const rawDevices = readData('gsm_devices');
+    const devices = Array.isArray(rawDevices) ? rawDevices : [];
+    const matches = devices.filter(device => String(device?.id || '').trim() === deviceRecordId);
+    if (matches.length === 1 && isActiveGsmDeviceRecord(matches[0])) {
+      const rawEquipment = readData('equipment');
+      equipmentRows = Array.isArray(rawEquipment) ? rawEquipment : [];
+      verified = !gsmCurrentDeviceBindingIssue(matches[0], { devices, equipment: equipmentRows })
+        && String(matches[0].equipmentId || '').trim() === String(entity?.id || '').trim();
+      if (verified) device = matches[0];
+    }
   }
-  if (!isWarrantyMechanic(user)) return entity;
+  if (!verified || !device) {
+    return { ...redactedEntity, gsmBindingVerified: false, gsmTelemetryVerified: false };
+  }
+
+  const revision = gsmDeviceBindingRevision(device);
+  const rawPackets = readData('gsm_packets');
+  const nowMs = Date.now();
+  const packets = (Array.isArray(rawPackets) ? rawPackets : [])
+    .filter((packet) => {
+      const timestamp = Date.parse(packet?.receivedAt || packet?.createdAt || '');
+      return packet?.direction !== 'outbound'
+        && String(packet?.gsmDeviceRecordId || '').trim() === deviceRecordId
+        && Number(packet?.gsmBindingRevision) === revision
+        && String(packet?.equipmentId || '').trim() === String(entity.id || '').trim()
+        && String(packet?.companyId || '').trim() === String(device.companyId || '').trim()
+        && String(packet?.tenantId || '').trim() === String(device.tenantId || '').trim()
+        && Number.isFinite(timestamp)
+        && timestamp <= nowMs;
+    })
+    .sort((left, right) => (
+      Date.parse(right.receivedAt || right.createdAt || '') - Date.parse(left.receivedAt || left.createdAt || '')
+    ));
+  const contactPacket = packets[0] || null;
+  const parsedPackets = packets.filter(packet => packet.parseStatus === 'parsed');
+  const locationPacket = parsedPackets.find((packet) => {
+    const lat = Number(packet.lat);
+    const lng = Number(packet.lng);
+    return Number.isFinite(lat)
+      && Number.isFinite(lng)
+      && Math.abs(lat) <= 90
+      && Math.abs(lng) <= 180
+      && !(lat === 0 && lng === 0);
+  }) || null;
+  const latestValue = (fields, predicate = value => value !== null && value !== undefined && value !== '') => {
+    for (const packet of parsedPackets) {
+      for (const field of fields) {
+        const value = packet?.[field];
+        if (predicate(value)) return value;
+      }
+    }
+    return null;
+  };
+  const contactAt = contactPacket?.receivedAt || contactPacket?.createdAt || null;
+  const contactAgeMs = contactAt ? nowMs - Date.parse(contactAt) : null;
+  const online = contactAgeMs !== null && contactAgeMs >= 0 && contactAgeMs <= 15 * 60 * 1000;
+  const lat = locationPacket ? Number(locationPacket.lat) : null;
+  const lng = locationPacket ? Number(locationPacket.lng) : null;
+  const speed = latestValue(['speed']);
+  const voltage = latestValue(['voltage', 'BoardVoltage']);
+  const motoHours = latestValue(['motoHours']);
+  const ignition = latestValue(['ignition'], value => typeof value === 'boolean');
+  const movementHistory = packets
+    .filter(packet => packet.parseStatus === 'parsed')
+    .filter((packet) => {
+      const packetLat = Number(packet.lat);
+      const packetLng = Number(packet.lng);
+      return Number.isFinite(packetLat)
+        && Number.isFinite(packetLng)
+        && Math.abs(packetLat) <= 90
+        && Math.abs(packetLng) <= 180
+        && !(packetLat === 0 && packetLng === 0);
+    })
+    .slice(0, 240)
+    .map(packet => ({
+      at: packet.receivedAt || packet.createdAt,
+      lat: Number(packet.lat),
+      lng: Number(packet.lng),
+      source: 'gps',
+      address: packet.address || null,
+      ...(Number.isFinite(Number(packet.speed)) ? { speedKph: Number(packet.speed) } : {}),
+    }));
+
+  return sanitizeTrustedGsmRecordForRead({
+    ...redactedEntity,
+    gsmBindingVerified: true,
+    gsmTelemetryVerified: Boolean(contactPacket),
+    ...canonicalEquipmentGsmConfigurationProjection(device),
+    gsmStatus: contactPacket ? (online ? 'online' : 'offline') : 'unknown',
+    gsmSignalStatus: contactPacket ? (online ? 'online' : 'offline') : 'unknown',
+    gsmLastSeenAt: contactAt,
+    gsmLastSignalAt: contactAt,
+    gsmLastLat: lat,
+    gsmLastLng: lng,
+    gsmLatitude: lat,
+    gsmLongitude: lng,
+    gsmLastSpeed: speed === null ? null : Number(speed),
+    gsmSpeedKph: speed === null ? null : Number(speed),
+    gsmLastVoltage: voltage === null ? null : Number(voltage),
+    gsmBatteryVoltage: voltage === null ? null : Number(voltage),
+    gsmLastMotoHours: motoHours === null ? null : Number(motoHours),
+    gsmHourmeter: motoHours === null ? null : Number(motoHours),
+    gsmIgnitionOn: ignition,
+    gsmMovementHistory: movementHistory,
+    gsmAddress: locationPacket?.address || null,
+    gsmCreatedAt: device.createdAt || null,
+  });
+}
+
+function sanitizeEntityForRead(collection, entity, user, readData = null) {
+  if (!entity) return entity;
+  const readableEntity = collection === 'equipment'
+    ? (canViewEquipmentGsmProjection(user)
+      ? equipmentWithVerifiedGsmBinding(entity, readData)
+      : redactEquipmentGsmProjection(entity))
+    : entity;
+  if (isHead(user) && ['deliveries', 'gantt_rentals', 'rentals'].includes(collection)) {
+    return redactHeadFields(readableEntity);
+  }
+  if (isTechnicalAuditor(user)) {
+    if (![
+      'clients',
+      'client_objects',
+      'counterparties',
+      'equipment',
+      'knowledge_base_modules',
+      'service',
+      'service_route_norms',
+      'service_works',
+      'spare_parts',
+    ].includes(collection)) {
+      return readableEntity;
+    }
+    return redactTechnicalAuditorFields(readableEntity);
+  }
+  if (!isWarrantyMechanic(user)) return readableEntity;
   if (![
     'equipment',
     'gantt_rentals',
@@ -1706,13 +1973,13 @@ function sanitizeEntityForRead(collection, entity, user) {
     'spare_parts',
     'warranty_claims',
   ].includes(collection)) {
-    return entity;
+    return readableEntity;
   }
-  return redactCommercialFields(entity);
+  return redactCommercialFields(readableEntity);
 }
 
-function sanitizeCollectionForRead(collection, list, user) {
-  return (Array.isArray(list) ? list : []).map(item => sanitizeEntityForRead(collection, item, user));
+function sanitizeCollectionForRead(collection, list, user, readData = null) {
+  return (Array.isArray(list) ? list : []).map(item => sanitizeEntityForRead(collection, item, user, readData));
 }
 
 function isSystemField(field) {
@@ -1721,6 +1988,7 @@ function isSystemField(field) {
 
 function isAdminGenericPatchBlockedField(collection, field) {
   if (SYSTEM_FIELD_PATTERN.test(field)) return true;
+  if (collection === 'equipment' && /^gsm/i.test(field)) return true;
   if (ADMIN_GENERIC_PATCH_BLOCKED_FIELDS.has(field)) return true;
   if (ADMIN_GENERIC_PATCH_COLLECTION_BLOCKED_FIELDS[collection]?.has(field)) return true;
   if (ADMIN_GENERIC_PATCH_USER_WORKFLOW_FIELDS.has(field) && collection !== 'users') return true;
@@ -1834,6 +2102,7 @@ function sanitizeCreateInput(collection, input, user) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
   }
+  assertMixedCatalogClientFields(collection, input);
   const strictRepairItemInput = sanitizeStrictRepairItemMutationInput(collection, input);
   if (strictRepairItemInput) return isAdmin(user)
     ? strictRepairItemInput
@@ -1870,6 +2139,7 @@ function sanitizeUpdateInput(collection, input, user, existing = null) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
   }
+  assertMixedCatalogClientFields(collection, input);
   const strictRepairItemInput = sanitizeStrictRepairItemMutationInput(collection, input);
   if (strictRepairItemInput) return isAdmin(user)
     ? sanitizeAdminGenericPatchInput(collection, strictRepairItemInput)
@@ -2002,6 +2272,13 @@ function assertCanCreateCollection(collection, user, input = {}, readData) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
   }
+  assertMixedCatalogClientFields(collection, input);
+  if (INTERNAL_APPEND_ONLY_COLLECTIONS.has(collection)) {
+    throw forbidden('Журнал зарплаты доступен только для внутренней append-only записи.');
+  }
+  if (isTechnicalAuditor(user)) {
+    throw forbidden('Техническому аудитору доступен только просмотр.');
+  }
   if ((collection === 'payments' || collection === 'payment_allocations') && !(isAdmin(user) || isOfficeManager(user))) {
     throw forbidden('Платежи можно создавать только администратору или офис-менеджеру.');
   }
@@ -2059,6 +2336,17 @@ function assertCanDeleteEntity(collection, entity, user, readData) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
   }
+  if (INTERNAL_APPEND_ONLY_COLLECTIONS.has(collection)) {
+    throw forbidden('Журнал зарплаты нельзя удалять или изменять.');
+  }
+  if (
+    isPlatformDefaultTenantOverlayCollection(collection)
+    && entity?.catalogOrigin?.kind === CATALOG_ORIGIN_KINDS.PLATFORM_DEFAULT
+  ) {
+    const error = forbidden('Platform default нельзя удалять tenant actor-ом.');
+    error.code = 'CATALOG_PLATFORM_DEFAULT_MUTATION_DENIED';
+    throw error;
+  }
   if (!isAdmin(user)) {
     if (collection === 'repair_work_items' || collection === 'repair_part_items') {
       throw forbidden(REPAIR_ITEMS_ADMIN_MESSAGE);
@@ -2078,6 +2366,9 @@ function assertCanDeleteEntity(collection, entity, user, readData) {
 function assertCanBulkReplace(collection, user) {
   if (!isKnownRole(user) || !isKnownCollection(collection)) {
     throw forbidden();
+  }
+  if (INTERNAL_APPEND_ONLY_COLLECTIONS.has(collection)) {
+    throw forbidden('Журнал зарплаты нельзя заменять массово.');
   }
   if (isAdmin(user)) return;
   if (!NON_ADMIN_BULK_ALLOWED_COLLECTIONS.has(collection)) {
@@ -2107,6 +2398,9 @@ function assertSafeAdminBulkReplaceInput(collection, list, context = 'массо
   }
   for (const item of Array.isArray(list) ? list : []) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    if (isPlatformDefaultTenantOverlayCollection(collection)) {
+      assertMixedCatalogClientFields(collection, item, { allowId: true, allowOrigin: true });
+    }
     const strictPaymentInput = sanitizeStrictPaymentMutationInput(collection, item, { mode: 'bulk' });
     if (strictPaymentInput) continue;
     for (const field of Object.keys(item)) {
@@ -2159,11 +2453,12 @@ function createAccessControl({ readData }) {
     isRentalManager,
     isSalesManager,
     isServiceForeman,
+    isTechnicalAuditor,
     matchesScopedRental: (entity, user) => matchesScopedRental(entity, user, readData),
     matchesUserManager,
     sanitizeCreateInput,
-    sanitizeCollectionForRead,
-    sanitizeEntityForRead,
+    sanitizeCollectionForRead: (collection, list, user) => sanitizeCollectionForRead(collection, list, user, readData),
+    sanitizeEntityForRead: (collection, entity, user) => sanitizeEntityForRead(collection, entity, user, readData),
     assertSafeAdminBulkReplaceInput,
     sanitizePaymentMutationInput: (input, options) => sanitizeStrictPaymentMutationInput('payments', input, options),
     sanitizeUpdateInput,

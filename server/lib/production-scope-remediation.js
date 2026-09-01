@@ -1,6 +1,14 @@
 const crypto = require('crypto');
+const {
+  prepareSqliteReadonlyStatement,
+} = require('./sqlite-readonly-statement');
 const { deriveCanonicalCompanyId } = require('./canonical-company-id');
 const {
+  COLLECTION_SCOPE_CATEGORY,
+  getCollectionScopePolicy,
+} = require('./app-data-scope-registry');
+const {
+  buildUsersDirectorySnapshot,
   calculateBootstrapChecksum,
   getSchemaFingerprint,
   planPlatformIdentityBootstrap,
@@ -8,12 +16,28 @@ const {
 const {
   runPlatformIdentityBootstrap,
 } = require('./platform-identity-bootstrap');
+const {
+  applyProductionSmokeIdentityTransition,
+  getProjectedSmokeIdentityUsers,
+  planProductionSmokeIdentityTransition,
+  validateProductionSmokeBootstrapBinding,
+} = require('./production-smoke-identity');
 
 const TARGET_COLLECTIONS = Object.freeze([
+  'equipment',
   'counterparties',
   'counterparty_role_assignments',
   'clients',
   'client_objects',
+  'documents',
+  'app_settings',
+]);
+
+const REMEDIATION_SCOPE_CATEGORIES = new Set([
+  COLLECTION_SCOPE_CATEGORY.TENANT,
+  COLLECTION_SCOPE_CATEGORY.TENANT_TECHNICAL,
+  COLLECTION_SCOPE_CATEGORY.DERIVED_SCOPE,
+  COLLECTION_SCOPE_CATEGORY.LEGACY_HISTORY,
 ]);
 
 const IDENTITY_COUNT_TABLES = Object.freeze([
@@ -69,23 +93,63 @@ function normalizedId(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function targetCollectionsForPlan(plan = {}) {
+  const names = new Set(TARGET_COLLECTIONS);
+  for (const mapping of [
+    ...(Array.isArray(plan.recordMappings) ? plan.recordMappings : []),
+    ...(Array.isArray(plan.relationMappings) ? plan.relationMappings : []),
+  ]) {
+    const name = normalizedId(mapping?.collection);
+    if (name) names.add(name);
+  }
+  for (const name of Object.keys(plan?.expected?.collectionCounts || {})) {
+    if (name !== 'users') names.add(normalizedId(name));
+  }
+  for (const name of Object.keys(plan?.expected?.collectionFingerprints || {})) {
+    if (name !== 'users') names.add(normalizedId(name));
+  }
+  return [...names].filter(Boolean).sort();
+}
+
+function validateTargetCollections(targetCollections, blockers) {
+  for (const collection of targetCollections) {
+    const policy = getCollectionScopePolicy(collection);
+    if (!policy) {
+      pushBlocker(blockers, 'REMEDIATION_COLLECTION_UNKNOWN', { collection });
+      continue;
+    }
+    if (!REMEDIATION_SCOPE_CATEGORIES.has(policy.category)) {
+      pushBlocker(blockers, 'REMEDIATION_COLLECTION_POLICY_REJECTED', {
+        collection,
+        category: policy.category,
+      });
+    }
+    if (policy.shape !== 'ARRAY') {
+      pushBlocker(blockers, 'REMEDIATION_COLLECTION_SHAPE_REJECTED', {
+        collection,
+        shape: policy.shape,
+      });
+    }
+  }
+}
+
 function tableExists(db, table) {
-  return Boolean(db.prepare(`
+  return Boolean(prepareSqliteReadonlyStatement(db, `
     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?
   `).get(table));
 }
 
 function tableCount(db, table) {
   if (!tableExists(db, table)) return null;
-  return Number(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
+  return Number(prepareSqliteReadonlyStatement(db, `SELECT COUNT(*) AS count FROM ${table}`).get().count);
 }
 
 function sqliteTotalChanges(db) {
-  return Number(db.prepare('SELECT total_changes() AS count').get().count);
+  return Number(prepareSqliteReadonlyStatement(db, 'SELECT total_changes() AS count').get().count);
 }
 
 function readCollection(db, name) {
-  const row = db.prepare('SELECT json FROM app_data WHERE name = ?').get(name);
+  const row = prepareSqliteReadonlyStatement(db, 'SELECT json FROM app_data WHERE name = ?').get(name);
   if (!row) return { exists: false, raw: null, value: null, error: 'COLLECTION_MISSING' };
   try {
     const value = JSON.parse(row.json);
@@ -102,6 +166,21 @@ function collectionFingerprint(value) {
   return sha256(stableJson(value));
 }
 
+function recordFingerprint(value) {
+  return sha256(stableJson(value));
+}
+
+function recordContentFingerprint(value) {
+  const content = value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...value }
+    : value;
+  if (content && typeof content === 'object' && !Array.isArray(content)) {
+    delete content.companyId;
+    delete content.tenantId;
+  }
+  return recordFingerprint(content);
+}
+
 function identityCounts(db) {
   return Object.fromEntries(IDENTITY_COUNT_TABLES.map(table => [table, tableCount(db, table)]));
 }
@@ -115,9 +194,9 @@ function databaseIdentity(db) {
   };
 }
 
-function recordIndex(collections) {
+function recordIndex(collections, targetCollections = Object.keys(collections)) {
   const indexes = {};
-  for (const name of TARGET_COLLECTIONS) {
+  for (const name of targetCollections) {
     const rows = collections[name]?.value;
     const index = new Map();
     if (Array.isArray(rows)) {
@@ -140,9 +219,9 @@ function scopeAnomaly(row) {
   return !companyId || !tenantId || companyId !== tenantId;
 }
 
-function candidateKeys(collections) {
+function candidateKeys(collections, targetCollections = Object.keys(collections)) {
   const keys = [];
-  for (const collection of TARGET_COLLECTIONS) {
+  for (const collection of targetCollections) {
     const rows = collections[collection]?.value;
     if (!Array.isArray(rows)) continue;
     for (const row of rows) {
@@ -153,7 +232,7 @@ function candidateKeys(collections) {
   return keys.sort();
 }
 
-function stateMetrics(collections, db) {
+function stateMetrics(collections, db, targetCollections = Object.keys(collections)) {
   const clients = Array.isArray(collections.clients?.value) ? collections.clients.value : [];
   const objects = Array.isArray(collections.client_objects?.value)
     ? collections.client_objects.value
@@ -161,7 +240,7 @@ function stateMetrics(collections, db) {
   const clientIds = new Set(clients.map(item => normalizedId(item?.id)).filter(Boolean));
   const scoped = {};
   let scopeAnomalyCount = 0;
-  for (const collection of TARGET_COLLECTIONS) {
+  for (const collection of targetCollections) {
     const rows = Array.isArray(collections[collection]?.value)
       ? collections[collection].value
       : [];
@@ -187,12 +266,12 @@ function pushBlocker(blockers, code, details = {}) {
   blockers.push({ code, ...details });
 }
 
-function readObservedState(db, blockers) {
+function readObservedState(db, blockers, targetCollections) {
   if (!tableExists(db, 'app_data')) {
     pushBlocker(blockers, 'APP_DATA_TABLE_MISSING');
   }
   const collections = {};
-  for (const name of TARGET_COLLECTIONS) {
+  for (const name of targetCollections) {
     const collection = tableExists(db, 'app_data')
       ? readCollection(db, name)
       : { exists: false, raw: null, value: null, error: 'APP_DATA_TABLE_MISSING' };
@@ -211,7 +290,7 @@ function readObservedState(db, blockers) {
   };
 }
 
-function compareExpectedState(plan, observed, blockers) {
+function compareExpectedState(plan, observed, blockers, targetCollections) {
   const expected = plan.expected || {};
   if (stableJson(expected.dbIdentity || {}) !== stableJson(observed.dbIdentity)) {
     pushBlocker(blockers, 'UNEXPECTED_DATABASE_IDENTITY', {
@@ -234,13 +313,16 @@ function compareExpectedState(plan, observed, blockers) {
       });
     }
   }
-  for (const name of [...TARGET_COLLECTIONS, 'users']) {
+  for (const name of [...targetCollections, 'users']) {
     const collection = name === 'users' ? observed.users : observed.collections[name];
     if (!Array.isArray(collection?.value)) continue;
-    if (Number(expectedCounts[name]) !== collection.value.length) {
+    const allowedCounts = Array.isArray(expectedCounts[name])
+      ? expectedCounts[name].map(Number)
+      : [Number(expectedCounts[name])];
+    if (!allowedCounts.includes(collection.value.length)) {
       pushBlocker(blockers, 'UNEXPECTED_COLLECTION_COUNT', {
         collection: name,
-        expected: expectedCounts[name],
+        expected: allowedCounts,
         actual: collection.value.length,
       });
     }
@@ -300,8 +382,8 @@ function validateCanonicalCompanyIdentity(plan, blockers) {
   }
 }
 
-function validateActors(plan, observed, identityPlan, blockers, unresolved) {
-  const users = Array.isArray(observed.users?.value) ? observed.users.value : [];
+function validateActors(plan, usersDirectory, identityPlan, blockers, unresolved) {
+  const users = Array.isArray(usersDirectory) ? usersDirectory : [];
   const usersById = new Map(users.map(user => [normalizedId(user?.id), user]));
   const actorMappings = Array.isArray(plan.actorMappings) ? plan.actorMappings : [];
   const actorIds = new Set();
@@ -313,7 +395,7 @@ function validateActors(plan, observed, identityPlan, blockers, unresolved) {
     }
     actorIds.add(userId);
     const user = usersById.get(userId);
-    if (!user || user.status !== 'Активен') {
+    if (!user || (mapping.action === 'CREATE_MEMBERSHIP' && user.status !== 'Активен')) {
       pushBlocker(blockers, 'ACTOR_NOT_ACTIVE', { userId });
     }
     if (mapping.action === 'UNRESOLVED') {
@@ -380,6 +462,40 @@ function validateActors(plan, observed, identityPlan, blockers, unresolved) {
   }
 }
 
+function planSmokeIdentity(plan, observed, blockers) {
+  const config = plan?.smokeIdentityTransition;
+  const users = Array.isArray(observed.users?.value) ? observed.users.value : [];
+  if (!config) {
+    return {
+      enabled: false,
+      preview: null,
+      effectiveUsers: users,
+    };
+  }
+  const preview = planProductionSmokeIdentityTransition({
+    users,
+    config,
+    usersRawFingerprint: observed.users?.raw ? sha256(observed.users.raw) : '',
+  });
+  preview.blockers.forEach(blocker => pushBlocker(blockers, 'SMOKE_IDENTITY_TRANSITION_BLOCKED', {
+    detail: blocker,
+  }));
+  const binding = validateProductionSmokeBootstrapBinding({
+    config,
+    identityBootstrap: plan?.authority?.identityBootstrap,
+  });
+  binding.blockers.forEach(blocker => pushBlocker(blockers, 'SMOKE_IDENTITY_BOOTSTRAP_BINDING_BLOCKED', {
+    detail: blocker,
+  }));
+  return {
+    enabled: true,
+    preview,
+    effectiveUsers: preview.readyToApply
+      ? getProjectedSmokeIdentityUsers(preview)
+      : users,
+  };
+}
+
 function identityCreateDiff(identityPlan, alreadyApplied) {
   if (!identityPlan?.normalized || alreadyApplied) return [];
   const normalized = identityPlan.normalized;
@@ -403,7 +519,7 @@ function identityCreateDiff(identityPlan, alreadyApplied) {
   ];
 }
 
-function planIdentity(db, plan, observed, blockers, unresolved) {
+function planIdentity(db, plan, observed, usersDirectorySnapshot, blockers, unresolved) {
   if (plan.authority?.status !== 'APPROVED') {
     pushBlocker(blockers, 'OWNERSHIP_NOT_PROVEN');
     unresolved.push({
@@ -424,7 +540,7 @@ function planIdentity(db, plan, observed, blockers, unresolved) {
   }
   let identityPlan;
   try {
-    identityPlan = planPlatformIdentityBootstrap(db, config);
+    identityPlan = planPlatformIdentityBootstrap(db, config, { usersDirectorySnapshot });
   } catch (error) {
     pushBlocker(blockers, 'IDENTITY_BOOTSTRAP_PLAN_FAILED', {
       detail: error.code || error.message,
@@ -439,7 +555,7 @@ function planIdentity(db, plan, observed, blockers, unresolved) {
   }
 
   const successfulRun = tableExists(db, 'identity_bootstrap_runs')
-    ? db.prepare(`
+    ? prepareSqliteReadonlyStatement(db, `
         SELECT 1 FROM identity_bootstrap_runs
         WHERE configChecksum = ? AND status = 'succeeded'
       `).get(identityPlan.configChecksum)
@@ -457,8 +573,8 @@ function planIdentity(db, plan, observed, blockers, unresolved) {
   };
 }
 
-function cloneCollections(observed) {
-  return Object.fromEntries(TARGET_COLLECTIONS.map(name => [name, {
+function cloneCollections(observed, targetCollections) {
+  return Object.fromEntries(targetCollections.map(name => [name, {
     ...observed.collections[name],
     value: Array.isArray(observed.collections[name]?.value)
       ? structuredClone(observed.collections[name].value)
@@ -466,16 +582,16 @@ function cloneCollections(observed) {
   }]));
 }
 
-function validateAndPlanRecords(plan, observed, blockers, unresolved) {
+function validateAndPlanRecords(plan, observed, blockers, unresolved, targetCollections) {
   const mappings = Array.isArray(plan.recordMappings) ? plan.recordMappings : [];
-  const indexes = recordIndex(observed.collections);
+  const indexes = recordIndex(observed.collections, targetCollections);
   const mappingKeys = new Set();
   const updates = [];
   for (const mapping of mappings) {
     const collection = normalizedId(mapping?.collection);
     const id = normalizedId(mapping?.id);
     const key = `${collection}:${id}`;
-    if (!TARGET_COLLECTIONS.includes(collection) || !id || mappingKeys.has(key)) {
+    if (!targetCollections.includes(collection) || !id || mappingKeys.has(key)) {
       pushBlocker(blockers, 'RECORD_MAPPING_INVALID', { collection, id });
       continue;
     }
@@ -505,11 +621,20 @@ function validateAndPlanRecords(plan, observed, blockers, unresolved) {
     if (mapping.action === 'LEAVE_UNSCOPED') {
       const classification = normalizedId(mapping.classification);
       const current = matches[0].row;
-      if (!/^SMOKE_TEST_FIXTURE(?:_|$)|^SERVICE_SYSTEM(?:_|$)/.test(classification)) {
+      if (!/^(?:SMOKE_TEST_FIXTURE|SERVICE_SYSTEM|LEGACY_UNSCOPED_AUDIT|GLOBAL_SYSTEM_AUDIT)(?:_|$)/.test(classification)) {
         pushBlocker(blockers, 'UNSCOPED_EXCLUSION_CLASSIFICATION_INVALID', { collection, id });
       }
       if (normalizedId(current?.companyId) || normalizedId(current?.tenantId)) {
         pushBlocker(blockers, 'UNSCOPED_EXCLUSION_STATE_CONFLICT', { collection, id });
+      }
+      const expectedSourceHash = normalizedId(mapping.sourceRecordHash || mapping.canonicalRecordHash);
+      const expectedContentHash = normalizedId(mapping.canonicalContentHash || mapping.canonicalRecordHash);
+      if (plan.manifestVersion >= 2 && (!expectedSourceHash || !expectedContentHash)) {
+        pushBlocker(blockers, 'RECORD_HASH_BINDING_REQUIRED', { collection, id });
+      } else if (expectedSourceHash && recordFingerprint(current) !== expectedSourceHash) {
+        pushBlocker(blockers, 'RECORD_SOURCE_HASH_MISMATCH', { collection, id });
+      } else if (expectedContentHash && recordContentFingerprint(current) !== expectedContentHash) {
+        pushBlocker(blockers, 'RECORD_CONTENT_HASH_MISMATCH', { collection, id });
       }
       continue;
     }
@@ -526,13 +651,62 @@ function validateAndPlanRecords(plan, observed, blockers, unresolved) {
     const current = matches[0].row;
     const currentCompanyId = normalizedId(current?.companyId);
     const currentTenantId = normalizedId(current?.tenantId);
+    const expectedBefore = mapping.expectedBefore || {
+      companyId: mapping.oldCompanyId ?? null,
+      tenantId: mapping.oldTenantId ?? null,
+    };
+    const expectedCompanyId = normalizedId(expectedBefore.companyId);
+    const expectedTenantId = normalizedId(expectedBefore.tenantId);
     const beforeIsLegacy = !currentCompanyId && !currentTenantId;
     const alreadyScoped = currentCompanyId === desiredCompanyId && currentTenantId === desiredTenantId;
+    const expectedBeforeMatches = currentCompanyId === expectedCompanyId
+      && currentTenantId === expectedTenantId;
+    const expectedSourceHash = normalizedId(mapping.sourceRecordHash || mapping.canonicalRecordHash);
+    const expectedContentHash = normalizedId(mapping.canonicalContentHash || mapping.canonicalRecordHash);
+    const actualSourceHash = recordFingerprint(current);
+    const actualContentHash = recordContentFingerprint(current);
+    const sourceProjection = structuredClone(current);
+    if (expectedCompanyId) sourceProjection.companyId = expectedCompanyId;
+    else delete sourceProjection.companyId;
+    if (expectedTenantId) sourceProjection.tenantId = expectedTenantId;
+    else delete sourceProjection.tenantId;
+    const projectedSourceHash = recordFingerprint(sourceProjection);
+    if (plan.manifestVersion >= 2 && (!expectedSourceHash || !expectedContentHash)) {
+      pushBlocker(blockers, 'RECORD_HASH_BINDING_REQUIRED', { collection, id });
+      continue;
+    }
+    if (expectedContentHash && actualContentHash !== expectedContentHash) {
+      pushBlocker(blockers, 'RECORD_CONTENT_HASH_MISMATCH', { collection, id });
+      continue;
+    }
+    if (
+      expectedSourceHash
+      && actualSourceHash !== expectedSourceHash
+      && projectedSourceHash !== expectedSourceHash
+    ) {
+      pushBlocker(blockers, 'RECORD_SOURCE_HASH_MISMATCH', { collection, id });
+      continue;
+    }
     if (!beforeIsLegacy && !alreadyScoped) {
       pushBlocker(blockers, 'RECORD_SCOPE_CONFLICT', {
         collection,
         id,
         current: { companyId: currentCompanyId || null, tenantId: currentTenantId || null },
+      });
+      continue;
+    }
+    if (!alreadyScoped && !expectedBeforeMatches) {
+      pushBlocker(blockers, 'RECORD_EXPECTED_SCOPE_MISMATCH', {
+        collection,
+        id,
+        expected: {
+          companyId: expectedCompanyId || null,
+          tenantId: expectedTenantId || null,
+        },
+        actual: {
+          companyId: currentCompanyId || null,
+          tenantId: currentTenantId || null,
+        },
       });
       continue;
     }
@@ -542,19 +716,25 @@ function validateAndPlanRecords(plan, observed, blockers, unresolved) {
         id,
         before: { companyId: null, tenantId: null },
         after: { companyId: desiredCompanyId, tenantId: desiredTenantId },
+        sourceRecordHash: expectedSourceHash || actualSourceHash,
+        canonicalContentHash: expectedContentHash || actualContentHash,
+        classification: normalizedId(mapping.classification) || null,
+        derivationRule: normalizedId(mapping.derivationRule || mapping.ownershipRule) || null,
+        reason: normalizedId(mapping.reason || mapping.evidence) || null,
+        operation: 'UPDATE_SCOPE',
       });
     }
   }
 
-  for (const key of candidateKeys(observed.collections)) {
+  for (const key of candidateKeys(observed.collections, targetCollections)) {
     if (!mappingKeys.has(key)) pushBlocker(blockers, 'UNMAPPED_LEGACY_RECORD', { record: key });
   }
   return updates;
 }
 
-function validateAndPlanRelations(plan, observed, blockers, unresolved) {
+function validateAndPlanRelations(plan, observed, blockers, unresolved, targetCollections) {
   const mappings = Array.isArray(plan.relationMappings) ? plan.relationMappings : [];
-  const indexes = recordIndex(observed.collections);
+  const indexes = recordIndex(observed.collections, targetCollections);
   const keys = new Set();
   const relinks = [];
   for (const mapping of mappings) {
@@ -563,7 +743,7 @@ function validateAndPlanRelations(plan, observed, blockers, unresolved) {
     const field = normalizedId(mapping?.field);
     const key = `${collection}:${id}:${field}`;
     if (
-      !TARGET_COLLECTIONS.includes(collection)
+      !targetCollections.includes(collection)
       || !id
       || !RELATION_FIELDS.has(field)
       || keys.has(key)
@@ -625,12 +805,12 @@ function validateAndPlanRelations(plan, observed, blockers, unresolved) {
   return relinks;
 }
 
-function applyDiffToCollections(collections, updates, relinks) {
-  const next = Object.fromEntries(TARGET_COLLECTIONS.map(name => [name, {
+function applyDiffToCollections(collections, updates, relinks, targetCollections = Object.keys(collections)) {
+  const next = Object.fromEntries(targetCollections.map(name => [name, {
     ...collections[name],
     value: structuredClone(collections[name].value),
   }]));
-  const indexes = recordIndex(next);
+  const indexes = recordIndex(next, targetCollections);
   for (const update of updates) {
     const match = indexes[update.collection].get(update.id)[0];
     match.row.companyId = update.after.companyId;
@@ -643,10 +823,15 @@ function applyDiffToCollections(collections, updates, relinks) {
   return next;
 }
 
-function expectedMetrics(db, observed, create, updates, relinks, blocked) {
-  if (blocked) return stateMetrics(observed.collections, db);
-  const next = applyDiffToCollections(cloneCollections(observed), updates, relinks);
-  const metrics = stateMetrics(next, db);
+function expectedMetrics(db, observed, create, updates, relinks, blocked, targetCollections) {
+  if (blocked) return stateMetrics(observed.collections, db, targetCollections);
+  const next = applyDiffToCollections(
+    cloneCollections(observed, targetCollections),
+    updates,
+    relinks,
+    targetCollections,
+  );
+  const metrics = stateMetrics(next, db, targetCollections);
   metrics.companies += create.filter(item => item.type === 'Company').length;
   metrics.memberships += create.filter(item => item.type === 'Membership').length;
   return metrics;
@@ -671,24 +856,59 @@ function planProductionScopeRemediation({ db, plan }) {
   }
   const blockers = [];
   const unresolved = [];
+  const targetCollections = targetCollectionsForPlan(plan);
+  validateTargetCollections(targetCollections, blockers);
   if (plan?.planVersion !== 1 || !normalizedId(plan?.planId)) {
     pushBlocker(blockers, 'PLAN_IDENTITY_INVALID');
   }
-  const observed = readObservedState(db, blockers);
-  compareExpectedState(plan || {}, observed, blockers);
+  const observed = readObservedState(db, blockers, targetCollections);
+  compareExpectedState(plan || {}, observed, blockers, targetCollections);
   validateBackup(plan || {}, blockers);
   validateCanonicalCompanyIdentity(plan || {}, blockers);
-  const identity = planIdentity(db, plan || {}, observed, blockers, unresolved);
-  validateActors(plan || {}, observed, identity.identityPlan, blockers, unresolved);
-  const updates = validateAndPlanRecords(plan || {}, observed, blockers, unresolved);
-  const relinks = validateAndPlanRelations(plan || {}, observed, blockers, unresolved);
+  const smokeIdentity = planSmokeIdentity(plan || {}, observed, blockers);
+  const effectiveUsersSnapshot = buildUsersDirectorySnapshot(smokeIdentity.effectiveUsers);
+  const identity = planIdentity(
+    db,
+    plan || {},
+    observed,
+    effectiveUsersSnapshot,
+    blockers,
+    unresolved,
+  );
+  validateActors(
+    plan || {},
+    smokeIdentity.effectiveUsers,
+    identity.identityPlan,
+    blockers,
+    unresolved,
+  );
+  const updates = validateAndPlanRecords(
+    plan || {},
+    observed,
+    blockers,
+    unresolved,
+    targetCollections,
+  );
+  const relinks = validateAndPlanRelations(
+    plan || {},
+    observed,
+    blockers,
+    unresolved,
+    targetCollections,
+  );
   const uniqueBlockers = deduplicateBlockers(blockers);
   const blocked = uniqueBlockers.length > 0;
-  const create = blocked ? [] : identity.create;
-  const plannedUpdates = blocked ? [] : updates;
+  const create = blocked ? [] : [
+    ...identity.create,
+    ...(smokeIdentity.preview?.plannedDiff.CREATE || []),
+  ];
+  const plannedUpdates = blocked ? [] : [
+    ...updates,
+    ...(smokeIdentity.preview?.plannedDiff.UPDATE || []),
+  ];
   const plannedRelinks = blocked ? [] : relinks;
   const observedFingerprints = Object.fromEntries([
-    ...TARGET_COLLECTIONS.map(name => [name, Array.isArray(observed.collections[name]?.value)
+    ...targetCollections.map(name => [name, Array.isArray(observed.collections[name]?.value)
       ? collectionFingerprint(observed.collections[name].value)
       : null]),
     ['users', Array.isArray(observed.users?.value)
@@ -714,12 +934,13 @@ function planProductionScopeRemediation({ db, plan }) {
       dbIdentity: observed.dbIdentity,
       identityCounts: observed.identityCounts,
       collectionCounts: Object.fromEntries([
-        ...TARGET_COLLECTIONS.map(name => [name, observed.collections[name]?.value?.length ?? null]),
+        ...targetCollections.map(name => [name, observed.collections[name]?.value?.length ?? null]),
         ['users', observed.users?.value?.length ?? null],
       ]),
       collectionFingerprints: observedFingerprints,
-      legacyCandidates: candidateKeys(observed.collections),
-      metrics: stateMetrics(observed.collections, db),
+      legacyCandidates: candidateKeys(observed.collections, targetCollections),
+      metrics: stateMetrics(observed.collections, db, targetCollections),
+      targetCollections,
     },
     plannedDiff: {
       CREATE: create,
@@ -731,25 +952,40 @@ function planProductionScopeRemediation({ db, plan }) {
       db,
       observed,
       create,
-      plannedUpdates,
+      updates,
       plannedRelinks,
       blocked,
+      targetCollections,
     ),
     identity: {
       alreadyApplied: identity.alreadyApplied,
       configChecksum: identity.identityPlan?.configChecksum || null,
     },
+    smokeIdentity: {
+      enabled: smokeIdentity.enabled,
+      status: smokeIdentity.preview?.status || 'disabled',
+      transitionChecksum: smokeIdentity.preview?.transitionChecksum || null,
+      projectedUsersDirectoryFingerprint:
+        smokeIdentity.preview?.projectedUsersDirectoryFingerprint || null,
+    },
   };
 }
 
 function persistCollectionDiff(db, initialPlan, faultInjector, mutationTimestamp) {
+  const targetCollections = initialPlan?.observed?.targetCollections || [];
+  const collectionUpdates = initialPlan.plannedDiff.UPDATE.filter(item => (
+    targetCollections.includes(item.collection)
+  ));
+  const collectionRelinks = initialPlan.plannedDiff.RELINK.filter(item => (
+    targetCollections.includes(item.collection)
+  ));
   const changedCollections = new Set([
-    ...initialPlan.plannedDiff.UPDATE.map(item => item.collection),
-    ...initialPlan.plannedDiff.RELINK.map(item => item.collection),
+    ...collectionUpdates.map(item => item.collection),
+    ...collectionRelinks.map(item => item.collection),
   ]);
   if (changedCollections.size === 0) return 0;
   const observedBlockers = [];
-  const observed = readObservedState(db, observedBlockers);
+  const observed = readObservedState(db, observedBlockers, targetCollections);
   if (observedBlockers.length > 0) {
     throw new ProductionScopeRemediationError(
       'TRANSACTIONAL_STATE_INVALID',
@@ -758,9 +994,10 @@ function persistCollectionDiff(db, initialPlan, faultInjector, mutationTimestamp
     );
   }
   const next = applyDiffToCollections(
-    cloneCollections(observed),
-    initialPlan.plannedDiff.UPDATE,
-    initialPlan.plannedDiff.RELINK,
+    cloneCollections(observed, targetCollections),
+    collectionUpdates,
+    collectionRelinks,
+    targetCollections,
   );
   let writes = 0;
   const update = db.prepare(`
@@ -830,6 +1067,17 @@ function applyProductionScopeRemediation({
     }
     const bootstrapConfig = plan.authority.identityBootstrap;
     const bootstrapTimestamp = normalizedId(plan.backup?.timestamp);
+    const smokeIdentityResult = live.smokeIdentity.enabled
+      ? applyProductionSmokeIdentityTransition({
+        db,
+        config: plan.smokeIdentityTransition,
+        expectedTransitionChecksum: live.smokeIdentity.transitionChecksum,
+        mutationTimestamp: bootstrapTimestamp,
+      })
+      : { status: 'noop', writes: 0 };
+    if (typeof faultInjector === 'function') {
+      faultInjector({ stage: 'after_smoke_identity_mutation', smokeIdentityResult });
+    }
     const bootstrapGenerateId = deterministicBootstrapIdGenerator(live.planChecksum);
     const bootstrapResult = runPlatformIdentityBootstrap({
       db,
@@ -868,16 +1116,19 @@ function applyProductionScopeRemediation({
     if (typeof faultInjector === 'function') {
       faultInjector({ stage: 'before_commit', bootstrapResult, collectionWrites });
     }
-    return { bootstrapResult, collectionWrites };
+    return { bootstrapResult, collectionWrites, smokeIdentityResult };
   });
   const result = execute.immediate();
   return {
-    status: result.bootstrapResult.status === 'noop' && result.collectionWrites === 0
+    status: result.bootstrapResult.status === 'noop'
+        && result.smokeIdentityResult.status === 'noop'
+        && result.collectionWrites === 0
       ? 'noop'
       : 'succeeded',
     writes: sqliteTotalChanges(db) - beforeTotalChanges,
     collectionWrites: result.collectionWrites,
     bootstrapStatus: result.bootstrapResult.status,
+    smokeIdentityStatus: result.smokeIdentityResult.status,
   };
 }
 
@@ -890,6 +1141,9 @@ module.exports = {
   databaseIdentity,
   identityCounts,
   planProductionScopeRemediation,
+  recordContentFingerprint,
+  recordFingerprint,
   sqliteTotalChanges,
   stableJson,
+  targetCollectionsForPlan,
 };

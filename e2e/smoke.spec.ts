@@ -100,6 +100,24 @@ test.describe('production smoke', () => {
     const serialNumber = `SMOKE-UI-SN-${suffix}`;
     const inventoryNumber = `SMK-${String(Date.now()).slice(-8)}`;
     const serviceReason = `SMOKE-UI-service-${suffix}`;
+    const ownerName = `SMOKE-UI-Owner-${suffix}`;
+
+    await withAdminApi(async (api) => {
+      const response = await api.post('/api/owners', {
+        data: {
+          name: ownerName,
+          type: 'company',
+          contact: 'SMOKE UI Owner',
+          phone: '+79990000002',
+          email: `smoke-ui-owner-${suffix}@example.local`,
+          notes: 'Created by Playwright smoke fixture',
+        },
+      });
+      expect(
+        response.ok(),
+        `POST /api/owners: ${response.status()} ${await response.text()}`,
+      ).toBeTruthy();
+    });
 
     await loginAsAdmin(page);
 

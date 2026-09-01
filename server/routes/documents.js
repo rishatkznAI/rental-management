@@ -76,6 +76,7 @@ function registerDocumentRoutes(router, deps) {
   const {
     readData,
     writeData,
+    writeDataBatch,
     requireAuth,
     requireRead,
     requireWrite,
@@ -87,7 +88,19 @@ function registerDocumentRoutes(router, deps) {
     normalizeRecordClientLink,
     getDb,
     businessNumbering = null,
+    runInAppDataWriteTransaction = null,
   } = deps;
+
+  if (typeof writeDataBatch !== 'function') {
+    const error = new Error('Document numbering persistence requires writeDataBatch.');
+    error.code = 'DOCUMENT_WRITE_BATCH_REQUIRED';
+    throw error;
+  }
+  if (businessNumbering && typeof runInAppDataWriteTransaction !== 'function') {
+    const error = new Error('SQL document numbering requires an enclosing app-data transaction.');
+    error.code = 'DOCUMENT_NUMBERING_TRANSACTION_REQUIRED';
+    throw error;
+  }
 
   const documentsRouter = express.Router();
 
@@ -581,6 +594,35 @@ function registerDocumentRoutes(router, deps) {
     writeData('app_settings', next);
   }
 
+  function persistNumberedDocuments(documents, settings) {
+    const appSettings = writeNumberingSettings(readData('app_settings') || [], settings, nowIso);
+    writeDataBatch([
+      { name: 'documents', value: documents },
+      { name: 'app_settings', value: appSettings },
+    ]);
+  }
+
+  function prepareAndPersistDocumentCreate(normalized, documents, user) {
+    const operation = () => {
+      if (businessNumbering && isSqlNumberedDocumentType(normalized.documentType || normalized.type)) {
+        businessNumbering.assignNewRecord('documents', normalized);
+      }
+      const prepared = prepareDocumentCreate(normalized, {
+        documents,
+        settings: readSettings(),
+        nowIso,
+        generateId,
+        idPrefix: idPrefixes.documents || 'D',
+        user,
+      });
+      persistNumberedDocuments([...documents, prepared.document], prepared.settings);
+      return prepared;
+    };
+    return typeof runInAppDataWriteTransaction === 'function'
+      ? runInAppDataWriteTransaction(operation)
+      : operation();
+  }
+
   documentsRouter.get('/documents/registry/summary', requireAuth, requireRead('documents'), (req, res) => {
     try {
       accessControl.assertCanReadCollection('documents', req.user);
@@ -770,19 +812,7 @@ function registerDocumentRoutes(router, deps) {
       }
       const documents = readData('documents') || [];
       const normalized = withRentalBillingSnapshot(normalizeDocumentDomainRecord({ ...input, id: input.id || generateId(idPrefixes.documents || 'D') }));
-      if (businessNumbering && isSqlNumberedDocumentType(normalized.documentType || normalized.type)) {
-        businessNumbering.assignNewRecord('documents', normalized);
-      }
-      const prepared = prepareDocumentCreate(normalized, {
-        documents,
-        settings: readSettings(),
-        nowIso,
-        generateId,
-        idPrefix: idPrefixes.documents || 'D',
-        user: req.user,
-      });
-      writeData('documents', [...documents, prepared.document]);
-      saveSettings(prepared.settings);
+      const prepared = prepareAndPersistDocumentCreate(normalized, documents, req.user);
       auditLog?.(req, {
         action: 'documents.create',
         entityType: 'documents',
@@ -807,19 +837,7 @@ function registerDocumentRoutes(router, deps) {
       }
       const documents = readData('documents') || [];
       const normalized = withRentalBillingSnapshot(normalizeDocumentDomainRecord({ ...input, id: input.id || generateId(idPrefixes.documents || 'D') }));
-      if (businessNumbering && isSqlNumberedDocumentType(normalized.documentType || normalized.type)) {
-        businessNumbering.assignNewRecord('documents', normalized);
-      }
-      const prepared = prepareDocumentCreate(normalized, {
-        documents,
-        settings: readSettings(),
-        nowIso,
-        generateId,
-        idPrefix: idPrefixes.documents || 'D',
-        user: req.user,
-      });
-      writeData('documents', [...documents, prepared.document]);
-      saveSettings(prepared.settings);
+      const prepared = prepareAndPersistDocumentCreate(normalized, documents, req.user);
       auditLog?.(req, {
         action: 'documents.generate',
         entityType: 'documents',
@@ -928,19 +946,7 @@ function registerDocumentRoutes(router, deps) {
       accessControl.assertCanCreateCollection('documents', req.user, copyInput);
       const input = accessControl.sanitizeCreateInput('documents', copyInput, req.user);
       const normalized = normalizeDocumentDomainRecord({ ...input, id: generateId(idPrefixes.documents || 'D') });
-      if (businessNumbering && isSqlNumberedDocumentType(normalized.documentType || normalized.type)) {
-        businessNumbering.assignNewRecord('documents', normalized);
-      }
-      const prepared = prepareDocumentCreate(normalized, {
-        documents,
-        settings: readSettings(),
-        nowIso,
-        generateId,
-        idPrefix: idPrefixes.documents || 'D',
-        user: req.user,
-      });
-      writeData('documents', [...documents, prepared.document]);
-      saveSettings(prepared.settings);
+      const prepared = prepareAndPersistDocumentCreate(normalized, documents, req.user);
       auditLog?.(req, {
         action: 'documents.duplicate',
         entityType: 'documents',
@@ -999,8 +1005,7 @@ function registerDocumentRoutes(router, deps) {
       });
       const next = [...documents];
       next[idx] = updated;
-      writeData('documents', next);
-      saveSettings(upsertSetting(settings, generated.setting));
+      persistNumberedDocuments(next, upsertSetting(settings, generated.setting));
       auditLog?.(req, {
         action: 'documents.assign_number',
         entityType: 'documents',

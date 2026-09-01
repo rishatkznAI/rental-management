@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
-const path = require('path');
+const Database = require('better-sqlite3');
+const {
+  assertAuditedMaintenanceApplyUnavailable,
+  parseAppDataValue,
+  resolveExplicitDatabasePath,
+} = require('../lib/maintenance-script-safety');
 
 function parseArgs(argv) {
   const args = {
@@ -30,63 +35,48 @@ function parseArgs(argv) {
 function printUsage() {
   console.log([
     'Usage:',
-    '  node server/scripts/backfill-service-created-at.js [--dry-run] [--db /path/to/app.sqlite]',
-    '  node server/scripts/backfill-service-created-at.js --apply [--db /path/to/app.sqlite]',
+    '  node server/scripts/backfill-service-created-at.js --dry-run --db /explicit/path/to/app.sqlite',
     '',
     'Default mode is dry-run and never writes to the database.',
-    '--apply writes only service tickets missing createdAt and creates a SQLite backup first.',
+    'Raw --apply is disabled; use an audited tenant-scoped maintenance runner.',
   ].join('\n'));
 }
 
-async function main() {
+function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     printUsage();
     return;
   }
 
-  if (args.dbPath) {
-    process.env.DB_PATH = path.resolve(args.dbPath);
-  }
-
-  const { DB_PATH, createSqliteBackup, getData, setData } = require('../db');
+  const dbPath = resolveExplicitDatabasePath(args.dbPath);
+  assertAuditedMaintenanceApplyUnavailable(args.apply, 'service createdAt backfill');
   const { backfillServiceTicketCreatedAt } = require('../lib/service-dto');
-
-  const service = getData('service') || [];
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  let service;
+  try {
+    const row = db.prepare('SELECT json FROM app_data WHERE name = ?').get('service');
+    service = parseAppDataValue(row, 'service', { expected: 'array', missing: [] });
+  } finally {
+    db.close();
+  }
   const result = backfillServiceTicketCreatedAt(service, {
     nowIso: () => new Date().toISOString(),
   });
 
   console.log(`Mode: ${args.apply ? 'apply' : 'dry-run'}`);
-  console.log(`DB: ${DB_PATH}`);
+  console.log(`DB: ${dbPath}`);
   console.log(`Service tickets: ${result.stats.total}`);
   console.log(`Missing createdAt: ${result.stats.missingCreatedAt}`);
   console.log(`Changed: ${result.stats.changed}`);
   console.log(`Sources: createdDate=${result.stats.fromCreatedDate}, date=${result.stats.fromDate}, requestedAt=${result.stats.fromRequestedAt}, updatedAt=${result.stats.fromUpdatedAt}, approximate=${result.stats.fromNow}`);
 
-  if (!args.apply) {
-    console.log('Dry-run only: no database writes were performed.');
-    return;
-  }
-
-  if (result.stats.changed === 0) {
-    console.log('Apply requested: nothing to update.');
-    return;
-  }
-
-  const backupPath = path.join(
-    path.dirname(DB_PATH),
-    'backups',
-    `pre-service-created-at-backfill-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`,
-  );
-  await createSqliteBackup(backupPath);
-  console.log(`Backup created: ${backupPath}`);
-
-  setData('service', result.items);
-  console.log(`Applied: changed=${result.stats.changed}`);
+  console.log('Dry-run only: no database writes were performed.');
 }
 
-main().catch(error => {
+try {
+  main();
+} catch (error) {
   console.error(error?.message || String(error));
   process.exitCode = 1;
-});
+}

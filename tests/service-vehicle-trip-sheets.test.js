@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const {
   normalizeVehicleTripPayload,
   applyVehicleMileageFromTrip,
+  buildVehicleTripPersistenceEntries,
 } = require('../server/lib/service-vehicle-trips-core.js');
 const { createAccessControl } = require('../server/lib/access-control.js');
 
@@ -134,6 +135,20 @@ test('service vehicle trip sheets are unique by sheet number inside one vehicle 
   assert.equal(otherVehicleTrip.sheetNumber, 'PL-1');
 });
 
+test('vehicle assignment is immutable on trip edit so mileage provenance cannot drift', () => {
+  const previous = makeTrip({
+    vehicleId: 'SV-1',
+    date: '2026-05-09',
+    driverName: 'Петров',
+    route: 'Склад — Объект',
+  });
+  assert.throws(() => makeTrip({ vehicleId: 'SV-2' }, {
+    previous,
+    trips: [previous],
+    vehicles: [...vehicles, { id: 'SV-2', plateNumber: 'B002BB', currentMileage: 0 }],
+  }), error => error?.status === 409 && /другую машину/.test(error.message));
+});
+
 test('service vehicle trip sheet updates vehicle mileage from latest odometer end', () => {
   const trip = makeTrip({
     vehicleId: 'SV-1',
@@ -148,6 +163,64 @@ test('service vehicle trip sheet updates vehicle mileage from latest odometer en
   const nextVehicles = applyVehicleMileageFromTrip(vehicles, trip, nowIso);
   assert.equal(nextVehicles[0].currentMileage, 1285);
   assert.equal(nextVehicles[0].mileageUpdatedAt, '2026-05-09T09:00:00.000Z');
+});
+
+test('all trip create/update aliases stage trip and mileage projection as one atomic batch', () => {
+  const trip = makeTrip({
+    vehicleId: 'SV-1',
+    date: '2026-05-09',
+    driverName: 'Петров',
+    route: 'Склад — Объект',
+    odometerStart: 1200,
+    odometerEnd: 1285,
+  });
+  const aliases = [
+    'POST /vehicle-trips',
+    'PUT /vehicle-trips/:id',
+    'POST /service-vehicles/:vehicleId/trip-sheets',
+    'PATCH /service-vehicles/:vehicleId/trip-sheets/:id',
+  ];
+
+  for (const alias of aliases) {
+    const state = {
+      vehicle_trips: [],
+      service_vehicles: structuredClone(vehicles),
+    };
+    const before = structuredClone(state);
+    const entries = buildVehicleTripPersistenceEntries({
+      trips: [trip],
+      vehicles: state.service_vehicles,
+      trip,
+      nowIso,
+    });
+    assert.deepEqual(entries.map(entry => entry.name), ['vehicle_trips', 'service_vehicles'], alias);
+
+    const injected = new Error(`injected failure: ${alias}`);
+    assert.throws(() => {
+      const staged = structuredClone(state);
+      for (const entry of entries) staged[entry.name] = structuredClone(entry.value);
+      throw injected;
+    }, error => error === injected);
+    assert.deepEqual(state, before, alias);
+
+    const staged = structuredClone(state);
+    for (const entry of entries) staged[entry.name] = structuredClone(entry.value);
+    Object.assign(state, staged);
+    assert.equal(state.vehicle_trips.length, 1, alias);
+    assert.equal(state.service_vehicles[0].currentMileage, 1285, alias);
+  }
+});
+
+test('server routes use the atomic trip-and-mileage batch for every write alias', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../server/server.js', import.meta.url), 'utf8');
+  const routeBlock = source.slice(
+    source.indexOf("apiRouter.post('/vehicle-trips'"),
+    source.indexOf("apiRouter.delete('/service-vehicles/:vehicleId/trip-sheets/:id'"),
+  );
+  assert.equal((routeBlock.match(/persistVehicleTripAndMileage\(/g) || []).length, 4);
+  assert.doesNotMatch(routeBlock, /writeData\('vehicle_trips'/);
+  assert.doesNotMatch(routeBlock, /assignNewRecord\('vehicle_trips'/);
 });
 
 test('service vehicle trip sheet access keeps manager read-only and denies investor mutation', () => {

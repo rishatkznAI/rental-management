@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const defaultPlan = require('../config/production-scope-remediation-active-plan');
@@ -12,8 +13,14 @@ const {
   runPreflight,
   runVerify,
 } = require('../lib/production-scope-remediation-runner');
+const {
+  validateProductionScopeExecutionBundle,
+} = require('../lib/production-scope-execution-plan-bundle');
 
 const ALLOWED_MODES = new Set(['preflight', 'backup', 'apply', 'verify']);
+const MAX_AUTHORIZED_BUNDLE_BYTES = 1024 * 1024;
+const AUTHORIZED_BUNDLE_PIN_FILENAME = '.production-scope-remediation-authorized-bundle.sha256';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 class ProductionScopeRouteError extends Error {
   constructor(code, message, status = 409) {
@@ -51,6 +58,59 @@ function signedRailwayIdentity(value = {}) {
   };
 }
 
+function buildProductionScopeConservationState({
+  appDisabled,
+  botDisabled,
+  gsmDisabled,
+  storageWriteGuardEnabled,
+  env = process.env,
+} = {}) {
+  return {
+    appDisabled: typeof appDisabled === 'boolean'
+      ? appDisabled
+      : env.APP_DISABLED === 'true',
+    botDisabled: typeof botDisabled === 'boolean'
+      ? botDisabled
+      : env.BOT_DISABLED === 'true',
+    gsmDisabled: typeof gsmDisabled === 'boolean'
+      ? gsmDisabled
+      : env.GSM_DISABLED === 'true' || String(env.GSM_ENABLED || '').toLowerCase() === 'off',
+    storageWriteGuardEnabled: typeof storageWriteGuardEnabled === 'boolean'
+      ? storageWriteGuardEnabled
+      : env.PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE === 'true',
+    schemaCompatibilityDisabled:
+      env.PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY !== 'true',
+    cleanResetDisabled: env.SKYTECH_CLEAN_RESET_ENABLED !== 'true',
+    adminResetDisabled: !String(env.ADMIN_RESET_PASSWORD || ''),
+  };
+}
+
+function readExpectedBundleFileSha256(dbPath) {
+  const pinPath = path.join(path.dirname(path.resolve(dbPath)), AUTHORIZED_BUNDLE_PIN_FILENAME);
+  let descriptor;
+  try {
+    descriptor = fs.openSync(
+      pinPath,
+      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0),
+    );
+    const stat = fs.fstatSync(descriptor);
+    if (
+      !stat.isFile()
+      || stat.nlink !== 1
+      || (stat.mode & 0o022) !== 0
+      || stat.size < 64
+      || stat.size > 65
+    ) return null;
+    const value = fs.readFileSync(descriptor, 'utf8');
+    if (!/^[a-f0-9]{64}\n?$/.test(value)) return null;
+    return value.trim();
+  } catch {
+    return null;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+  }
+}
+
 function registerProductionScopeRemediationRoutes(router, deps) {
   const {
     dbPath,
@@ -70,21 +130,12 @@ function registerProductionScopeRemediationRoutes(router, deps) {
     getExpectedExecutionSha = () => (
       process.env.PRODUCTION_SCOPE_REMEDIATION_EXPECTED_EXECUTION_SHA
     ),
+    getExpectedBundleFileSha256 = () => readExpectedBundleFileSha256(dbPath),
     getRuntimeIdentity = () => runtimeIdentityFromEnv(),
-    getConservationState = () => ({
-      appDisabled: process.env.APP_DISABLED === 'true',
-      botDisabled: process.env.BOT_DISABLED === 'true',
-      gsmDisabled: process.env.GSM_DISABLED === 'true'
-        || String(process.env.GSM_ENABLED || '').toLowerCase() === 'off',
-      storageWriteGuardEnabled:
-        process.env.PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE === 'true',
-      schemaCompatibilityDisabled:
-        process.env.PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY !== 'true',
-      cleanResetDisabled: process.env.SKYTECH_CLEAN_RESET_ENABLED !== 'true',
-      adminResetDisabled: !String(process.env.ADMIN_RESET_PASSWORD || ''),
-    }),
+    getConservationState = () => buildProductionScopeConservationState(),
     now = () => new Date(),
     consumeRequest = consumeOperationRequest,
+    validateExecutionBundle = validateProductionScopeExecutionBundle,
     logger = console,
     runner = { runApply, runBackup, runPreflight, runVerify },
   } = deps;
@@ -93,6 +144,127 @@ function registerProductionScopeRemediationRoutes(router, deps) {
   function actualDeployedSha() {
     const info = typeof buildInfo === 'function' ? buildInfo() : (buildInfo || {});
     return String(info?.commitFull || '');
+  }
+
+  function actualDeploymentId() {
+    const info = typeof buildInfo === 'function' ? buildInfo() : (buildInfo || {});
+    return String(info?.deployment?.railwayDeploymentId || '').trim().toLowerCase();
+  }
+
+  function planMatchesEnvironment(candidatePlan) {
+    return Boolean(
+      candidatePlan?.sourceDbPath
+      && path.resolve(candidatePlan.sourceDbPath) === path.resolve(expectedEnvironment.sourceDbPath)
+      && candidatePlan?.authority?.companyId === expectedEnvironment.canonicalCompanyId
+      && candidatePlan?.authority?.tenantId === expectedEnvironment.canonicalCompanyId
+    );
+  }
+
+  function resolveSignedRequestPlan(body) {
+    const hasEncodedBundle = Object.prototype.hasOwnProperty.call(
+      body || {},
+      'executionBundleBase64',
+    );
+    const hasFileHash = Object.prototype.hasOwnProperty.call(
+      body || {},
+      'executionBundleFileSha256',
+    );
+    const expectedBundleFileSha256 = String(getExpectedBundleFileSha256() || '').trim();
+    const exactBundlePinConfigured = /^[a-f0-9]{64}$/.test(expectedBundleFileSha256);
+    if (!hasEncodedBundle && !hasFileHash) {
+      fail(
+        'EXECUTION_BUNDLE_REQUIRED',
+        'An explicitly supplied, authorized, and independently pinned execution bundle is required.',
+        403,
+      );
+    }
+    if (
+      !hasEncodedBundle
+      || !hasFileHash
+      || Object.prototype.hasOwnProperty.call(body || {}, 'executionBundle')
+      || typeof body.executionBundleBase64 !== 'string'
+      || !/^[A-Za-z0-9+/]+={0,2}$/.test(body.executionBundleBase64)
+      || !/^[a-f0-9]{64}$/.test(body.executionBundleFileSha256)
+    ) {
+      fail('EXECUTION_BUNDLE_BYTES_INVALID', 'The signed execution bundle bytes are invalid.', 403);
+    }
+    if (!exactBundlePinConfigured) {
+      fail('EXECUTION_BUNDLE_PIN_NOT_CONFIGURED', 'Not found', 404);
+    }
+    if (body.executionBundleFileSha256 !== expectedBundleFileSha256) {
+      fail(
+        'EXECUTION_BUNDLE_EXTERNAL_PIN_MISMATCH',
+        'The signed execution bundle does not match the independently provisioned hash.',
+        403,
+      );
+    }
+    const bundleBytes = Buffer.from(body.executionBundleBase64, 'base64');
+    if (
+      bundleBytes.length === 0
+      || bundleBytes.length > MAX_AUTHORIZED_BUNDLE_BYTES
+      || bundleBytes.toString('base64') !== body.executionBundleBase64
+      || crypto.createHash('sha256').update(bundleBytes).digest('hex')
+        !== body.executionBundleFileSha256
+    ) {
+      fail('EXECUTION_BUNDLE_FILE_HASH_MISMATCH', 'The signed execution bundle file hash differs.', 403);
+    }
+    let executionBundle;
+    try {
+      executionBundle = JSON.parse(bundleBytes.toString('utf8'));
+    } catch {
+      fail('EXECUTION_BUNDLE_JSON_INVALID', 'The signed execution bundle is invalid JSON.', 403);
+    }
+    let validated;
+    try {
+      validated = validateExecutionBundle(executionBundle, { requireAuthorized: true });
+    } catch (error) {
+      fail(
+        typeof error?.code === 'string' ? error.code : 'EXECUTION_BUNDLE_INVALID',
+        'The signed execution bundle is invalid.',
+        403,
+      );
+    }
+    const requestedPlan = validated?.plan;
+    const deployedSha = actualDeployedSha().trim().toLowerCase();
+    const signedDeploymentIdentity = {
+      serviceInstanceId: String(body?.deploymentIdentity?.serviceInstanceId || '')
+        .trim().toLowerCase(),
+      deploymentInstanceId: String(body?.deploymentIdentity?.deploymentInstanceId || '')
+        .trim().toLowerCase(),
+    };
+    const bundledDeploymentIdentity = {
+      serviceInstanceId: String(executionBundle?.source?.deploymentIdentity?.serviceInstanceId || '')
+        .trim().toLowerCase(),
+      deploymentInstanceId: String(executionBundle?.source?.deploymentIdentity?.deploymentInstanceId || '')
+        .trim().toLowerCase(),
+    };
+    const signedRequestRailwayIdentity = signedRailwayIdentity(body?.railwayIdentity);
+    const bundledRailwayIdentity = signedRailwayIdentity(
+      executionBundle?.source?.railwayIdentity,
+    );
+    const approvedRailwayIdentity = signedRailwayIdentity(expectedEnvironment);
+    const runtimeReplicaId = String(getRuntimeIdentity()?.replicaId || '').trim().toLowerCase();
+    if (
+      validated?.authorized !== true
+      || requestedPlan?.executionScope !== 'IDENTITY_ONLY'
+      || executionBundle?.authorization?.authorizedExecutionSha !== deployedSha
+      || executionBundle?.source?.captureDeployedSha !== deployedSha
+      || executionBundle?.source?.captureDeploymentId !== actualDeploymentId()
+      || !UUID_PATTERN.test(signedDeploymentIdentity.serviceInstanceId)
+      || !UUID_PATTERN.test(signedDeploymentIdentity.deploymentInstanceId)
+      || JSON.stringify(signedDeploymentIdentity) !== JSON.stringify(bundledDeploymentIdentity)
+      || JSON.stringify(bundledRailwayIdentity) !== JSON.stringify(signedRequestRailwayIdentity)
+      || JSON.stringify(bundledRailwayIdentity) !== JSON.stringify(approvedRailwayIdentity)
+      || runtimeReplicaId !== bundledDeploymentIdentity.deploymentInstanceId
+      || !planMatchesEnvironment(requestedPlan)
+    ) {
+      fail(
+        'IDENTITY_EXECUTION_BUNDLE_RUNTIME_MISMATCH',
+        'The signed identity bundle does not match this exact deployed runtime and target.',
+        403,
+      );
+    }
+    return requestedPlan;
   }
 
   function assertSecureConfiguration(mode, body) {
@@ -131,10 +303,7 @@ function registerProductionScopeRemediationRoutes(router, deps) {
       && /^[a-f0-9]{40}$/.test(expectedExecutionSha)
       && expectedExecutionSha === actualDeployedSha().toLowerCase()
       && exactDatabasePath
-      && plan?.sourceDbPath
-      && path.resolve(plan.sourceDbPath) === path.resolve(expectedEnvironment.sourceDbPath)
-      && plan?.authority?.companyId === expectedEnvironment.canonicalCompanyId
-      && plan?.authority?.tenantId === expectedEnvironment.canonicalCompanyId
+      && planMatchesEnvironment(plan)
     );
     if (!runtimeMatches) {
       fail('RAILWAY_RUNTIME_IDENTITY_MISMATCH', 'Not found', 404);
@@ -159,6 +328,7 @@ function registerProductionScopeRemediationRoutes(router, deps) {
       body: req.body,
       now: now(),
     });
+    const requestPlan = resolveSignedRequestPlan(req.body);
     consumeRequest({
       dbPath,
       requestId: authorization.requestId,
@@ -166,7 +336,7 @@ function registerProductionScopeRemediationRoutes(router, deps) {
       issuedAt: authorization.issuedAt,
       expiresAt: authorization.expiresAt,
     });
-    return { railwayIdentity, authorization };
+    return { railwayIdentity, authorization, plan: requestPlan };
   }
 
   function guarded(mode, handler) {
@@ -179,7 +349,7 @@ function registerProductionScopeRemediationRoutes(router, deps) {
       try {
         const authorization = authorizeRequest(req, mode);
         requestHash = authorization.authorization.requestId.slice(0, 8);
-        return await handler(req, res, authorization.railwayIdentity);
+        return await handler(req, res, authorization.railwayIdentity, authorization.plan);
       } catch (error) {
         const code = typeof error?.code === 'string'
           ? error.code
@@ -204,10 +374,10 @@ function registerProductionScopeRemediationRoutes(router, deps) {
 
   router.post(
     '/admin/production-scope-remediation/preflight',
-    guarded('preflight', async (req, res, railwayIdentity) => {
+    guarded('preflight', async (req, res, railwayIdentity, requestPlan) => {
       const result = await runner.runPreflight({
         dbPath,
-        plan,
+        plan: requestPlan,
         expectedDeployedSha: req.body?.expectedDeployedSha,
         actualDeployedSha: actualDeployedSha(),
         railwayIdentity,
@@ -218,10 +388,10 @@ function registerProductionScopeRemediationRoutes(router, deps) {
 
   router.post(
     '/admin/production-scope-remediation/backup',
-    guarded('backup', async (req, res, railwayIdentity) => {
+    guarded('backup', async (req, res, railwayIdentity, requestPlan) => {
       const result = await runner.runBackup({
         dbPath,
-        plan,
+        plan: requestPlan,
         expectedDeployedSha: req.body?.expectedDeployedSha,
         actualDeployedSha: actualDeployedSha(),
         conservationState: getConservationState(),
@@ -237,13 +407,14 @@ function registerProductionScopeRemediationRoutes(router, deps) {
 
   router.post(
     '/admin/production-scope-remediation/apply',
-    guarded('apply', async (req, res, railwayIdentity) => {
+    guarded('apply', async (req, res, railwayIdentity, requestPlan) => {
       const result = await runner.runApply({
         dbPath,
-        plan,
+        plan: requestPlan,
         receipt: req.body?.backup,
         expectedDeployedSha: req.body?.expectedDeployedSha,
         actualDeployedSha: actualDeployedSha(),
+        expectedAuthorityConfigChecksum: req.body?.expectedAuthorityConfigChecksum,
         expectedPlanChecksum: req.body?.expectedPlanChecksum,
         expectedStateFingerprint: req.body?.expectedStateFingerprint,
         expectedUserInventoryFingerprint: req.body?.expectedUserInventoryFingerprint,
@@ -263,10 +434,10 @@ function registerProductionScopeRemediationRoutes(router, deps) {
 
   router.post(
     '/admin/production-scope-remediation/verify',
-    guarded('verify', async (req, res, railwayIdentity) => {
+    guarded('verify', async (req, res, railwayIdentity, requestPlan) => {
       const result = await runner.runVerify({
         dbPath,
-        plan,
+        plan: requestPlan,
         receipt: req.body?.backup,
         expectedDeployedSha: req.body?.expectedDeployedSha,
         actualDeployedSha: actualDeployedSha(),
@@ -279,7 +450,10 @@ function registerProductionScopeRemediationRoutes(router, deps) {
 }
 
 module.exports = {
+  AUTHORIZED_BUNDLE_PIN_FILENAME,
   ProductionScopeRouteError,
+  buildProductionScopeConservationState,
+  readExpectedBundleFileSha256,
   registerProductionScopeRemediationRoutes,
   runtimeIdentityFromEnv,
   signedRailwayIdentity,

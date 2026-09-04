@@ -233,6 +233,7 @@ const { registerStaffRoutes } = require('./routes/staff');
 const { registerSystemRoutes } = require('./routes/system');
 const { registerSkytechCleanResetRoutes } = require('./routes/skytech-clean-reset');
 const {
+  buildProductionScopeConservationState,
   registerProductionScopeRemediationRoutes,
 } = require('./routes/production-scope-remediation');
 const { registerTasksCenterRoutes } = require('./routes/tasks-center');
@@ -1762,13 +1763,11 @@ registerProductionScopeRemediationRoutes(apiRouter, {
   createSqliteBackup,
   collections: JSON_COLLECTIONS,
   buildInfo: getBuildInfo,
-  getConservationState: () => ({
+  getConservationState: () => buildProductionScopeConservationState({
     appDisabled: appDisabledConfig.disabled,
     botDisabled: botDisabledConfig.disabled,
     gsmDisabled: gsmDisabledConfig.disabled,
     storageWriteGuardEnabled: productionScopeWriteFreezeEnabled,
-    cleanResetDisabled: process.env.SKYTECH_CLEAN_RESET_ENABLED !== 'true',
-    adminResetDisabled: !String(process.env.ADMIN_RESET_PASSWORD || ''),
   }),
 });
 

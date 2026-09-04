@@ -17,6 +17,14 @@ const {
   runPlatformIdentityBootstrap,
 } = require('./platform-identity-bootstrap');
 const {
+  APPROVAL_REFERENCE: IDENTITY_ONLY_APPROVAL_REFERENCE,
+  AUTHORITY: IDENTITY_ONLY_AUTHORITY,
+  COMPANY_ID: IDENTITY_ONLY_COMPANY_ID,
+  OWNER_MEMBERSHIP_ID: IDENTITY_ONLY_OWNER_MEMBERSHIP_ID,
+  OWNER_PRINCIPAL_ID: IDENTITY_ONLY_OWNER_PRINCIPAL_ID,
+  WRITE_MANIFEST: IDENTITY_ONLY_WRITE_MANIFEST,
+} = require('./identity-bootstrap-execution-bundle');
+const {
   applyProductionSmokeIdentityTransition,
   getProjectedSmokeIdentityUsers,
   planProductionSmokeIdentityTransition,
@@ -55,6 +63,13 @@ const IDENTITY_COUNT_TABLES = Object.freeze([
 const RECORD_ACTIONS = new Set(['UPDATE_SCOPE', 'LEAVE_UNSCOPED', 'UNRESOLVED']);
 const RELATION_ACTIONS = new Set(['RELINK', 'LEAVE_UNCHANGED', 'UNRESOLVED']);
 const RELATION_FIELDS = new Set(['clientId', 'counterpartyId']);
+const IDENTITY_ONLY_EXECUTION_SCOPE = 'IDENTITY_ONLY';
+const IDENTITY_ONLY_CREATE_TYPES = new Set([
+  'Company',
+  'Branch',
+  'RoleTemplate',
+  'Membership',
+]);
 
 class ProductionScopeRemediationError extends Error {
   constructor(code, message, blockers = []) {
@@ -93,7 +108,12 @@ function normalizedId(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function isIdentityOnlyPlan(plan) {
+  return plan?.executionScope === IDENTITY_ONLY_EXECUTION_SCOPE;
+}
+
 function targetCollectionsForPlan(plan = {}) {
+  if (isIdentityOnlyPlan(plan)) return [];
   const names = new Set(TARGET_COLLECTIONS);
   for (const mapping of [
     ...(Array.isArray(plan.recordMappings) ? plan.recordMappings : []),
@@ -109,6 +129,67 @@ function targetCollectionsForPlan(plan = {}) {
     if (name !== 'users') names.add(normalizedId(name));
   }
   return [...names].filter(Boolean).sort();
+}
+
+function validateIdentityOnlyInput(plan, blockers) {
+  if (!isIdentityOnlyPlan(plan)) return;
+  const config = plan?.authority?.identityBootstrap;
+  const authorityProjection = {
+    configVersion: config?.configVersion,
+    company: config?.company,
+    branches: config?.branches,
+    roleTemplates: config?.roleTemplates,
+    memberships: config?.memberships,
+    intentionallyUnmappedUserIds: config?.intentionallyUnmappedUserIds,
+  };
+  const expectedActorMappings = [
+    {
+      userId: IDENTITY_ONLY_OWNER_PRINCIPAL_ID,
+      action: 'CREATE_MEMBERSHIP',
+      membershipId: IDENTITY_ONLY_OWNER_MEMBERSHIP_ID,
+      companyId: IDENTITY_ONLY_COMPANY_ID,
+      tenantId: IDENTITY_ONLY_COMPANY_ID,
+    },
+    ...IDENTITY_ONLY_AUTHORITY.intentionallyUnmappedUserIds.map(userId => ({
+      userId,
+      action: 'NO_MEMBERSHIP',
+      candidateForProductionMembership: false,
+    })),
+  ];
+  if (
+    plan?.authority?.status !== 'APPROVED'
+    || plan?.authority?.companyId !== IDENTITY_ONLY_COMPANY_ID
+    || plan?.authority?.tenantId !== IDENTITY_ONLY_COMPANY_ID
+    || stableJson(authorityProjection) !== stableJson(IDENTITY_ONLY_AUTHORITY)
+    || config?.approval?.approvedBy !== IDENTITY_ONLY_OWNER_PRINCIPAL_ID
+    || config?.approval?.approvalReference !== IDENTITY_ONLY_APPROVAL_REFERENCE
+    || stableJson(plan?.actorMappings) !== stableJson(expectedActorMappings)
+  ) {
+    pushBlocker(blockers, 'IDENTITY_ONLY_AUTHORITY_MISMATCH');
+  }
+  const mappingFields = [
+    ['recordMappings', 'IDENTITY_ONLY_RECORD_MAPPINGS_FORBIDDEN'],
+    ['relationMappings', 'IDENTITY_ONLY_RELATION_MAPPINGS_FORBIDDEN'],
+  ];
+  for (const [field, code] of mappingFields) {
+    const value = plan?.[field];
+    if (value != null && (!Array.isArray(value) || value.length > 0)) {
+      pushBlocker(blockers, code);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(plan || {}, 'smokeIdentityTransition')) {
+    pushBlocker(blockers, 'IDENTITY_ONLY_SMOKE_IDENTITY_TRANSITION_FORBIDDEN');
+  }
+  for (const field of ['collectionCounts', 'collectionFingerprints']) {
+    for (const collection of Object.keys(plan?.expected?.[field] || {})) {
+      if (collection !== 'users') {
+        pushBlocker(blockers, 'IDENTITY_ONLY_COLLECTION_EXPECTATION_FORBIDDEN', {
+          field,
+          collection,
+        });
+      }
+    }
+  }
 }
 
 function validateTargetCollections(targetCollections, blockers) {
@@ -160,6 +241,15 @@ function readCollection(db, name) {
   } catch {
     return { exists: true, raw: row.json, value: null, error: 'COLLECTION_JSON_INVALID' };
   }
+}
+
+function appDataTableFingerprint(db) {
+  if (!tableExists(db, 'app_data')) return null;
+  const rows = prepareSqliteReadonlyStatement(
+    db,
+    'SELECT * FROM app_data ORDER BY name',
+  ).all();
+  return sha256(stableJson(rows));
 }
 
 function collectionFingerprint(value) {
@@ -266,7 +356,7 @@ function pushBlocker(blockers, code, details = {}) {
   blockers.push({ code, ...details });
 }
 
-function readObservedState(db, blockers, targetCollections) {
+function readObservedState(db, blockers, targetCollections, bindAppData = false) {
   if (!tableExists(db, 'app_data')) {
     pushBlocker(blockers, 'APP_DATA_TABLE_MISSING');
   }
@@ -287,6 +377,7 @@ function readObservedState(db, blockers, targetCollections) {
     users,
     dbIdentity: databaseIdentity(db),
     identityCounts: identityCounts(db),
+    appDataFingerprint: bindAppData ? appDataTableFingerprint(db) : null,
   };
 }
 
@@ -517,6 +608,38 @@ function identityCreateDiff(identityPlan, alreadyApplied) {
       value: { ...membership, companyId: normalized.company.id },
     })),
   ];
+}
+
+function validateIdentityOnlyProjection(
+  plan,
+  { create, updates, relinks, smokeIdentity },
+  blockers,
+) {
+  if (!isIdentityOnlyPlan(plan)) return;
+  for (const item of create) {
+    const invalidType = !IDENTITY_ONLY_CREATE_TYPES.has(item?.type);
+    const invalidBranch = item?.type === 'Branch'
+      && (item?.value?.isHeadOffice !== true || item?.value?.status !== 'active');
+    if (invalidType || invalidBranch) {
+      pushBlocker(blockers, 'IDENTITY_ONLY_CREATE_PROJECTION_FORBIDDEN', {
+        type: item?.type || null,
+        id: item?.id || null,
+      });
+    }
+  }
+  if (updates.length > 0) {
+    pushBlocker(blockers, 'IDENTITY_ONLY_UPDATE_PROJECTION_FORBIDDEN', {
+      count: updates.length,
+    });
+  }
+  if (relinks.length > 0) {
+    pushBlocker(blockers, 'IDENTITY_ONLY_RELINK_PROJECTION_FORBIDDEN', {
+      count: relinks.length,
+    });
+  }
+  if (smokeIdentity.enabled) {
+    pushBlocker(blockers, 'IDENTITY_ONLY_SMOKE_PROJECTION_FORBIDDEN');
+  }
 }
 
 function planIdentity(db, plan, observed, usersDirectorySnapshot, blockers, unresolved) {
@@ -856,16 +979,24 @@ function planProductionScopeRemediation({ db, plan }) {
   }
   const blockers = [];
   const unresolved = [];
+  const identityOnly = isIdentityOnlyPlan(plan);
+  validateIdentityOnlyInput(plan || {}, blockers);
   const targetCollections = targetCollectionsForPlan(plan);
   validateTargetCollections(targetCollections, blockers);
   if (plan?.planVersion !== 1 || !normalizedId(plan?.planId)) {
     pushBlocker(blockers, 'PLAN_IDENTITY_INVALID');
   }
-  const observed = readObservedState(db, blockers, targetCollections);
+  const observed = readObservedState(db, blockers, targetCollections, identityOnly);
   compareExpectedState(plan || {}, observed, blockers, targetCollections);
   validateBackup(plan || {}, blockers);
   validateCanonicalCompanyIdentity(plan || {}, blockers);
-  const smokeIdentity = planSmokeIdentity(plan || {}, observed, blockers);
+  const smokeIdentity = identityOnly
+    ? {
+      enabled: false,
+      preview: null,
+      effectiveUsers: Array.isArray(observed.users?.value) ? observed.users.value : [],
+    }
+    : planSmokeIdentity(plan || {}, observed, blockers);
   const effectiveUsersSnapshot = buildUsersDirectorySnapshot(smokeIdentity.effectiveUsers);
   const identity = planIdentity(
     db,
@@ -896,6 +1027,11 @@ function planProductionScopeRemediation({ db, plan }) {
     unresolved,
     targetCollections,
   );
+  validateIdentityOnlyProjection(
+    plan || {},
+    { create: identity.create, updates, relinks, smokeIdentity },
+    blockers,
+  );
   const uniqueBlockers = deduplicateBlockers(blockers);
   const blocked = uniqueBlockers.length > 0;
   const create = blocked ? [] : [
@@ -915,13 +1051,16 @@ function planProductionScopeRemediation({ db, plan }) {
       ? collectionFingerprint(observed.users.value)
       : null],
   ]);
-  const stateFingerprint = sha256(stableJson({
+  const stateBinding = {
     dbIdentity: observed.dbIdentity,
     identityCounts: observed.identityCounts,
     collectionFingerprints: observedFingerprints,
-  }));
+  };
+  if (identityOnly) stateBinding.appDataFingerprint = observed.appDataFingerprint;
+  const stateFingerprint = sha256(stableJson(stateBinding));
   const planChecksum = sha256(stableJson({ plan, stateFingerprint }));
   return {
+    ...(identityOnly ? { executionScope: IDENTITY_ONLY_EXECUTION_SCOPE } : {}),
     mode: 'dry-run',
     ok: !blocked,
     readyToApply: !blocked,
@@ -938,6 +1077,7 @@ function planProductionScopeRemediation({ db, plan }) {
         ['users', observed.users?.value?.length ?? null],
       ]),
       collectionFingerprints: observedFingerprints,
+      ...(identityOnly ? { appDataFingerprint: observed.appDataFingerprint } : {}),
       legacyCandidates: candidateKeys(observed.collections, targetCollections),
       metrics: stateMetrics(observed.collections, db, targetCollections),
       targetCollections,
@@ -979,6 +1119,19 @@ function persistCollectionDiff(db, initialPlan, faultInjector, mutationTimestamp
   const collectionRelinks = initialPlan.plannedDiff.RELINK.filter(item => (
     targetCollections.includes(item.collection)
   ));
+  if (
+    initialPlan?.executionScope === IDENTITY_ONLY_EXECUTION_SCOPE
+    && (
+      targetCollections.length > 0
+      || collectionUpdates.length > 0
+      || collectionRelinks.length > 0
+    )
+  ) {
+    throw new ProductionScopeRemediationError(
+      'IDENTITY_ONLY_NON_IDENTITY_MUTATION_FORBIDDEN',
+      'Identity-only execution cannot persist app_data collection changes.',
+    );
+  }
   const changedCollections = new Set([
     ...collectionUpdates.map(item => item.collection),
     ...collectionRelinks.map(item => item.collection),
@@ -1024,6 +1177,30 @@ function persistCollectionDiff(db, initialPlan, faultInjector, mutationTimestamp
   return writes;
 }
 
+function assertIdentityOnlyApplyBoundary(plan, preview) {
+  if (!isIdentityOnlyPlan(plan)) return;
+  const invalidCreate = preview.plannedDiff.CREATE.some(item => (
+    !IDENTITY_ONLY_CREATE_TYPES.has(item?.type)
+    || (
+      item?.type === 'Branch'
+      && (item?.value?.isHeadOffice !== true || item?.value?.status !== 'active')
+    )
+  ));
+  if (
+    preview.observed.targetCollections.length > 0
+    || preview.smokeIdentity.enabled
+    || invalidCreate
+    || preview.plannedDiff.UPDATE.length > 0
+    || preview.plannedDiff.RELINK.length > 0
+    || !/^[a-f0-9]{64}$/.test(preview.observed.appDataFingerprint || '')
+  ) {
+    throw new ProductionScopeRemediationError(
+      'IDENTITY_ONLY_NON_IDENTITY_MUTATION_FORBIDDEN',
+      'Identity-only execution contains a non-identity mutation projection.',
+    );
+  }
+}
+
 function applyProductionScopeRemediation({
   db,
   plan,
@@ -1040,6 +1217,18 @@ function applyProductionScopeRemediation({
       'Production scope remediation requires explicit apply confirmation.',
     );
   }
+  if (isIdentityOnlyPlan(plan)) {
+    // Loaded lazily because execution-plan-bundle depends on stableJson from
+    // this module. Only a fully validated, authorized exact bundle can place
+    // an identity plan in the module-private authorization WeakSet.
+    const { isAuthorizedIdentityExecutionPlan } = require('./production-scope-execution-plan-bundle');
+    if (!isAuthorizedIdentityExecutionPlan(plan)) {
+      throw new ProductionScopeRemediationError(
+        'IDENTITY_ONLY_AUTHORIZED_EXECUTION_BUNDLE_REQUIRED',
+        'Identity-only apply requires a plan produced by exact authorized bundle validation.',
+      );
+    }
+  }
   const preview = planProductionScopeRemediation({ db, plan });
   if (!preview.readyToApply) {
     throw new ProductionScopeRemediationError(
@@ -1054,6 +1243,7 @@ function applyProductionScopeRemediation({
       'Production scope remediation plan checksum confirmation mismatch.',
     );
   }
+  assertIdentityOnlyApplyBoundary(plan, preview);
   const beforeTotalChanges = sqliteTotalChanges(db);
   const execute = db.transaction(() => {
     if (typeof transactionalGuard === 'function') transactionalGuard();
@@ -1065,6 +1255,7 @@ function applyProductionScopeRemediation({
         live.blockers,
       );
     }
+    assertIdentityOnlyApplyBoundary(plan, live);
     const bootstrapConfig = plan.authority.identityBootstrap;
     const bootstrapTimestamp = normalizedId(plan.backup?.timestamp);
     const smokeIdentityResult = live.smokeIdentity.enabled
@@ -1100,6 +1291,15 @@ function applyProductionScopeRemediation({
     if (typeof afterWrites === 'function') afterWrites({ bootstrapResult, collectionWrites });
     const postState = planProductionScopeRemediation({ db, plan });
     if (
+      isIdentityOnlyPlan(plan)
+      && postState.observed.appDataFingerprint !== live.observed.appDataFingerprint
+    ) {
+      throw new ProductionScopeRemediationError(
+        'IDENTITY_ONLY_APP_DATA_MUTATION_DETECTED',
+        'Identity-only execution changed app_data.',
+      );
+    }
+    if (
       !postState.readyToApply
       || postState.plannedDiff.CREATE.length !== 0
       || postState.plannedDiff.UPDATE.length !== 0
@@ -1115,6 +1315,29 @@ function applyProductionScopeRemediation({
     if (typeof transactionalPostGuard === 'function') transactionalPostGuard();
     if (typeof faultInjector === 'function') {
       faultInjector({ stage: 'before_commit', bootstrapResult, collectionWrites });
+    }
+    if (
+      isIdentityOnlyPlan(plan)
+      && appDataTableFingerprint(db) !== live.observed.appDataFingerprint
+    ) {
+      throw new ProductionScopeRemediationError(
+        'IDENTITY_ONLY_APP_DATA_MUTATION_DETECTED',
+        'Identity-only execution changed app_data.',
+      );
+    }
+    if (isIdentityOnlyPlan(plan)) {
+      const identityWriteCount = sqliteTotalChanges(db) - beforeTotalChanges;
+      if (
+        identityWriteCount !== IDENTITY_ONLY_WRITE_MANIFEST.expectedSqliteTotalChanges
+        || collectionWrites !== IDENTITY_ONLY_WRITE_MANIFEST.collectionWriteCount
+        || bootstrapResult.status !== 'succeeded'
+        || smokeIdentityResult.status !== 'noop'
+      ) {
+        throw new ProductionScopeRemediationError(
+          'IDENTITY_ONLY_SQL_WRITE_MANIFEST_MISMATCH',
+          'Identity-only execution differed from the sealed exact SQL/write manifest.',
+        );
+      }
     }
     return { bootstrapResult, collectionWrites, smokeIdentityResult };
   });
@@ -1133,6 +1356,7 @@ function applyProductionScopeRemediation({
 }
 
 module.exports = {
+  IDENTITY_ONLY_EXECUTION_SCOPE,
   IDENTITY_COUNT_TABLES,
   ProductionScopeRemediationError,
   TARGET_COLLECTIONS,

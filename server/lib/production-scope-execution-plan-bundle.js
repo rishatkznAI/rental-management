@@ -7,8 +7,19 @@ const {
 } = require('./production-scope-evidence-builder');
 const { stableJsonSha256: baselineStableJsonSha256 } = require('./production-scope-baseline-contract');
 const { classificationAuthoritySnapshot } = require('./production-scope-evidence-classification');
+const {
+  APPROVAL_REFERENCE: IDENTITY_ONLY_APPROVAL_REFERENCE,
+  AUTHORITY: IDENTITY_ONLY_AUTHORITY,
+  COMPANY_ID: IDENTITY_ONLY_COMPANY_ID,
+  EXPECTED_ROW_COUNT_DELTAS: IDENTITY_ONLY_ROW_COUNT_DELTAS,
+  HEAD_OFFICE_ID: IDENTITY_ONLY_HEAD_OFFICE_ID,
+  OWNER_MEMBERSHIP_ID: IDENTITY_ONLY_OWNER_MEMBERSHIP_ID,
+  OWNER_PRINCIPAL_ID: IDENTITY_ONLY_OWNER_PRINCIPAL_ID,
+} = require('./identity-bootstrap-execution-bundle');
 
 const BUNDLE_VERSION = 1;
+const IDENTITY_ONLY_EXECUTION_SCOPE = 'IDENTITY_ONLY';
+const authorizedIdentityExecutionPlans = new WeakSet();
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SHA40_PATTERN = /^[a-f0-9]{40}$/;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -19,6 +30,8 @@ const AUTHORIZATION_KEYS = new Set([
   'approvalReference',
   'approvedAt',
   'approvedBy',
+  'authorityConfigChecksum',
+  'authorizedExecutionSha',
   'captureDeployedSha',
   'independentAuditVerdict',
   'reviewBundleFileSha256',
@@ -27,6 +40,43 @@ const AUTHORIZATION_KEYS = new Set([
   'scopeManifestSha256',
   'simulationOneSha256',
   'simulationTwoSha256',
+]);
+const IDENTITY_ONLY_UNMAPPED_PRINCIPAL_IDS = Object.freeze([
+  ...IDENTITY_ONLY_AUTHORITY.intentionallyUnmappedUserIds,
+]);
+const IDENTITY_ONLY_BUNDLE_KEYS = Object.freeze([
+  'authorization',
+  'bundleSha256',
+  'bundleVersion',
+  'evidence',
+  'executionPlan',
+  'executionPlanSha256',
+  'platformDefaultTenantOverlaySemantics',
+  'productionExecutionAuthorized',
+  'recordBindings',
+  'scopeManifestSha256',
+  'source',
+  'sourceBindingsFingerprint',
+  'status',
+  'summary',
+]);
+const IDENTITY_ONLY_PLAN_KEYS = Object.freeze([
+  'actorMappings',
+  'authority',
+  'backup',
+  'exactSourceBinding',
+  'executionScope',
+  'expected',
+  'manifestVersion',
+  'planId',
+  'planVersion',
+  'platformDefaultTenantOverlaySemantics',
+  'productionExecutionAuthorized',
+  'recordMappings',
+  'relationMappings',
+  'scopeManifestSha256',
+  'sourceBindingsFingerprint',
+  'sourceDbPath',
 ]);
 
 class ProductionScopeExecutionBundleError extends Error {
@@ -90,6 +140,482 @@ function fail(code, message) {
   throw new ProductionScopeExecutionBundleError(code, message);
 }
 
+function isIdentityOnlyPlan(plan) {
+  return plan?.executionScope === IDENTITY_ONLY_EXECUTION_SCOPE;
+}
+
+function isAuthorizedIdentityExecutionPlan(plan) {
+  return Boolean(plan && authorizedIdentityExecutionPlans.has(plan));
+}
+
+function inheritAuthorizedIdentityExecutionPlan(basePlan, derivedPlan) {
+  if (
+    !isIdentityOnlyPlan(basePlan)
+    || !isIdentityOnlyPlan(derivedPlan)
+    || !isAuthorizedIdentityExecutionPlan(basePlan)
+  ) return derivedPlan;
+  const projected = clone(derivedPlan);
+  projected.backup = clone(basePlan.backup);
+  if (projected.authority?.identityBootstrap?.approval) {
+    projected.authority.identityBootstrap.approval.backupReference = (
+      basePlan.authority.identityBootstrap.approval.backupReference
+    );
+  }
+  if (stableJson(projected) === stableJson(basePlan)) {
+    authorizedIdentityExecutionPlans.add(derivedPlan);
+  }
+  return derivedPlan;
+}
+
+function exactObjectKeys(value, expectedKeys, code, label) {
+  const keys = value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.keys(value).sort()
+    : [];
+  const expected = [...expectedKeys].sort();
+  if (stableJson(keys) !== stableJson(expected)) {
+    fail(code, `${label} contains missing or unapproved fields.`);
+  }
+}
+
+function exactValue(value, expected, code, message) {
+  if (stableJson(value) !== stableJson(expected)) fail(code, message);
+}
+
+function validateIdentityOnlyBootstrapConfig(config, source) {
+  exactObjectKeys(
+    config,
+    [
+      'approval',
+      'branches',
+      'company',
+      'configVersion',
+      'intentionallyUnmappedUserIds',
+      'memberships',
+      'roleTemplates',
+    ],
+    'IDENTITY_ONLY_BOOTSTRAP_SHAPE_INVALID',
+    'The identity-only bootstrap config',
+  );
+  exactValue(
+    {
+      configVersion: config.configVersion,
+      company: config.company,
+      branches: config.branches,
+      roleTemplates: config.roleTemplates,
+      memberships: config.memberships,
+      intentionallyUnmappedUserIds: config.intentionallyUnmappedUserIds,
+    },
+    IDENTITY_ONLY_AUTHORITY,
+    'IDENTITY_ONLY_BOOTSTRAP_AUTHORITY_MISMATCH',
+    'The identity-only bootstrap differs from the exact owner-approved authority.',
+  );
+  exactObjectKeys(
+    config.approval,
+    [
+      'approvalReference',
+      'approvedAt',
+      'approvedBy',
+      'backupReference',
+      'configChecksum',
+      'schemaFingerprint',
+    ],
+    'IDENTITY_ONLY_BOOTSTRAP_APPROVAL_INVALID',
+    'The identity-only bootstrap approval',
+  );
+  const approvedAt = exactText(config.approval.approvedAt);
+  if (
+    config.approval.approvedBy !== IDENTITY_ONLY_OWNER_PRINCIPAL_ID
+    || config.approval.approvalReference !== IDENTITY_ONLY_APPROVAL_REFERENCE
+    || config.approval.backupReference !== 'PENDING_VERIFIED_PRODUCTION_BACKUP'
+    || !Number.isFinite(Date.parse(approvedAt))
+    || new Date(approvedAt).toISOString() !== approvedAt
+    || !SHA256_PATTERN.test(exactText(config.approval.configChecksum))
+    || !SHA256_PATTERN.test(exactText(config.approval.schemaFingerprint))
+    || config.approval.schemaFingerprint !== source.schemaFingerprint
+  ) {
+    fail(
+      'IDENTITY_ONLY_BOOTSTRAP_APPROVAL_INVALID',
+      'The identity-only bootstrap approval or source-schema binding is invalid.',
+    );
+  }
+}
+
+function validateIdentityOnlyExpectedState(expected, source) {
+  exactObjectKeys(
+    expected,
+    ['collectionCounts', 'collectionFingerprints', 'dbIdentity', 'identityCounts'],
+    'IDENTITY_ONLY_EXPECTED_STATE_INVALID',
+    'The identity-only expected state',
+  );
+  exactObjectKeys(
+    expected.dbIdentity,
+    ['applicationId', 'pageSize', 'schemaFingerprint', 'userVersion'],
+    'IDENTITY_ONLY_DATABASE_IDENTITY_INVALID',
+    'The identity-only database identity',
+  );
+  if (
+    !Number.isSafeInteger(expected.dbIdentity.applicationId)
+    || !Number.isSafeInteger(expected.dbIdentity.pageSize)
+    || expected.dbIdentity.pageSize <= 0
+    || !Number.isSafeInteger(expected.dbIdentity.userVersion)
+    || expected.dbIdentity.schemaFingerprint !== source.schemaFingerprint
+  ) {
+    fail('IDENTITY_ONLY_DATABASE_IDENTITY_INVALID', 'The identity-only database identity is invalid.');
+  }
+  exactObjectKeys(
+    expected.identityCounts,
+    Object.keys(IDENTITY_ONLY_ROW_COUNT_DELTAS),
+    'IDENTITY_ONLY_IDENTITY_COUNTS_INVALID',
+    'The identity-only relational count binding',
+  );
+  exactValue(
+    expected.identityCounts,
+    Object.fromEntries(Object.entries(IDENTITY_ONLY_ROW_COUNT_DELTAS).map(
+      ([table, delta]) => [table, delta === 0 ? [0] : [0, delta]],
+    )),
+    'IDENTITY_ONLY_IDENTITY_COUNTS_INVALID',
+    'The identity-only relational count deltas are not exact.',
+  );
+  exactObjectKeys(
+    expected.collectionCounts,
+    ['users'],
+    'IDENTITY_ONLY_COLLECTION_EXPECTATION_INVALID',
+    'The identity-only collection count binding',
+  );
+  exactObjectKeys(
+    expected.collectionFingerprints,
+    ['users'],
+    'IDENTITY_ONLY_COLLECTION_EXPECTATION_INVALID',
+    'The identity-only collection fingerprint binding',
+  );
+  const userCounts = Array.isArray(expected.collectionCounts.users)
+    ? expected.collectionCounts.users
+    : [expected.collectionCounts.users];
+  const userFingerprints = Array.isArray(expected.collectionFingerprints.users)
+    ? expected.collectionFingerprints.users
+    : [expected.collectionFingerprints.users];
+  if (
+    userCounts.length !== 1
+    || !Number.isSafeInteger(userCounts[0])
+    || userCounts[0] < 5
+    || userFingerprints.length !== 1
+    || !SHA256_PATTERN.test(exactText(userFingerprints[0]))
+  ) {
+    fail(
+      'IDENTITY_ONLY_COLLECTION_EXPECTATION_INVALID',
+      'Identity-only execution may bind only one exact users-directory source state.',
+    );
+  }
+}
+
+function validateIdentityOnlyActorMappings(actorMappings) {
+  exactValue(
+    actorMappings,
+    [
+      {
+        userId: IDENTITY_ONLY_OWNER_PRINCIPAL_ID,
+        action: 'CREATE_MEMBERSHIP',
+        membershipId: IDENTITY_ONLY_OWNER_MEMBERSHIP_ID,
+        companyId: IDENTITY_ONLY_COMPANY_ID,
+        tenantId: IDENTITY_ONLY_COMPANY_ID,
+      },
+      ...IDENTITY_ONLY_UNMAPPED_PRINCIPAL_IDS.map(userId => ({
+        userId,
+        action: 'NO_MEMBERSHIP',
+        candidateForProductionMembership: false,
+      })),
+    ],
+    'IDENTITY_ONLY_ACTOR_MAPPINGS_INVALID',
+    'The identity-only actor mappings differ from the exact approved principal dispositions.',
+  );
+}
+
+function validateIdentityOnlyPlanAndBundle(bundle, plan, source, evidence) {
+  exactObjectKeys(
+    bundle,
+    IDENTITY_ONLY_BUNDLE_KEYS,
+    'IDENTITY_ONLY_BUNDLE_SHAPE_INVALID',
+    'The identity-only bundle',
+  );
+  exactObjectKeys(
+    plan,
+    IDENTITY_ONLY_PLAN_KEYS,
+    'IDENTITY_ONLY_PLAN_MUTATION_FIELD_FORBIDDEN',
+    'The identity-only plan',
+  );
+  if (
+    plan.executionScope !== IDENTITY_ONLY_EXECUTION_SCOPE
+    || plan.planVersion !== 1
+    || !exactText(plan.planId)
+    || Object.prototype.hasOwnProperty.call(plan, 'smokeIdentityTransition')
+  ) {
+    fail('IDENTITY_ONLY_PLAN_SHAPE_INVALID', 'The identity-only plan identity or scope is invalid.');
+  }
+  if (
+    !Array.isArray(plan.recordMappings)
+    || plan.recordMappings.length !== 0
+    || !Array.isArray(plan.relationMappings)
+    || plan.relationMappings.length !== 0
+    || !Array.isArray(bundle.recordBindings)
+    || bundle.recordBindings.length !== 0
+  ) {
+    fail(
+      'IDENTITY_ONLY_DATA_MAPPING_FORBIDDEN',
+      'Identity-only execution cannot carry record, relation, or manifest record bindings.',
+    );
+  }
+  exactObjectKeys(
+    plan.authority,
+    ['companyId', 'identityBootstrap', 'status', 'tenantId'],
+    'IDENTITY_ONLY_AUTHORITY_INVALID',
+    'The identity-only authority',
+  );
+  if (
+    plan.authority.status !== 'APPROVED'
+    || plan.authority.companyId !== IDENTITY_ONLY_COMPANY_ID
+    || plan.authority.tenantId !== IDENTITY_ONLY_COMPANY_ID
+  ) {
+    fail('IDENTITY_ONLY_AUTHORITY_INVALID', 'The identity-only company authority is invalid.');
+  }
+  validateIdentityOnlyBootstrapConfig(plan.authority.identityBootstrap, source);
+  validateIdentityOnlyExpectedState(plan.expected, source);
+  validateIdentityOnlyActorMappings(plan.actorMappings);
+  exactObjectKeys(
+    plan.backup,
+    ['reference', 'sha256', 'sizeBytes', 'sourceDbIdentity', 'timestamp', 'verified'],
+    'IDENTITY_ONLY_BACKUP_STATE_INVALID',
+    'The identity-only backup state',
+  );
+  exactValue(
+    plan.backup,
+    {
+      verified: false,
+      reference: null,
+      sourceDbIdentity: null,
+      timestamp: null,
+      sizeBytes: null,
+      sha256: null,
+    },
+    'IDENTITY_ONLY_BACKUP_STATE_INVALID',
+    'A review-only identity bundle must leave the fresh backup receipt unresolved.',
+  );
+  exactObjectKeys(
+    source,
+    [
+      'captureDeployedSha',
+      'captureDeploymentId',
+      'databaseContentFingerprint',
+      'deploymentIdentity',
+      'railwayIdentity',
+      'schemaFingerprint',
+      'sourceFileSetHash',
+      'sourceObservedFileSetHash',
+      'sourceSnapshotHash',
+    ],
+    'IDENTITY_ONLY_SOURCE_SHAPE_INVALID',
+    'The identity-only source binding',
+  );
+  exactObjectKeys(
+    source.railwayIdentity,
+    [
+      'environmentId',
+      'projectId',
+      'serviceId',
+      'volumeId',
+      'volumeMountPath',
+      'volumeName',
+    ],
+    'IDENTITY_ONLY_SOURCE_SHAPE_INVALID',
+    'The identity-only Railway source binding',
+  );
+  exactObjectKeys(
+    source.deploymentIdentity,
+    ['deploymentInstanceId', 'serviceInstanceId'],
+    'IDENTITY_ONLY_SOURCE_SHAPE_INVALID',
+    'The identity-only deployment source binding',
+  );
+  exactObjectKeys(
+    evidence,
+    [
+      'approvedReconciliationFingerprint',
+      'artifactIndexSha256',
+      'baselineContractSha256',
+      'candidateAuthoritySha256',
+      'candidateKeySetSha256',
+      'canonicalScopeSha256',
+      'classificationAuthorityFingerprint',
+      'packFingerprint',
+      'platformDefaultTenantOverlaySemantics',
+      'reviewedPlanFileSha256',
+      'sourceBindingsFingerprint',
+    ],
+    'IDENTITY_ONLY_EVIDENCE_SHAPE_INVALID',
+    'The identity-only evidence binding',
+  );
+  exactObjectKeys(
+    bundle.summary,
+    [
+      'classifiedRecordCount',
+      'collectionWriteCounts',
+      'executionRecordMappingCount',
+      'globalReferenceCollectionCount',
+      'operationCounts',
+      'registryEntryCount',
+      'registryWriteCount',
+      'semanticScopeWriteCount',
+    ],
+    'IDENTITY_ONLY_WRITE_SUMMARY_INVALID',
+    'The identity-only write summary',
+  );
+  if (
+    bundle.summary.registryEntryCount !== 0
+    || bundle.summary.registryWriteCount !== 0
+    || bundle.summary.classifiedRecordCount !== 0
+    || bundle.summary.executionRecordMappingCount !== 0
+    || bundle.summary.semanticScopeWriteCount !== 0
+    || bundle.summary.globalReferenceCollectionCount !== 0
+    || stableJson(bundle.summary.operationCounts) !== '{}'
+    || stableJson(bundle.summary.collectionWriteCounts) !== '{}'
+  ) {
+    fail(
+      'IDENTITY_ONLY_WRITE_SUMMARY_INVALID',
+      'Identity-only execution must have zero registry, semantic-scope, and collection writes.',
+    );
+  }
+  if (stableJson(plan.exactSourceBinding) !== stableJson({ source, evidence })) {
+    fail('IDENTITY_ONLY_SOURCE_BINDING_INVALID', 'The identity-only source binding is not exact.');
+  }
+}
+
+function validateIdentityOnlyManifestForBuild(manifest) {
+  exactObjectKeys(
+    manifest,
+    [
+      'blockers',
+      'canonicalScope',
+      'evidence',
+      'identity',
+      'manifestSha256',
+      'manifestVersion',
+      'platformDefaultTenantOverlaySemantics',
+      'productionExecutionAuthorized',
+      'records',
+      'registry',
+      'source',
+      'status',
+      'summary',
+    ],
+    'IDENTITY_ONLY_MANIFEST_MUTATION_FIELD_FORBIDDEN',
+    'The identity-only manifest',
+  );
+  const projected = JSON.parse(JSON.stringify(manifest));
+  delete projected.manifestSha256;
+  if (sha256(stableJson(projected)) !== manifest.manifestSha256) {
+    fail('IDENTITY_ONLY_MANIFEST_HASH_MISMATCH', 'The exact identity-only manifest hash is inconsistent.');
+  }
+  exactValue(
+    manifest.canonicalScope,
+    { companyId: IDENTITY_ONLY_COMPANY_ID, tenantId: IDENTITY_ONLY_COMPANY_ID },
+    'IDENTITY_ONLY_MANIFEST_AUTHORITY_INVALID',
+    'The identity-only manifest has a different company authority.',
+  );
+  exactObjectKeys(
+    manifest.identity,
+    ['reviewedPlanFileSha256'],
+    'IDENTITY_ONLY_MANIFEST_IDENTITY_INVALID',
+    'The identity-only manifest identity binding',
+  );
+  exactObjectKeys(
+    manifest.source,
+    [
+      'captureDeployedSha',
+      'captureDeploymentId',
+      'databaseContentFingerprint',
+      'deploymentIdentity',
+      'railwayIdentity',
+      'schemaFingerprint',
+      'sourceFileSetHash',
+      'sourceObservedFileSetHash',
+      'sourceSnapshotHash',
+    ],
+    'IDENTITY_ONLY_MANIFEST_MUTATION_FIELD_FORBIDDEN',
+    'The identity-only manifest source binding',
+  );
+  exactObjectKeys(
+    manifest.source.railwayIdentity,
+    [
+      'environmentId',
+      'projectId',
+      'serviceId',
+      'volumeId',
+      'volumeMountPath',
+      'volumeName',
+    ],
+    'IDENTITY_ONLY_MANIFEST_MUTATION_FIELD_FORBIDDEN',
+    'The identity-only manifest Railway source binding',
+  );
+  exactObjectKeys(
+    manifest.source.deploymentIdentity,
+    ['deploymentInstanceId', 'serviceInstanceId'],
+    'IDENTITY_ONLY_MANIFEST_MUTATION_FIELD_FORBIDDEN',
+    'The identity-only manifest deployment source binding',
+  );
+  exactObjectKeys(
+    manifest.registry,
+    ['entryCount', 'globalReferenceCollectionCount'],
+    'IDENTITY_ONLY_MANIFEST_MUTATION_FIELD_FORBIDDEN',
+    'The identity-only manifest registry summary',
+  );
+  exactObjectKeys(
+    manifest.evidence,
+    [
+      'approvedReconciliationFingerprint',
+      'artifactIndexSha256',
+      'baselineContractSha256',
+      'candidateAuthoritySha256',
+      'candidateKeySetSha256',
+      'canonicalScopeSha256',
+      'classificationAuthorityFingerprint',
+      'packFingerprint',
+      'platformDefaultTenantOverlaySemantics',
+      'sourceBindingsFingerprint',
+    ],
+    'IDENTITY_ONLY_MANIFEST_MUTATION_FIELD_FORBIDDEN',
+    'The identity-only manifest evidence binding',
+  );
+  exactObjectKeys(
+    manifest.summary,
+    [
+      'classifiedRecordCount',
+      'collectionWriteCounts',
+      'operationCounts',
+      'semanticScopeWriteCount',
+      'unresolvedRecordCount',
+    ],
+    'IDENTITY_ONLY_MANIFEST_MUTATION_FIELD_FORBIDDEN',
+    'The identity-only manifest write summary',
+  );
+  if (
+    !SHA256_PATTERN.test(exactText(manifest.identity.reviewedPlanFileSha256))
+    || !Array.isArray(manifest.blockers)
+    || manifest.blockers.length !== 0
+    || !Array.isArray(manifest.records)
+    || manifest.records.length !== 0
+    || manifest.registry?.entryCount !== 0
+    || manifest.registry?.globalReferenceCollectionCount !== 0
+    || manifest.summary?.classifiedRecordCount !== 0
+    || manifest.summary?.semanticScopeWriteCount !== 0
+    || manifest.summary?.unresolvedRecordCount !== 0
+    || stableJson(manifest.summary?.operationCounts) !== '{}'
+    || stableJson(manifest.summary?.collectionWriteCounts) !== '{}'
+  ) {
+    fail(
+      'IDENTITY_ONLY_MANIFEST_WRITE_SCOPE_INVALID',
+      'The identity-only manifest must contain no registry, record, semantic-scope, or collection write.',
+    );
+  }
+}
+
 function validateAuthorizationBinding(authorization, bundle) {
   if (!authorization || typeof authorization !== 'object' || Array.isArray(authorization)) {
     fail('EXECUTION_AUTHORIZATION_EVIDENCE_REQUIRED', 'Authorized execution requires exact approval evidence.');
@@ -120,6 +646,28 @@ function validateAuthorizationBinding(authorization, bundle) {
     || authorization.scopeManifestSha256 !== bundle.scopeManifestSha256
   ) {
     fail('EXECUTION_AUTHORIZATION_BINDING_MISMATCH', 'The execution approval does not bind the reviewed source bundle.');
+  }
+  const identityOnly = isIdentityOnlyPlan(bundle.executionPlan);
+  if (identityOnly && (
+    !SHA40_PATTERN.test(exactText(authorization.authorizedExecutionSha))
+    || authorization.authorizedExecutionSha !== bundle.source?.captureDeployedSha
+    || !SHA256_PATTERN.test(exactText(authorization.authorityConfigChecksum))
+    || authorization.authorityConfigChecksum
+      !== bundle.executionPlan?.authority?.identityBootstrap?.approval?.configChecksum
+  )) {
+    fail(
+      'IDENTITY_ONLY_EXECUTION_AUTHORIZATION_BINDING_INVALID',
+      'Identity-only authorization requires the exact execution SHA and authority checksum.',
+    );
+  }
+  if (!identityOnly && (
+    Object.prototype.hasOwnProperty.call(authorization, 'authorizedExecutionSha')
+    || Object.prototype.hasOwnProperty.call(authorization, 'authorityConfigChecksum')
+  )) {
+    fail(
+      'EXECUTION_AUTHORIZATION_SCOPE_FIELDS_FORBIDDEN',
+      'Identity-only authorization fields are forbidden for a generic scope bundle.',
+    );
   }
 }
 
@@ -265,23 +813,31 @@ function validateProductionScopeExecutionBundle(bundle, { requireAuthorized = fa
   const recordMappings = Array.isArray(plan.recordMappings) ? plan.recordMappings : [];
   const actorMappings = Array.isArray(plan.actorMappings) ? plan.actorMappings : [];
   const recordBindings = Array.isArray(bundle.recordBindings) ? bundle.recordBindings : [];
+  const identityOnly = isIdentityOnlyPlan(plan);
+  // Identity-only changes mapping rules, never the common source, authority,
+  // classification, tenant-overlay, target, or review-authorization guards above.
+  if (identityOnly) {
+    validateIdentityOnlyPlanAndBundle(bundle, plan, source, evidence);
+  }
   if (
-    !Number.isSafeInteger(bundle.summary?.registryEntryCount)
-    || bundle.summary.registryEntryCount <= 0
-    ||
-    recordMappings.length !== bundle.summary?.executionRecordMappingCount
-    || recordBindings.length !== bundle.summary?.classifiedRecordCount
-    || recordMappings.filter(row => row?.action === 'UPDATE_SCOPE').length
-      !== recordBindings.filter(row => ['UPDATE_SCOPE', 'VERIFY_SCOPE'].includes(row?.operation)).length
-    || recordBindings.filter(row => row?.operation === 'UPDATE_SCOPE').length
-      !== bundle.summary?.semanticScopeWriteCount
-    || bundle.summary?.globalReferenceCollectionCount !== 0
-    || recordMappings.some(row => !['UPDATE_SCOPE', 'LEAVE_UNSCOPED'].includes(row?.action))
-    || actorMappings.some(row => !['CREATE_MEMBERSHIP', 'NO_MEMBERSHIP'].includes(row?.action))
+    !identityOnly
+    && (
+      !Number.isSafeInteger(bundle.summary?.registryEntryCount)
+      || bundle.summary.registryEntryCount <= 0
+      || recordMappings.length !== bundle.summary?.executionRecordMappingCount
+      || recordBindings.length !== bundle.summary?.classifiedRecordCount
+      || recordMappings.filter(row => row?.action === 'UPDATE_SCOPE').length
+        !== recordBindings.filter(row => ['UPDATE_SCOPE', 'VERIFY_SCOPE'].includes(row?.operation)).length
+      || recordBindings.filter(row => row?.operation === 'UPDATE_SCOPE').length
+        !== bundle.summary?.semanticScopeWriteCount
+      || bundle.summary?.globalReferenceCollectionCount !== 0
+      || recordMappings.some(row => !['UPDATE_SCOPE', 'LEAVE_UNSCOPED'].includes(row?.action))
+      || actorMappings.some(row => !['CREATE_MEMBERSHIP', 'NO_MEMBERSHIP'].includes(row?.action))
+    )
   ) {
     fail('EXECUTION_MAPPING_COVERAGE_INVALID', 'The execution mappings are incomplete or unresolved.');
   }
-  for (const row of recordMappings) {
+  for (const row of identityOnly ? [] : recordMappings) {
     if (
       !normalizedText(row.collection)
       || !normalizedText(row.id)
@@ -301,7 +857,7 @@ function validateProductionScopeExecutionBundle(bundle, { requireAuthorized = fa
     }
   }
   const bindingByKey = new Map();
-  for (const row of recordBindings) {
+  for (const row of identityOnly ? [] : recordBindings) {
     const key = `${normalizedText(row?.collection)}:${normalizedText(row?.recordId)}`;
     if (
       !normalizedText(row?.collection)
@@ -326,7 +882,7 @@ function validateProductionScopeExecutionBundle(bundle, { requireAuthorized = fa
     }
     bindingByKey.set(key, row);
   }
-  for (const mapping of recordMappings) {
+  for (const mapping of identityOnly ? [] : recordMappings) {
     const binding = bindingByKey.get(`${mapping.collection}:${mapping.id}`);
     const expectedAction = ['UPDATE_SCOPE', 'VERIFY_SCOPE'].includes(binding?.operation)
       ? 'UPDATE_SCOPE'
@@ -340,18 +896,22 @@ function validateProductionScopeExecutionBundle(bundle, { requireAuthorized = fa
       fail('EXECUTION_RECORD_MANIFEST_MISMATCH', 'An execution mapping differs from its manifest binding.');
     }
   }
-  if (!plan.smokeIdentityTransition || !plan.authority?.identityBootstrap) {
+  if (!identityOnly && (!plan.smokeIdentityTransition || !plan.authority?.identityBootstrap)) {
     fail('EXECUTION_IDENTITY_BINDING_INVALID', 'The smoke transition or identity bootstrap is missing.');
   }
   const forbiddenPath = forbiddenKeyPath(bundle);
   if (forbiddenPath) {
     fail('EXECUTION_BUNDLE_SECRET_FIELD_FORBIDDEN', `Forbidden field in exact execution bundle: ${forbiddenPath}.`);
   }
+  const validatedPlan = deepFreeze(clone(plan));
+  if (requireAuthorized && authorized && identityOnly) {
+    authorizedIdentityExecutionPlans.add(validatedPlan);
+  }
   return deepFreeze({
     authorized,
     bundleSha256: bundle.bundleSha256,
     executionPlanSha256: bundle.executionPlanSha256,
-    plan: clone(plan),
+    plan: validatedPlan,
   });
 }
 
@@ -366,6 +926,8 @@ function buildProductionScopeExecutionBundle({ plan, manifest }) {
   ) {
     fail('EXECUTION_BUNDLE_INPUT_INVALID', 'A reviewed, non-authorizing v2 manifest and plan are required.');
   }
+  const identityOnly = isIdentityOnlyPlan(plan);
+  if (identityOnly) validateIdentityOnlyManifestForBuild(manifest);
   let currentSourceBindingsFingerprint;
   try {
     currentSourceBindingsFingerprint = currentRepositorySourceBindingsFingerprint();
@@ -447,6 +1009,7 @@ function buildProductionScopeExecutionBundle({ plan, manifest }) {
     evidence,
     summary: {
       registryEntryCount: manifest.registry.entryCount,
+      ...(identityOnly ? { registryWriteCount: 0 } : {}),
       classifiedRecordCount: manifest.summary.classifiedRecordCount,
       executionRecordMappingCount: executionPlan.recordMappings.length,
       semanticScopeWriteCount: manifest.summary.semanticScopeWriteCount,
@@ -466,10 +1029,13 @@ function buildProductionScopeExecutionBundle({ plan, manifest }) {
 
 module.exports = {
   BUNDLE_VERSION,
+  IDENTITY_ONLY_EXECUTION_SCOPE,
   ProductionScopeExecutionBundleError,
   buildProductionScopeExecutionBundle,
   executionBundleSha256,
   executionPlanSha256,
+  inheritAuthorizedIdentityExecutionPlan,
+  isAuthorizedIdentityExecutionPlan,
   validateAuthorizationBinding,
   validateProductionScopeExecutionBundle,
 };

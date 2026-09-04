@@ -33,6 +33,9 @@ const {
   assertProductionWriteAllowed,
 } = require('../server/db.js');
 const {
+  AUTHORIZED_BUNDLE_PIN_FILENAME,
+  buildProductionScopeConservationState,
+  readExpectedBundleFileSha256,
   registerProductionScopeRemediationRoutes,
 } = require('../server/routes/production-scope-remediation.js');
 const bundledProductionPlan = require('../server/config/production-scope-remediation-plan.js');
@@ -44,6 +47,9 @@ const {
 } = require('../server/lib/production-smoke-identity.js');
 
 const DEPLOYED_SHA = '1'.repeat(40);
+const DEPLOYMENT_ID = '11111111-1111-4111-8111-111111111111';
+const SERVICE_INSTANCE_ID = '22222222-2222-4222-8222-222222222222';
+const DEPLOYMENT_INSTANCE_ID = '33333333-3333-4333-8333-333333333333';
 const SIGNING_SECRET = 'test-remediation-signing-secret-that-is-long-enough';
 const COMPANY_ID = 'company-approved-a';
 const HEAD_OFFICE_ID = 'branch-approved-head-office';
@@ -276,6 +282,7 @@ function applyOptions(fixture, backup) {
   return {
     ...preflightOptions(fixture),
     receipt: { backupId: backup.receipt.backupId, filename: backup.receipt.filename },
+    expectedAuthorityConfigChecksum: backup.receipt.authorityConfigChecksum,
     expectedPlanChecksum: backup.executionPlanChecksum,
     expectedStateFingerprint: backup.receipt.stateFingerprint,
     expectedUserInventoryFingerprint: backup.receipt.userInventoryFingerprint,
@@ -309,6 +316,7 @@ function applyOptions(fixture, backup) {
       sourceObservedFileSetFingerprint: backup.receipt.sourceObservedFileSetFingerprint,
       canonicalCompanyId: backup.receipt.canonicalCompanyId,
       bundledPlanChecksum: backup.receipt.bundledPlanChecksum,
+      authorityConfigChecksum: backup.receipt.authorityConfigChecksum,
       executionPlanChecksum: backup.receipt.executionPlanChecksum,
       expectedPostDatabaseFingerprint: backup.receipt.expectedPostDatabaseFingerprint,
       railwayIdentity: backup.receipt.railwayIdentity,
@@ -353,6 +361,32 @@ function createRouteHarness(fixture, overrides = {}) {
     runApply: () => ({ mode: 'apply', ok: true }),
     runVerify: () => ({ mode: 'verify', ok: true }),
   };
+  const defaultRequestedPlan = {
+    ...structuredClone(fixture.plan),
+    executionScope: 'IDENTITY_ONLY',
+  };
+  const defaultExecutionBundle = {
+    authorization: { authorizedExecutionSha: DEPLOYED_SHA },
+    source: {
+      captureDeployedSha: DEPLOYED_SHA,
+      captureDeploymentId: DEPLOYMENT_ID,
+      railwayIdentity: RAILWAY_IDENTITY,
+      deploymentIdentity: {
+        serviceInstanceId: SERVICE_INSTANCE_ID,
+        deploymentInstanceId: DEPLOYMENT_INSTANCE_ID,
+      },
+    },
+  };
+  const defaultBundleBytes = Buffer.from(`${JSON.stringify(defaultExecutionBundle)}\n`);
+  const defaultBundleFileSha256 = crypto.createHash('sha256')
+    .update(defaultBundleBytes).digest('hex');
+  const defaultRequestBody = {
+    expectedDeployedSha: DEPLOYED_SHA,
+    railwayIdentity: RAILWAY_IDENTITY,
+    deploymentIdentity: defaultExecutionBundle.source.deploymentIdentity,
+    executionBundleBase64: defaultBundleBytes.toString('base64'),
+    executionBundleFileSha256: defaultBundleFileSha256,
+  };
   registerProductionScopeRemediationRoutes({
     post(routePath, handler) {
       registered.set(routePath, handler);
@@ -363,7 +397,10 @@ function createRouteHarness(fixture, overrides = {}) {
     readData: fixture.readData,
     createSqliteBackup: target => fixture.context.db.backup(target),
     collections: ['users', ...COLLECTIONS],
-    buildInfo: () => ({ commitFull: DEPLOYED_SHA }),
+    buildInfo: () => ({
+      commitFull: DEPLOYED_SHA,
+      deployment: { railwayDeploymentId: DEPLOYMENT_ID },
+    }),
     plan: fixture.plan,
     expectedEnvironment,
     isEnabled: () => enabled,
@@ -374,39 +411,50 @@ function createRouteHarness(fixture, overrides = {}) {
         ? overrides.expectedExecutionSha
         : DEPLOYED_SHA
     ),
+    getExpectedBundleFileSha256: () => (
+      Object.prototype.hasOwnProperty.call(overrides, 'expectedBundleFileSha256')
+        ? overrides.expectedBundleFileSha256
+        : defaultBundleFileSha256
+    ),
     getRuntimeIdentity: () => ({
       projectId: expectedEnvironment.projectId,
       environmentId: expectedEnvironment.environmentId,
       serviceId: expectedEnvironment.serviceId,
       volumeName: expectedEnvironment.volumeName,
       volumeMountPath: expectedEnvironment.volumeMountPath,
-      replicaId: 'replica-production',
+      replicaId: DEPLOYMENT_INSTANCE_ID,
       gitCommitSha: DEPLOYED_SHA,
       ...(overrides.runtimeIdentity || {}),
     }),
     getConservationState: () => CONSERVATION_STATE,
+    validateExecutionBundle: overrides.validateExecutionBundle || (() => ({
+      authorized: true,
+      plan: defaultRequestedPlan,
+    })),
     runner,
     now: () => new Date('2026-08-25T12:00:00.000Z'),
     logger: overrides.logger || { error() {} },
   });
 
   async function invoke(mode, {
-    body = { expectedDeployedSha: DEPLOYED_SHA, railwayIdentity: RAILWAY_IDENTITY },
+    body = {},
+    includeBundle = true,
     requestId = crypto.randomUUID(),
     signature,
     issuedAt = 1787658900,
     expiresAt = 1787659500,
   } = {}) {
+    const requestBody = includeBundle ? { ...defaultRequestBody, ...body } : body;
     const token = signature === undefined ? signOperationRequest({
       secret: SIGNING_SECRET,
       requestId,
       mode,
       issuedAt,
       expiresAt,
-      body,
+      body: requestBody,
     }) : signature;
     const req = {
-      body,
+      body: requestBody,
       headers: {
         'x-production-scope-remediation-token': token,
         'x-production-scope-remediation-request-id': requestId,
@@ -421,6 +469,7 @@ function createRouteHarness(fixture, overrides = {}) {
 
   return {
     invoke,
+    requestBody: defaultRequestBody,
     setEnabled(value) { enabled = value; },
     setAllowedMode(value) { allowedMode = value; },
   };
@@ -524,6 +573,8 @@ test('apply requires complete explicit approval material and a verified backup',
     conservationState: CONSERVATION_STATE,
     confirmation: 'RENTCORE_PHASE_A_APPLY',
     approvedCompanyId: COMPANY_ID,
+    expectedAuthorityConfigChecksum:
+      fixture.plan.authority.identityBootstrap.approval.configChecksum,
     expectedPlanChecksum: 'a'.repeat(64),
     expectedStateFingerprint: 'b'.repeat(64),
     expectedUserInventoryFingerprint: 'c'.repeat(64),
@@ -831,6 +882,45 @@ test('route registration and normal startup wiring do not execute remediation', 
   ]);
 });
 
+test('shared server conservation state includes the schema-compatibility freeze', () => {
+  const state = buildProductionScopeConservationState({
+    appDisabled: true,
+    botDisabled: true,
+    gsmDisabled: true,
+    storageWriteGuardEnabled: true,
+    env: {
+      PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY: 'false',
+      SKYTECH_CLEAN_RESET_ENABLED: 'false',
+      ADMIN_RESET_PASSWORD: '',
+    },
+  });
+  assert.deepEqual(state, CONSERVATION_STATE);
+  assert.equal(buildProductionScopeConservationState({
+    ...state,
+    env: { PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY: 'true' },
+  }).schemaCompatibilityDisabled, false);
+});
+
+test('authorized bundle pin reader accepts only one protected regular file beside the database', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-bundle-pin-test-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const dbPath = path.join(directory, 'app.sqlite');
+  const pinPath = path.join(directory, AUTHORIZED_BUNDLE_PIN_FILENAME);
+  const targetPath = path.join(directory, 'alternate.sha256');
+  const expected = 'a'.repeat(64);
+
+  fs.writeFileSync(pinPath, `${expected}\n`, { mode: 0o600 });
+  assert.equal(readExpectedBundleFileSha256(dbPath), expected);
+
+  fs.chmodSync(pinPath, 0o622);
+  assert.equal(readExpectedBundleFileSha256(dbPath), null);
+
+  fs.rmSync(pinPath);
+  fs.writeFileSync(targetPath, `${expected}\n`, { mode: 0o600 });
+  fs.symlinkSync(targetPath, pinPath);
+  assert.equal(readExpectedBundleFileSha256(dbPath), null);
+});
+
 test('route fails closed for disabled/missing mode, token, and every Railway identity field', async (t) => {
   const fixture = createFixture(t);
 
@@ -887,7 +977,7 @@ test('operation authorization is body/mode-bound, expires, and is single-use', a
   assert.equal(expired.statusCode, 403);
   assert.equal(expired.body.code, 'OPERATION_TOKEN_EXPIRED');
 
-  const originalBody = { expectedDeployedSha: DEPLOYED_SHA, railwayIdentity: RAILWAY_IDENTITY };
+  const originalBody = harness.requestBody;
   const tamperedBody = { ...originalBody, expectedDeployedSha: '2'.repeat(40) };
   const tamperedRequestId = crypto.randomUUID();
   const signature = signOperationRequest({
@@ -908,21 +998,233 @@ test('operation authorization is body/mode-bound, expires, and is single-use', a
 
   const crossModeHarness = createRouteHarness(fixture, { allowedMode: 'preflight,backup' });
   const crossModeRequestId = crypto.randomUUID();
+  const crossModeBody = crossModeHarness.requestBody;
   const crossModeSignature = signOperationRequest({
     secret: SIGNING_SECRET,
     requestId: crossModeRequestId,
     mode: 'preflight',
     issuedAt: 1787658900,
     expiresAt: 1787659500,
-    body: originalBody,
+    body: crossModeBody,
   });
   const crossMode = await crossModeHarness.invoke('backup', {
-    body: originalBody,
+    body: crossModeBody,
     requestId: crossModeRequestId,
     signature: crossModeSignature,
   });
   assert.equal(crossMode.statusCode, 403);
   assert.equal(crossMode.body.code, 'OPERATION_TOKEN_INVALID');
+});
+
+test('apply route forwards the exact approved authority configuration checksum', async (t) => {
+  const fixture = createFixture(t);
+  const checksum = fixture.plan.authority.identityBootstrap.approval.configChecksum;
+  let received;
+  const harness = createRouteHarness(fixture, {
+    allowedMode: 'apply',
+    runner: {
+      runPreflight() {},
+      async runBackup() {},
+      runApply(options) {
+        received = options.expectedAuthorityConfigChecksum;
+        return { mode: 'apply', ok: true };
+      },
+      runVerify() {},
+    },
+  });
+
+  const response = await harness.invoke('apply', {
+    body: {
+      expectedDeployedSha: DEPLOYED_SHA,
+      expectedAuthorityConfigChecksum: checksum,
+      railwayIdentity: RAILWAY_IDENTITY,
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(received, checksum);
+});
+
+test('signed request bundle bytes are externally pinned and select only the exact identity plan', async (t) => {
+  const fixture = createFixture(t);
+  const requestedPlan = { ...structuredClone(fixture.plan), executionScope: 'IDENTITY_ONLY' };
+  const executionBundle = {
+    authorization: { authorizedExecutionSha: DEPLOYED_SHA },
+    source: {
+      captureDeployedSha: DEPLOYED_SHA,
+      captureDeploymentId: DEPLOYMENT_ID,
+      railwayIdentity: RAILWAY_IDENTITY,
+      deploymentIdentity: {
+        serviceInstanceId: SERVICE_INSTANCE_ID,
+        deploymentInstanceId: DEPLOYMENT_INSTANCE_ID,
+      },
+    },
+  };
+  const bytes = Buffer.from(`${JSON.stringify(executionBundle)}\n`);
+  const fileSha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+  const body = {
+    expectedDeployedSha: DEPLOYED_SHA,
+    railwayIdentity: RAILWAY_IDENTITY,
+    deploymentIdentity: executionBundle.source.deploymentIdentity,
+    executionBundleBase64: bytes.toString('base64'),
+    executionBundleFileSha256: fileSha256,
+  };
+  let receivedPlan;
+  let validationOptions;
+  const harness = createRouteHarness(fixture, {
+    expectedBundleFileSha256: fileSha256,
+    validateExecutionBundle(bundle, options) {
+      assert.deepEqual(bundle, executionBundle);
+      validationOptions = options;
+      return { authorized: true, plan: requestedPlan };
+    },
+    runner: {
+      runPreflight(options) {
+        receivedPlan = options.plan;
+        return { mode: 'preflight', ok: true };
+      },
+      async runBackup() {},
+      runApply() {},
+      runVerify() {},
+    },
+  });
+
+  const response = await harness.invoke('preflight', { body });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(validationOptions, { requireAuthorized: true });
+  assert.equal(receivedPlan, requestedPlan);
+
+  for (const [name, overrides, expectedCode] of [
+    ['external file pin', { expectedBundleFileSha256: 'f'.repeat(64) }, 'EXECUTION_BUNDLE_EXTERNAL_PIN_MISMATCH'],
+    ['runtime SHA', {
+      executionBundle: {
+        ...executionBundle,
+        authorization: { authorizedExecutionSha: '2'.repeat(40) },
+      },
+    }, 'IDENTITY_EXECUTION_BUNDLE_RUNTIME_MISMATCH'],
+    ['deployment ID', {
+      executionBundle: {
+        ...executionBundle,
+        source: { ...executionBundle.source, captureDeploymentId: '22222222-2222-4222-8222-222222222222' },
+      },
+    }, 'IDENTITY_EXECUTION_BUNDLE_RUNTIME_MISMATCH'],
+    ...Object.keys(RAILWAY_IDENTITY).map(field => [
+      `bundled Railway ${field}`,
+      {
+        executionBundle: {
+          ...executionBundle,
+          source: {
+            ...executionBundle.source,
+            railwayIdentity: {
+              ...executionBundle.source.railwayIdentity,
+              [field]: `wrong-${field}`,
+            },
+          },
+        },
+      },
+      'IDENTITY_EXECUTION_BUNDLE_RUNTIME_MISMATCH',
+    ]),
+    ['service instance ID', {
+      executionBundle: {
+        ...executionBundle,
+        source: {
+          ...executionBundle.source,
+          deploymentIdentity: {
+            ...executionBundle.source.deploymentIdentity,
+            serviceInstanceId: '88888888-8888-4888-8888-888888888888',
+          },
+        },
+      },
+    }, 'IDENTITY_EXECUTION_BUNDLE_RUNTIME_MISMATCH'],
+    ['deployment instance ID', {
+      executionBundle: {
+        ...executionBundle,
+        source: {
+          ...executionBundle.source,
+          deploymentIdentity: {
+            ...executionBundle.source.deploymentIdentity,
+            deploymentInstanceId: '99999999-9999-4999-8999-999999999999',
+          },
+        },
+      },
+    }, 'IDENTITY_EXECUTION_BUNDLE_RUNTIME_MISMATCH'],
+    ['generic scope', { plan: { ...requestedPlan, executionScope: undefined } }, 'IDENTITY_EXECUTION_BUNDLE_RUNTIME_MISMATCH'],
+  ]) {
+    const candidateBundle = overrides.executionBundle || executionBundle;
+    const candidateBytes = Buffer.from(`${JSON.stringify(candidateBundle)}\n`);
+    const candidateSha = crypto.createHash('sha256').update(candidateBytes).digest('hex');
+    const rejected = createRouteHarness(fixture, {
+      expectedBundleFileSha256: overrides.expectedBundleFileSha256 || candidateSha,
+      validateExecutionBundle: () => ({ authorized: true, plan: overrides.plan || requestedPlan }),
+    });
+    const result = await rejected.invoke('preflight', {
+      body: {
+        ...body,
+        executionBundleBase64: candidateBytes.toString('base64'),
+        executionBundleFileSha256: candidateSha,
+      },
+    });
+    assert.equal(result.statusCode, 403, name);
+    assert.equal(result.body.code, expectedCode, name);
+  }
+
+  for (const [name, deploymentIdentity, runtimeIdentity] of [
+    ['signed service instance', {
+      ...executionBundle.source.deploymentIdentity,
+      serviceInstanceId: '88888888-8888-4888-8888-888888888888',
+    }, {}],
+    ['signed deployment instance', {
+      ...executionBundle.source.deploymentIdentity,
+      deploymentInstanceId: '99999999-9999-4999-8999-999999999999',
+    }, {}],
+    ['runtime replica', executionBundle.source.deploymentIdentity, {
+      replicaId: '99999999-9999-4999-8999-999999999999',
+    }],
+  ]) {
+    const rejected = createRouteHarness(fixture, {
+      expectedBundleFileSha256: fileSha256,
+      runtimeIdentity,
+      validateExecutionBundle: () => ({ authorized: true, plan: requestedPlan }),
+    });
+    const result = await rejected.invoke('preflight', {
+      body: { ...body, deploymentIdentity },
+    });
+    assert.equal(result.statusCode, 403, name);
+    assert.equal(result.body.code, 'IDENTITY_EXECUTION_BUNDLE_RUNTIME_MISMATCH', name);
+  }
+
+  const unpinned = createRouteHarness(fixture, {
+    expectedBundleFileSha256: undefined,
+    validateExecutionBundle: () => ({ authorized: true, plan: requestedPlan }),
+  });
+  const unpinnedResult = await unpinned.invoke('preflight', { body });
+  assert.equal(unpinnedResult.statusCode, 404);
+  assert.equal(unpinnedResult.body.code, 'EXECUTION_BUNDLE_PIN_NOT_CONFIGURED');
+});
+
+test('configured bundle pin cannot be bypassed by omitting signed bundle fields', async (t) => {
+  const fixture = createFixture(t);
+  const harness = createRouteHarness(fixture, {
+    expectedBundleFileSha256: 'a'.repeat(64),
+  });
+  const response = await harness.invoke('preflight', {
+    includeBundle: false,
+    body: { expectedDeployedSha: DEPLOYED_SHA, railwayIdentity: RAILWAY_IDENTITY },
+  });
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.body.code, 'EXECUTION_BUNDLE_REQUIRED');
+});
+
+test('identity-only default plan cannot bypass the unconditional authorized-bundle gate', async (t) => {
+  const fixture = createFixture(t);
+  fixture.plan.executionScope = 'IDENTITY_ONLY';
+  const harness = createRouteHarness(fixture);
+  const response = await harness.invoke('preflight', {
+    includeBundle: false,
+    body: { expectedDeployedSha: DEPLOYED_SHA, railwayIdentity: RAILWAY_IDENTITY },
+  });
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.body.code, 'EXECUTION_BUNDLE_REQUIRED');
 });
 
 test('authorization failures redact signing material from logs and responses', async (t) => {
@@ -977,13 +1279,19 @@ test('manual workflow is production-protected, target-pinned, and has no deploy 
   );
   assert.match(source, /^on:\n  workflow_dispatch:/m);
   assert.match(source, /environment: production/);
-  assert.match(source, /npm install --global @railway\/cli@5\.45\.0/);
-  assert.match(source, /test "\$\(railway --version\)" = "railway 5\.45\.0"/);
-  assert.doesNotMatch(source, /@railway\/cli@4\.60\.0/);
+  assert.match(source, /RAILWAY_CLI_ARCHIVE_SHA256: 68688cd8ddcffbfcd3e117f7261758ac281727981c2698b5573223694f1d8ad4/);
+  assert.match(source, /RAILWAY_CLI_BINARY_SHA256: 5014d217ba2e996022df7eed4fab7cdbc87b7039320244fa56f939b78986a0e8/);
+  assert.match(source, /test "\$\("\$cli_dir\/railway" --version\)" = "railway 5\.45\.0"/);
+  assert.doesNotMatch(source, /npm install (?:--global|-g) @railway\/cli|@railway\/cli@4\.60\.0/);
   assert.doesNotMatch(source, /\brailway link\b/);
   assert.doesNotMatch(source, /secrets\.RAILWAY_TOKEN\b/);
-  assert.equal((source.match(/secrets\.RAILWAY_PROJECT_TOKEN/g) || []).length, 3);
-  assert.equal((source.match(/railway status\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--json >/g) || []).length, 1);
+  assert.equal((source.match(/secrets\.RAILWAY_PROJECT_TOKEN/g) || []).length, 5);
+  assert.equal((source.match(/railway status\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--json >/g) || []).length, 2);
+  assert.equal((source.match(/node (?:"\$GITHUB_WORKSPACE\/)?scripts\/railway-remediation-interlock\.mjs"?/g) || []).length, 3);
+  assert.match(source, /\.deployment\.nonterminalDeploymentCount.*= "0"/);
+  assert.match(source, /\.autoDeploy\.enabled.*= "false"/);
+  assert.match(source, /cmp --silent railway-interlock-before\.json railway-interlock-immediate\.json/);
+  assert.match(source, /cmp --silent "\$GITHUB_WORKSPACE\/railway-interlock-before\.json"/);
   assert.equal((source.match(/railway volume\s+\\\s+--project "\$RAILWAY_PROJECT_ID"\s+\\\s+--environment "\$RAILWAY_ENVIRONMENT_ID"\s+\\\s+--service "\$RAILWAY_SERVICE_ID"\s+\\\s+files --volume "\$RAILWAY_VOLUME_ID" download/g) || []).length, 1);
   assert.equal(source.includes(reviewedProductionEnvironment.projectId), true);
   assert.equal(source.includes(reviewedProductionEnvironment.environmentId), true);
@@ -994,7 +1302,7 @@ test('manual workflow is production-protected, target-pinned, and has no deploy 
     /PRODUCTION_API_ORIGIN: https:\/\/rental-management-production-35bc\.up\.railway\.app/,
   );
   assert.doesNotMatch(source, /api\.skytech-rent\.ru/);
-  assert.doesNotMatch(source, /--location\b/);
+  assert.equal((source.match(/--location\b/g) || []).length, 1);
   assert.doesNotMatch(source, /\bwrangler\b/);
   assert.match(source, /\(\$services \| length\) == 1/);
   assert.match(source, /\(\$volumes \| length\) == 1/);

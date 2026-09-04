@@ -16,6 +16,18 @@ on:
         description: Exact 40-character commit currently approved for production
         required: true
         type: string
+      expected_authorized_bundle_sha256:
+        description: Exact externally reviewed SHA-256 of the uncommitted authorized bundle bytes
+        required: true
+        type: string
+      authorized_bundle_base64:
+        description: Exact authorized bundle bytes as canonical base64; never commit this runtime artifact
+        required: true
+        type: string
+      expected_authority_config_checksum:
+        description: Exact independently reviewed identity authority/config SHA-256; apply only
+        required: false
+        type: string
       expected_plan_checksum:
         description: Exact execution-plan checksum from the stored receipt; apply only
         required: false
@@ -33,7 +45,7 @@ on:
         required: false
         type: string
       expected_source_file_set_fingerprint:
-        description: Exact DB/WAL/SHM fingerprint from backup; apply only
+        description: Exact durable DB/WAL fingerprint from backup; apply only
         required: false
         type: string
       expected_post_database_fingerprint:
@@ -81,9 +93,167 @@ jobs:
       RAILWAY_VOLUME_ID: 48b8768c-a8a9-4a87-8a4b-b980fff5d00c
       RAILWAY_VOLUME_NAME: rental-management-volume
       RAILWAY_VOLUME_MOUNT_PATH: /data
+      RAILWAY_ENVIRONMENT_NAME: production
+      RAILWAY_SERVICE_NAME: rental-management
       CANONICAL_COMPANY_ID: cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ
       PRODUCTION_API_ORIGIN: https://rental-management-production-35bc.up.railway.app
     steps:
+      - name: Checkout the exact authorized release commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Bind exact deployed workflow and materialize external bundle bytes
+        env:
+          AUTHORIZED_BUNDLE_BASE64: ${{ inputs.authorized_bundle_base64 }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+          EXPECTED_AUTHORIZED_BUNDLE_SHA256: ${{ inputs.expected_authorized_bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REPOSITORY" = "rishatkznAI/rental-management"
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_DEPLOYED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_AUTHORIZED_BUNDLE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          test "$GITHUB_SHA" = "$EXPECTED_DEPLOYED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_DEPLOYED_SHA"
+          test -n "$AUTHORIZED_BUNDLE_BASE64"
+          test "${#AUTHORIZED_BUNDLE_BASE64}" -le 45000
+          [[ "$AUTHORIZED_BUNDLE_BASE64" =~ ^[A-Za-z0-9+/]+={0,2}$ ]]
+          authorized_bundle_path="$(mktemp "$RUNNER_TEMP/production-scope-remediation-authorized-bundle.XXXXXX")"
+          test -f "$authorized_bundle_path"
+          test ! -L "$authorized_bundle_path"
+          chmod 600 "$authorized_bundle_path"
+          cleanup_materialized_bundle() { rm -f -- "$authorized_bundle_path"; }
+          trap cleanup_materialized_bundle ERR
+          printf '%s' "$AUTHORIZED_BUNDLE_BASE64" | base64 --decode > "$authorized_bundle_path"
+          test "$(base64 -w 0 "$authorized_bundle_path")" = "$AUTHORIZED_BUNDLE_BASE64"
+          unset AUTHORIZED_BUNDLE_BASE64
+          test "$(stat -c '%a' "$authorized_bundle_path")" = "600"
+          test "$(sha256sum "$authorized_bundle_path" | awk '{print $1}')" = "$EXPECTED_AUTHORIZED_BUNDLE_SHA256"
+          {
+            echo "AUTHORIZED_BUNDLE_PATH=$authorized_bundle_path"
+            echo "AUTHORIZED_BUNDLE_FILE_SHA256=$EXPECTED_AUTHORIZED_BUNDLE_SHA256"
+          } >> "$GITHUB_ENV"
+          trap - ERR
+
+      - name: Set up the pinned bundle-verifier runtime
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 20.20.2
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install locked bundle-verifier dependencies
+        run: |
+          set -euo pipefail
+          npm ci --prefix server
+
+      - name: Validate exact authorized bundle semantics
+        id: authorized_bundle
+        env:
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+          EXPECTED_AUTHORIZED_BUNDLE_SHA256: ${{ inputs.expected_authorized_bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$GITHUB_SHA" = "$EXPECTED_DEPLOYED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_DEPLOYED_SHA"
+          test -f "$AUTHORIZED_BUNDLE_PATH"
+          test ! -L "$AUTHORIZED_BUNDLE_PATH"
+          test "$(stat -c '%a' "$AUTHORIZED_BUNDLE_PATH")" = "600"
+          test "$(sha256sum "$AUTHORIZED_BUNDLE_PATH" | awk '{print $1}')" = "$EXPECTED_AUTHORIZED_BUNDLE_SHA256"
+          verification_file="$RUNNER_TEMP/authorized-bundle-verification.json"
+          test ! -e "$verification_file"
+          test ! -L "$verification_file"
+          node server/scripts/verify-production-scope-execution-bundle.js \
+            --bundle "$AUTHORIZED_BUNDLE_PATH" \
+            --expected-sha256 "$EXPECTED_AUTHORIZED_BUNDLE_SHA256" \
+            --require-authorized > "$verification_file"
+          jq -e '.ok == true and .productionExecutionAuthorized == true' \
+            "$verification_file" > /dev/null
+          jq -e '
+            .productionExecutionAuthorized == true
+            and .executionPlan.executionScope == "IDENTITY_ONLY"
+            and .executionPlan.recordMappings == []
+            and .executionPlan.relationMappings == []
+            and .recordBindings == []
+            and .summary.registryEntryCount == 0
+            and .summary.registryWriteCount == 0
+            and .summary.semanticScopeWriteCount == 0
+            and .summary.collectionWriteCounts == {}
+          ' "$AUTHORIZED_BUNDLE_PATH" > /dev/null
+          jq -e \
+            --arg project "$RAILWAY_PROJECT_ID" \
+            --arg environment "$RAILWAY_ENVIRONMENT_ID" \
+            --arg service "$RAILWAY_SERVICE_ID" \
+            --arg volume "$RAILWAY_VOLUME_ID" \
+            --arg volumeName "$RAILWAY_VOLUME_NAME" \
+            --arg mountPath "$RAILWAY_VOLUME_MOUNT_PATH" '
+              .source.railwayIdentity == {
+                projectId: $project,
+                environmentId: $environment,
+                serviceId: $service,
+                volumeId: $volume,
+                volumeName: $volumeName,
+                volumeMountPath: $mountPath
+              }
+            ' "$AUTHORIZED_BUNDLE_PATH" > /dev/null
+
+          capture_sha="$(jq -er '.source.captureDeployedSha' "$AUTHORIZED_BUNDLE_PATH")"
+          test "$capture_sha" = "$EXPECTED_DEPLOYED_SHA"
+          authorization_capture_sha="$(jq -er '.authorization.captureDeployedSha' "$AUTHORIZED_BUNDLE_PATH")"
+          test "$authorization_capture_sha" = "$EXPECTED_DEPLOYED_SHA"
+
+          execution_plan_sha="$(jq -er '.executionPlanSha256' "$AUTHORIZED_BUNDLE_PATH")"
+          [[ "$execution_plan_sha" =~ ^[a-f0-9]{64}$ ]]
+          authorized_execution_sha="$(jq -er '.authorization.authorizedExecutionSha' "$AUTHORIZED_BUNDLE_PATH")"
+          [[ "$authorized_execution_sha" =~ ^[a-f0-9]{40}$ ]]
+          test "$authorized_execution_sha" = "$EXPECTED_DEPLOYED_SHA"
+          authority_config_checksum="$(jq -er '.executionPlan.authority.identityBootstrap.approval.configChecksum' "$AUTHORIZED_BUNDLE_PATH")"
+          [[ "$authority_config_checksum" =~ ^[a-f0-9]{64}$ ]]
+          {
+            echo "AUTHORIZED_EXECUTION_PLAN_SHA256=$execution_plan_sha"
+            echo "AUTHORIZED_EXECUTION_SHA=$authorized_execution_sha"
+            echo "AUTHORIZED_AUTHORITY_CONFIG_CHECKSUM=$authority_config_checksum"
+            echo "CAPTURE_DEPLOYED_SHA=$capture_sha"
+          } >> "$GITHUB_ENV"
+
+      - name: Install checksum-pinned Railway CLI for exact target verification
+        env:
+          RAILWAY_CLI_ARCHIVE_SHA256: 68688cd8ddcffbfcd3e117f7261758ac281727981c2698b5573223694f1d8ad4
+          RAILWAY_CLI_BINARY_SHA256: 5014d217ba2e996022df7eed4fab7cdbc87b7039320244fa56f939b78986a0e8
+          RAILWAY_CLI_URL: https://github.com/railwayapp/cli/releases/download/v5.45.0/railway-v5.45.0-x86_64-unknown-linux-musl.tar.gz
+        run: |
+          set -euo pipefail
+          umask 077
+          cli_dir="$RUNNER_TEMP/railway-cli-v5.45.0"
+          archive_path="$RUNNER_TEMP/railway-cli-v5.45.0-x86_64-unknown-linux-musl.tar.gz"
+          test ! -e "$cli_dir"
+          test ! -L "$cli_dir"
+          test ! -e "$archive_path"
+          test ! -L "$archive_path"
+          mkdir -m 700 "$cli_dir"
+          curl --fail-with-body --location --silent --show-error \
+            --proto '=https' --tlsv1.2 \
+            --connect-timeout 15 --max-time 120 \
+            --output "$archive_path" "$RAILWAY_CLI_URL"
+          test -f "$archive_path"
+          test ! -L "$archive_path"
+          test "$(sha256sum "$archive_path" | awk '{print $1}')" = "$RAILWAY_CLI_ARCHIVE_SHA256"
+          test "$(tar -tzf "$archive_path")" = "railway"
+          tar -xOzf "$archive_path" railway > "$cli_dir/railway"
+          test -f "$cli_dir/railway"
+          test ! -L "$cli_dir/railway"
+          test "$(stat -c '%s' "$cli_dir/railway")" = "17487656"
+          test "$(sha256sum "$cli_dir/railway" | awk '{print $1}')" = "$RAILWAY_CLI_BINARY_SHA256"
+          chmod 0555 "$cli_dir/railway"
+          test "$("$cli_dir/railway" --version)" = "railway 5.45.0"
+          echo "$cli_dir" >> "$GITHUB_PATH"
+
       - name: Mask and validate secrets
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
@@ -91,6 +261,8 @@ jobs:
           BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
           MODE: ${{ inputs.mode }}
         run: |
+          set -euo pipefail
+          umask 077
           echo "::add-mask::$RAILWAY_TOKEN"
           echo "::add-mask::$REMEDIATION_SIGNING_SECRET"
           if [[ "$MODE" == "backup" ]]; then
@@ -102,27 +274,86 @@ jobs:
             test "$(printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | wc -c)" -ge 32
           fi
 
-      - name: Install pinned Railway CLI
+      - name: Prepare safe operation metadata
+        env:
+          MODE: ${{ inputs.mode }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
         run: |
           set -euo pipefail
-          npm install --global @railway/cli@5.45.0
-          test "$(railway --version)" = "railway 5.45.0"
+          umask 077
+          protected_paths=(
+            remediation-operation-metadata.json
+            remediation-request.json
+            remediation-response.json
+            remediation-response-summary.json
+            railway-control-plane-before.json
+            railway-control-plane-after.json
+            railway-interlock-before.json
+            railway-interlock-immediate.json
+            railway-interlock-after.json
+            api-runtime-before.raw.json
+            api-runtime-after.raw.json
+            api-runtime-identity-before.json
+            api-runtime-identity-after.json
+            remediation-backup-receipt.json
+            remediation-backup.zip
+            remediation-backup-verify.zip
+            remediation-backup.zip.gpg
+            independent-copy-machine-evidence.json
+          )
+          for protected_path in "${protected_paths[@]}"; do
+            test ! -e "$protected_path"
+            test ! -L "$protected_path"
+          done
+          jq -nS \
+            --arg schemaVersion "1" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg ref "$GITHUB_REF" \
+            --arg workflowSha "$GITHUB_SHA" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg mode "$MODE" \
+            --arg expectedDeployedSha "$EXPECTED_DEPLOYED_SHA" \
+            --arg authorizedBundleFileSha256 "$AUTHORIZED_BUNDLE_FILE_SHA256" \
+            --arg authorizedExecutionSha "$AUTHORIZED_EXECUTION_SHA" \
+            --arg captureDeployedSha "$CAPTURE_DEPLOYED_SHA" \
+            --arg startedAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" '
+              {
+                schemaVersion: ($schemaVersion | tonumber),
+                repository: $repository,
+                ref: $ref,
+                workflowSha: $workflowSha,
+                runId: $runId,
+                runAttempt: $runAttempt,
+                mode: $mode,
+                expectedDeployedSha: $expectedDeployedSha,
+                authorizedBundleFileSha256: $authorizedBundleFileSha256,
+                authorizedExecutionSha: $authorizedExecutionSha,
+                captureDeployedSha: $captureDeployedSha,
+                startedAt: $startedAt
+              }
+            ' > remediation-operation-metadata.json
 
-      - name: Verify exact Railway target and deployed commit
+      - name: Capture exact Railway control-plane state before operation
+        id: railway_before
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
           EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
         run: |
+          set -euo pipefail
+          umask 077
           [[ "$EXPECTED_DEPLOYED_SHA" =~ ^[a-f0-9]{40}$ ]]
           target_dir="$RUNNER_TEMP/production-scope-remediation-target"
-          mkdir -p "$target_dir"
+          test ! -e "$target_dir"
+          test ! -L "$target_dir"
+          mkdir -m 700 "$target_dir"
           cd "$target_dir"
           railway status \
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_ENVIRONMENT_ID" \
-            --json > railway-status.json
-          test "$(jq -r '.id' railway-status.json)" = "$RAILWAY_PROJECT_ID"
+            --json > railway-status-before.json
           jq -e \
+            --arg project "$RAILWAY_PROJECT_ID" \
             --arg environment "$RAILWAY_ENVIRONMENT_ID" \
             --arg service "$RAILWAY_SERVICE_ID" \
             --arg volume "$RAILWAY_VOLUME_ID" \
@@ -130,35 +361,121 @@ jobs:
             --arg mountPath "$RAILWAY_VOLUME_MOUNT_PATH" \
             --arg sha "$EXPECTED_DEPLOYED_SHA" '
               ([.environments.edges[].node | select(.id == $environment)]) as $environments
-              | ($environments | length) == 1
-                and (
-                  $environments[0] as $environmentNode
-                  | ([
-                      $environmentNode.serviceInstances.edges[].node
-                      | select(.serviceId == $service)
-                    ]) as $services
-                  | ([
-                      $environmentNode.volumeInstances.edges[].node
-                      | select(.serviceId == $service)
-                      | select(.volume.id == $volume)
-                      | select(.volume.name == $volumeName)
-                      | select(.mountPath == $mountPath)
-                      | select(.state == "READY")
-                    ]) as $volumes
-                  | ($services | length) == 1
-                    and ($volumes | length) == 1
-                    and $services[0].latestDeployment.status == "SUCCESS"
-                    and $services[0].latestDeployment.meta.commitHash == $sha
-                    and ([
-                      $services[0].latestDeployment.instances[]
-                      | select(.status == "RUNNING")
-                    ] | length) == 1
-                )
-            ' railway-status.json > /dev/null
+              | $environments[0] as $environmentNode
+              | ([
+                  $environmentNode.serviceInstances.edges[].node
+                  | select(.serviceId == $service)
+                ]) as $services
+              | ([
+                  $environmentNode.volumeInstances.edges[].node
+                  | select(.serviceId == $service)
+                  | select(.volume.id == $volume)
+                  | select(.volume.name == $volumeName)
+                  | select(.mountPath == $mountPath)
+                  | select(.state == "READY")
+                ]) as $volumes
+              | ($services[0].latestDeployment.instances // []) as $instances
+              | if (
+                  .id == $project
+                  and ($environments | length) == 1
+                  and ($services | length) == 1
+                  and ($volumes | length) == 1
+                  and $services[0].latestDeployment.status == "SUCCESS"
+                  and $services[0].latestDeployment.meta.commitHash == $sha
+                  and ($services[0].id | type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+                  and ($services[0].latestDeployment.id | type == "string" and length > 0)
+                  and ($instances | length) == 1
+                  and $instances[0].status == "RUNNING"
+                  and ($instances[0].id | type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+                ) then {
+                  projectId: .id,
+                  environmentId: $environmentNode.id,
+                  serviceId: $services[0].serviceId,
+                  serviceInstanceId: $services[0].id,
+                  volumeId: $volumes[0].volume.id,
+                  volumeName: $volumes[0].volume.name,
+                  volumeMountPath: $volumes[0].mountPath,
+                  volumeState: $volumes[0].state,
+                  deploymentId: $services[0].latestDeployment.id,
+                  deploymentStatus: $services[0].latestDeployment.status,
+                  deploymentCommitSha: $services[0].latestDeployment.meta.commitHash,
+                  deploymentInstanceId: $instances[0].id,
+                  runningInstanceIds: [$instances[0].id]
+                } else error("exact Railway production target is not stable") end
+            ' railway-status-before.json > "$GITHUB_WORKSPACE/railway-control-plane-before.json"
+          authorized_bundle_file="$AUTHORIZED_BUNDLE_PATH"
+          test -f "$authorized_bundle_file"
+          test ! -L "$authorized_bundle_file"
+          bundle_capture_deployment_id="$(jq -er '.source.captureDeploymentId' "$authorized_bundle_file")"
+          [[ "$bundle_capture_deployment_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          test "$bundle_capture_deployment_id" = "$(jq -er '.deploymentId' "$GITHUB_WORKSPACE/railway-control-plane-before.json")"
+          bundle_service_instance_id="$(jq -er '.source.deploymentIdentity.serviceInstanceId' "$authorized_bundle_file")"
+          bundle_deployment_instance_id="$(jq -er '.source.deploymentIdentity.deploymentInstanceId' "$authorized_bundle_file")"
+          [[ "$bundle_service_instance_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          [[ "$bundle_deployment_instance_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          test "$bundle_service_instance_id" = "$(jq -er '.serviceInstanceId' "$GITHUB_WORKSPACE/railway-control-plane-before.json")"
+          test "$bundle_deployment_instance_id" = "$(jq -er '.deploymentInstanceId' "$GITHUB_WORKSPACE/railway-control-plane-before.json")"
+          node "$GITHUB_WORKSPACE/scripts/railway-remediation-interlock.mjs" \
+            > "$GITHUB_WORKSPACE/railway-interlock-before.json"
+          test "$(jq -er '.projectId' "$GITHUB_WORKSPACE/railway-interlock-before.json")" = "$RAILWAY_PROJECT_ID"
+          test "$(jq -er '.environmentId' "$GITHUB_WORKSPACE/railway-interlock-before.json")" = "$RAILWAY_ENVIRONMENT_ID"
+          test "$(jq -er '.service.id' "$GITHUB_WORKSPACE/railway-interlock-before.json")" = "$RAILWAY_SERVICE_ID"
+          test "$(jq -er '.service.instanceId' "$GITHUB_WORKSPACE/railway-interlock-before.json")" = "$bundle_service_instance_id"
+          test "$(jq -er '.deployment.deploymentId' "$GITHUB_WORKSPACE/railway-interlock-before.json")" = "$bundle_capture_deployment_id"
+          test "$(jq -er '.deployment.deploymentInstanceId' "$GITHUB_WORKSPACE/railway-interlock-before.json")" = "$bundle_deployment_instance_id"
+          test "$(jq -er '.deployment.nonterminalDeploymentCount' "$GITHUB_WORKSPACE/railway-interlock-before.json")" = "0"
+          test "$(jq -er '.autoDeploy.enabled' "$GITHUB_WORKSPACE/railway-interlock-before.json")" = "false"
+
+      - name: Capture exact API runtime identity before operation
+        id: runtime_before
+        env:
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f api-runtime-before.raw.json' EXIT
+          test "$PRODUCTION_API_ORIGIN" = "https://rental-management-production-35bc.up.railway.app"
+          deployment_id="$(jq -er '.deploymentId' railway-control-plane-before.json)"
+          curl --fail-with-body --silent --show-error \
+            --proto '=https' --tlsv1.2 \
+            --connect-timeout 15 --max-time 60 \
+            --header 'Accept: application/json' \
+            --header 'Cache-Control: no-cache' \
+            "$PRODUCTION_API_ORIGIN/api/version" > api-runtime-before.raw.json
+          jq -e \
+            --arg sha "$EXPECTED_DEPLOYED_SHA" \
+            --arg deploymentId "$deployment_id" \
+            --arg environment "$RAILWAY_ENVIRONMENT_NAME" \
+            --arg service "$RAILWAY_SERVICE_NAME" '
+              .ok == true
+              and .build.service == "backend"
+              and .build.commitFull == $sha
+              and .build.deployment.railwayDeploymentId == $deploymentId
+              and .build.deployment.railwayEnvironment == $environment
+              and .build.deployment.railwayService == $service
+              and .build.deployment.nodeEnv == "production"
+              and (.build.startedAt | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{3})?Z$"))
+              and (.app.disabled | type == "boolean")
+              and (.app.validationReadOnly | type == "boolean")
+            ' api-runtime-before.raw.json > /dev/null
+          jq -cS '{
+            ok,
+            build: {
+              service: .build.service,
+              commitFull: .build.commitFull,
+              startedAt: .build.startedAt,
+              deployment: .build.deployment
+            },
+            app: {
+              disabled: .app.disabled,
+              validationReadOnly: .app.validationReadOnly
+            }
+          }' api-runtime-before.raw.json > api-runtime-identity-before.json
 
       - name: Validate explicit operation inputs
         env:
           MODE: ${{ inputs.mode }}
+          EXPECTED_AUTHORITY_CONFIG_CHECKSUM: ${{ inputs.expected_authority_config_checksum }}
           EXPECTED_PLAN_CHECKSUM: ${{ inputs.expected_plan_checksum }}
           EXPECTED_STATE_FINGERPRINT: ${{ inputs.expected_state_fingerprint }}
           EXPECTED_USER_INVENTORY_FINGERPRINT: ${{ inputs.expected_user_inventory_fingerprint }}
@@ -172,11 +489,17 @@ jobs:
           INDEPENDENT_COPY_EVIDENCE_JSON: ${{ inputs.independent_copy_evidence_json }}
           EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
         run: |
+          set -euo pipefail
+          umask 077
+          [[ "$EXPECTED_DEPLOYED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$MODE" =~ ^(preflight|backup|apply|verify)$ ]]
           if [[ "$MODE" == "apply" || "$MODE" == "verify" ]]; then
             [[ "$BACKUP_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
             [[ "$BACKUP_FILENAME" =~ ^rentcore-phase-a-[0-9]{8}T[0-9]{6}Z\.zip$ ]]
           fi
           if [[ "$MODE" == "apply" ]]; then
+            [[ "$EXPECTED_AUTHORITY_CONFIG_CHECKSUM" =~ ^[a-f0-9]{64}$ ]]
+            test "$EXPECTED_AUTHORITY_CONFIG_CHECKSUM" = "$AUTHORIZED_AUTHORITY_CONFIG_CHECKSUM"
             [[ "$EXPECTED_PLAN_CHECKSUM" =~ ^[a-f0-9]{64}$ ]]
             [[ "$EXPECTED_STATE_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
             [[ "$EXPECTED_USER_INVENTORY_FINGERPRINT" =~ ^[a-f0-9]{64}$ ]]
@@ -194,6 +517,7 @@ jobs:
               --arg databaseFingerprint "$EXPECTED_DATABASE_FINGERPRINT" \
               --arg sourceFileSetFingerprint "$EXPECTED_SOURCE_FILE_SET_FINGERPRINT" \
               --arg expectedPostDatabaseFingerprint "$EXPECTED_POST_DATABASE_FINGERPRINT" \
+              --arg authorityConfigChecksum "$EXPECTED_AUTHORITY_CONFIG_CHECKSUM" \
               --arg companyId "$APPROVED_COMPANY_ID" \
               --arg planChecksum "$EXPECTED_PLAN_CHECKSUM" '
               .evidenceVersion == 1
@@ -206,20 +530,45 @@ jobs:
               and .userInventoryFingerprint == $userInventoryFingerprint
               and .databaseFingerprint == $databaseFingerprint
               and .sourceFileSetFingerprint == $sourceFileSetFingerprint
+              and (.sourceObservedFileSetFingerprint | test("^[a-f0-9]{64}$"))
               and .expectedPostDatabaseFingerprint == $expectedPostDatabaseFingerprint
+              and .authorityConfigChecksum == $authorityConfigChecksum
               and .canonicalCompanyId == $companyId
               and .executionPlanChecksum == $planChecksum
               and (.githubArtifactDigest | test("^(sha256:)?[a-f0-9]{64}$"))
+              and .decryptabilityVerified == true
+              and .decryptedArchiveSha256 == .backupSha256
+              and .decryptedArchiveSizeBytes == .backupSizeBytes
               and .confirmation == "INDEPENDENT_COPY_VERIFIED"
               and (.operatorApprovalReference | type == "string" and length >= 16)
-              and (.verifiedAt | fromdateiso8601 > 0)
+              and (.verifiedAt | type == "string")
+              and (.verifiedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"))
+              and (.verifiedAt | sub("\\.[0-9]{3}Z$"; "Z") | fromdateiso8601 > 0)
             ' > /dev/null
+          fi
+          if [[ "$MODE" == "preflight" || "$MODE" == "backup" ]]; then
+            test -z "$BACKUP_ID"
+            test -z "$BACKUP_FILENAME"
+          fi
+          if [[ "$MODE" != "apply" ]]; then
+            test -z "$EXPECTED_AUTHORITY_CONFIG_CHECKSUM"
+            test -z "$EXPECTED_PLAN_CHECKSUM"
+            test -z "$EXPECTED_STATE_FINGERPRINT"
+            test -z "$EXPECTED_USER_INVENTORY_FINGERPRINT"
+            test -z "$EXPECTED_DATABASE_FINGERPRINT"
+            test -z "$EXPECTED_SOURCE_FILE_SET_FINGERPRINT"
+            test -z "$EXPECTED_POST_DATABASE_FINGERPRINT"
+            test -z "$APPROVED_COMPANY_ID"
+            test -z "$CONFIRMATION"
+            test -z "$INDEPENDENT_COPY_EVIDENCE_JSON"
           fi
 
       - name: Invoke exactly one guarded operation
+        id: operation
         env:
           MODE: ${{ inputs.mode }}
           EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+          EXPECTED_AUTHORITY_CONFIG_CHECKSUM: ${{ inputs.expected_authority_config_checksum }}
           EXPECTED_PLAN_CHECKSUM: ${{ inputs.expected_plan_checksum }}
           EXPECTED_STATE_FINGERPRINT: ${{ inputs.expected_state_fingerprint }}
           EXPECTED_USER_INVENTORY_FINGERPRINT: ${{ inputs.expected_user_inventory_fingerprint }}
@@ -231,15 +580,27 @@ jobs:
           BACKUP_ID: ${{ inputs.backup_id }}
           BACKUP_FILENAME: ${{ inputs.backup_filename }}
           INDEPENDENT_COPY_EVIDENCE_JSON: ${{ inputs.independent_copy_evidence_json }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
           REMEDIATION_SIGNING_SECRET: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET }}
         run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f remediation-request.json remediation-response.json' EXIT
           test "$PRODUCTION_API_ORIGIN" = "https://rental-management-production-35bc.up.railway.app"
           independent_copy_evidence='null'
           if [[ "$MODE" == "apply" ]]; then
             independent_copy_evidence="$INDEPENDENT_COPY_EVIDENCE_JSON"
           fi
+          service_instance_id="$(jq -er '.serviceInstanceId' railway-control-plane-before.json)"
+          deployment_instance_id="$(jq -er '.deploymentInstanceId' railway-control-plane-before.json)"
+          test "$(sha256sum "$AUTHORIZED_BUNDLE_PATH" | awk '{print $1}')" = "$AUTHORIZED_BUNDLE_FILE_SHA256"
+          execution_bundle_base64="$(base64 -w 0 "$AUTHORIZED_BUNDLE_PATH")"
+          test -n "$execution_bundle_base64"
           jq -cnS \
+            --arg executionBundleBase64 "$execution_bundle_base64" \
+            --arg executionBundleFileSha256 "$AUTHORIZED_BUNDLE_FILE_SHA256" \
             --arg expectedDeployedSha "$EXPECTED_DEPLOYED_SHA" \
+            --arg expectedAuthorityConfigChecksum "$EXPECTED_AUTHORITY_CONFIG_CHECKSUM" \
             --arg expectedPlanChecksum "$EXPECTED_PLAN_CHECKSUM" \
             --arg expectedStateFingerprint "$EXPECTED_STATE_FINGERPRINT" \
             --arg expectedUserInventoryFingerprint "$EXPECTED_USER_INVENTORY_FINGERPRINT" \
@@ -256,9 +617,14 @@ jobs:
             --arg serviceId "$RAILWAY_SERVICE_ID" \
             --arg volumeId "$RAILWAY_VOLUME_ID" \
             --arg volumeName "$RAILWAY_VOLUME_NAME" \
-            --arg volumeMountPath "$RAILWAY_VOLUME_MOUNT_PATH" '
+            --arg volumeMountPath "$RAILWAY_VOLUME_MOUNT_PATH" \
+            --arg serviceInstanceId "$service_instance_id" \
+            --arg deploymentInstanceId "$deployment_instance_id" '
               {
+                executionBundleBase64: $executionBundleBase64,
+                executionBundleFileSha256: $executionBundleFileSha256,
                 expectedDeployedSha: $expectedDeployedSha,
+                expectedAuthorityConfigChecksum: $expectedAuthorityConfigChecksum,
                 expectedPlanChecksum: $expectedPlanChecksum,
                 expectedStateFingerprint: $expectedStateFingerprint,
                 expectedUserInventoryFingerprint: $expectedUserInventoryFingerprint,
@@ -276,9 +642,15 @@ jobs:
                   volumeId: $volumeId,
                   volumeName: $volumeName,
                   volumeMountPath: $volumeMountPath
+                },
+                deploymentIdentity: {
+                  serviceInstanceId: $serviceInstanceId,
+                  deploymentInstanceId: $deploymentInstanceId
                 }
               }
             ' | tr -d '\n' > remediation-request.json
+          node scripts/railway-remediation-interlock.mjs > railway-interlock-immediate.json
+          cmp --silent railway-interlock-before.json railway-interlock-immediate.json
           REQUEST_ID="$(cat /proc/sys/kernel/random/uuid)"
           ISSUED_AT="$(date +%s)"
           EXPIRES_AT="$((ISSUED_AT + 300))"
@@ -293,44 +665,328 @@ jobs:
               process.env.ISSUED_AT,
               process.env.EXPIRES_AT,
               process.env.BODY_SHA256,
-            ].join("\\n");
+            ].join("\n");
             process.stdout.write(crypto.createHmac("sha256", process.env.REMEDIATION_SIGNING_SECRET).update(message).digest("hex"));
           ')"
           base_url="$PRODUCTION_API_ORIGIN/api/admin/production-scope-remediation"
-          curl --fail-with-body --silent --show-error \
+          http_status="$(curl --fail-with-body --silent --show-error \
+            --proto '=https' --tlsv1.2 \
+            --connect-timeout 15 --max-time 900 \
             --request POST \
+            --output remediation-response.json \
+            --write-out '%{http_code}' \
             --header 'Content-Type: application/json' \
+            --header 'Accept: application/json' \
+            --header 'Cache-Control: no-cache' \
             --header "X-Production-Scope-Remediation-Token: $OPERATION_SIGNATURE" \
             --header "X-Production-Scope-Remediation-Request-Id: $REQUEST_ID" \
             --header "X-Production-Scope-Remediation-Issued-At: $ISSUED_AT" \
             --header "X-Production-Scope-Remediation-Expires-At: $EXPIRES_AT" \
             --data-binary @remediation-request.json \
-            "$base_url/$MODE" > remediation-response.json
-          jq -e '.ok == true' remediation-response.json > /dev/null
-          jq '{
+            "$base_url/$MODE")"
+
+          case "$MODE" in
+            preflight)
+              test "$http_status" = "200"
+              jq -e \
+                --arg sha "$EXPECTED_DEPLOYED_SHA" \
+                --arg plan "$AUTHORIZED_EXECUTION_PLAN_SHA256" \
+                --arg authorityConfigChecksum "$AUTHORIZED_AUTHORITY_CONFIG_CHECKSUM" \
+                --arg project "$RAILWAY_PROJECT_ID" \
+                --arg environment "$RAILWAY_ENVIRONMENT_ID" \
+                --arg service "$RAILWAY_SERVICE_ID" \
+                --arg volume "$RAILWAY_VOLUME_ID" \
+                --arg volumeName "$RAILWAY_VOLUME_NAME" \
+                --arg mountPath "$RAILWAY_VOLUME_MOUNT_PATH" '
+                  .ok == true
+                  and .result.mode == "preflight"
+                  and .result.ok == false
+                  and .result.readyForBackup == true
+                  and .result.readyToApply == false
+                  and .result.deployedSha == $sha
+                  and .result.bundledPlanChecksum == $plan
+                  and .result.authorityConfigChecksum == $authorityConfigChecksum
+                  and (.result.executionPlanChecksum | test("^[a-f0-9]{64}$"))
+                  and .result.railwayIdentity == {
+                    projectId: $project,
+                    environmentId: $environment,
+                    serviceId: $service,
+                    volumeId: $volume,
+                    volumeName: $volumeName,
+                    volumeMountPath: $mountPath
+                  }
+                  and (.result.blockers | map(.code)) == ["RECOVERABLE_BACKUP_NOT_VERIFIED"]
+                  and .result.sqlite.integrity == "ok"
+                  and .result.sqlite.foreignKeyViolationCount == 0
+                  and .result.sqlite.databaseAndWalUnchanged == true
+                  and .result.runtimeSafety.readonly == true
+                  and .result.runtimeSafety.queryOnly == true
+                  and .result.runtimeSafety.totalChangesDelta == 0
+                ' remediation-response.json > /dev/null
+              ;;
+            backup)
+              test "$http_status" = "201"
+              jq -e \
+                --arg sha "$EXPECTED_DEPLOYED_SHA" \
+                --arg plan "$AUTHORIZED_EXECUTION_PLAN_SHA256" \
+                --arg authorityConfigChecksum "$AUTHORIZED_AUTHORITY_CONFIG_CHECKSUM" \
+                --arg company "$CANONICAL_COMPANY_ID" \
+                --arg project "$RAILWAY_PROJECT_ID" \
+                --arg environment "$RAILWAY_ENVIRONMENT_ID" \
+                --arg service "$RAILWAY_SERVICE_ID" \
+                --arg volume "$RAILWAY_VOLUME_ID" \
+                --arg volumeName "$RAILWAY_VOLUME_NAME" \
+                --arg mountPath "$RAILWAY_VOLUME_MOUNT_PATH" '
+                  .ok == true
+                  and .result.mode == "backup"
+                  and .result.ok == true
+                  and .result.deployedSha == $sha
+                  and .result.readyToApplyAfterIndependentCopy == true
+                  and .result.blockers == []
+                  and .result.receipt.receiptVersion == 2
+                  and .result.receipt.deployedSha == $sha
+                  and .result.receipt.bundledPlanChecksum == $plan
+                  and .result.receipt.authorityConfigChecksum == $authorityConfigChecksum
+                  and .result.receipt.canonicalCompanyId == $company
+                  and .result.receipt.railwayIdentity == {
+                    projectId: $project,
+                    environmentId: $environment,
+                    serviceId: $service,
+                    volumeId: $volume,
+                    volumeName: $volumeName,
+                    volumeMountPath: $mountPath
+                  }
+                  and .result.receipt.integrity == "ok"
+                  and .result.receipt.foreignKeyViolationCount == 0
+                  and .result.receipt.databaseIncludedAs == "database/app.sqlite"
+                  and .result.receipt.skippedFilesCount == 0
+                  and (.result.receipt.backupId | test("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+                  and (.result.receipt.filename | test("^rentcore-phase-a-[0-9]{8}T[0-9]{6}Z\\.zip$"))
+                  and (.result.receipt.sha256 | test("^[a-f0-9]{64}$"))
+                  and (.result.receipt.sizeBytes | type == "number" and . > 0)
+                  and (.result.receipt.executionPlanChecksum | test("^[a-f0-9]{64}$"))
+                  and .result.executionPlanChecksum == .result.receipt.executionPlanChecksum
+                ' remediation-response.json > /dev/null
+              ;;
+            apply)
+              test "$http_status" = "200"
+              jq -e \
+                --arg plan "$EXPECTED_PLAN_CHECKSUM" \
+                --arg authorityConfigChecksum "$EXPECTED_AUTHORITY_CONFIG_CHECKSUM" \
+                --arg state "$EXPECTED_STATE_FINGERPRINT" \
+                --arg postDatabase "$EXPECTED_POST_DATABASE_FINGERPRINT" \
+                --arg backupId "$BACKUP_ID" '
+                  .ok == true
+                  and .result.mode == "apply"
+                  and .result.ok == true
+                  and .result.status == "succeeded"
+                  and .result.writes == 13
+                  and .result.collectionWrites == 0
+                  and .result.bootstrapStatus == "succeeded"
+                  and .result.planChecksum == $plan
+                  and .result.authorityConfigChecksum == $authorityConfigChecksum
+                  and .result.sourceStateFingerprint == $state
+                  and .result.postDatabaseFingerprint == $postDatabase
+                  and .result.backupId == $backupId
+                  and (.result.independentBackupEvidenceSha256 | test("^[a-f0-9]{64}$"))
+                ' remediation-response.json > /dev/null
+              ;;
+            verify)
+              test "$http_status" = "200"
+              jq -e --arg sha "$EXPECTED_DEPLOYED_SHA" '
+                .ok == true
+                and .result.mode == "verify"
+                and .result.ok == true
+                and .result.deployedSha == $sha
+                and (.result.stateFingerprint | test("^[a-f0-9]{64}$"))
+                and (.result.databaseFingerprint | test("^[a-f0-9]{64}$"))
+                and (.result.planChecksum | test("^[a-f0-9]{64}$"))
+                and .result.blockers == []
+                and .result.summary.smokeScopeViolationCount == 0
+                and .result.summary.tenantMismatchCount == 0
+                and .result.summary.idempotentPlannedWriteCount == 0
+                and .result.runtimeSafety.readonly == true
+                and .result.runtimeSafety.queryOnly == true
+                and .result.runtimeSafety.totalChangesDelta == 0
+                and .result.verifyRuntimeSafety.readonly == true
+                and .result.verifyRuntimeSafety.queryOnly == true
+                and .result.verifyRuntimeSafety.totalChangesDelta == 0
+                and .result.verifyRuntimeSafety.databaseAndWalUnchanged == true
+              ' remediation-response.json > /dev/null
+              ;;
+            *) exit 1 ;;
+          esac
+
+          response_sha="$(sha256sum remediation-response.json | awk '{print $1}')"
+          if [[ "$MODE" == "backup" ]]; then
+            jq -cS '.result.receipt' remediation-response.json > remediation-backup-receipt.json
+          fi
+          jq -cS --arg httpStatus "$http_status" --arg responseSha256 "$response_sha" --arg expectedSha "$EXPECTED_DEPLOYED_SHA" '{
+            schemaVersion: 1,
+            httpStatus: ($httpStatus | tonumber),
             ok,
             mode: .result.mode,
-            deployedSha: .result.deployedSha,
+            deployedSha: (.result.deployedSha // $expectedSha),
             backupId: .result.receipt.backupId,
             stateFingerprint: (.result.stateFingerprint // .result.receipt.stateFingerprint),
             databaseFingerprint: (.result.databaseFingerprint // .result.receipt.databaseFingerprint),
             sourceFileSetFingerprint: .result.receipt.sourceFileSetFingerprint,
+            sourceObservedFileSetFingerprint: .result.receipt.sourceObservedFileSetFingerprint,
+            authorityConfigChecksum: (.result.authorityConfigChecksum // .result.receipt.authorityConfigChecksum),
             planChecksum: (.result.executionPlanChecksum // .result.planChecksum),
             userInventoryFingerprint: (.result.userInventory.fingerprint // .result.receipt.userInventoryFingerprint),
             userCount: (.result.userInventory.totalCount // 0),
             blockersCount: ((.result.blockers // []) | length),
-            writes: (.result.writes // 0)
-          }' remediation-response.json
+            writes: (.result.writes // 0),
+            responseSha256: $responseSha256
+          }' remediation-response.json > remediation-response-summary.json
+          metadata_tmp="$(mktemp "$RUNNER_TEMP/remediation-metadata.XXXXXX")"
+          jq -cS \
+            --arg requestId "$REQUEST_ID" \
+            --arg responseSha256 "$response_sha" \
+            --arg completedAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" '
+              . + {
+                requestId: $requestId,
+                responseSha256: $responseSha256,
+                completedAt: $completedAt
+              }
+            ' remediation-operation-metadata.json > "$metadata_tmp"
+          mv "$metadata_tmp" remediation-operation-metadata.json
+          jq . remediation-response-summary.json
+
+      - name: Revalidate exact Railway control-plane state after operation
+        id: railway_after
+        if: always() && steps.railway_before.outcome == 'success'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cd "$RUNNER_TEMP/production-scope-remediation-target"
+          railway status \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENVIRONMENT_ID" \
+            --json > railway-status-after.json
+          jq -e \
+            --arg project "$RAILWAY_PROJECT_ID" \
+            --arg environment "$RAILWAY_ENVIRONMENT_ID" \
+            --arg service "$RAILWAY_SERVICE_ID" \
+            --arg volume "$RAILWAY_VOLUME_ID" \
+            --arg volumeName "$RAILWAY_VOLUME_NAME" \
+            --arg mountPath "$RAILWAY_VOLUME_MOUNT_PATH" \
+            --arg sha "$EXPECTED_DEPLOYED_SHA" '
+              ([.environments.edges[].node | select(.id == $environment)]) as $environments
+              | $environments[0] as $environmentNode
+              | ([$environmentNode.serviceInstances.edges[].node | select(.serviceId == $service)]) as $services
+              | ([
+                  $environmentNode.volumeInstances.edges[].node
+                  | select(.serviceId == $service)
+                  | select(.volume.id == $volume)
+                  | select(.volume.name == $volumeName)
+                  | select(.mountPath == $mountPath)
+                  | select(.state == "READY")
+                ]) as $volumes
+              | ($services[0].latestDeployment.instances // []) as $instances
+              | if (
+                  .id == $project
+                  and ($environments | length) == 1
+                  and ($services | length) == 1
+                  and ($volumes | length) == 1
+                  and $services[0].latestDeployment.status == "SUCCESS"
+                  and $services[0].latestDeployment.meta.commitHash == $sha
+                  and ($services[0].id | type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+                  and ($services[0].latestDeployment.id | type == "string" and length > 0)
+                  and ($instances | length) == 1
+                  and $instances[0].status == "RUNNING"
+                  and ($instances[0].id | type == "string" and test("^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"))
+                ) then {
+                  projectId: .id,
+                  environmentId: $environmentNode.id,
+                  serviceId: $services[0].serviceId,
+                  serviceInstanceId: $services[0].id,
+                  volumeId: $volumes[0].volume.id,
+                  volumeName: $volumes[0].volume.name,
+                  volumeMountPath: $volumes[0].mountPath,
+                  volumeState: $volumes[0].state,
+                  deploymentId: $services[0].latestDeployment.id,
+                  deploymentStatus: $services[0].latestDeployment.status,
+                  deploymentCommitSha: $services[0].latestDeployment.meta.commitHash,
+                  deploymentInstanceId: $instances[0].id,
+                  runningInstanceIds: [$instances[0].id]
+                } else error("exact Railway production target is not stable") end
+            ' railway-status-after.json > "$GITHUB_WORKSPACE/railway-control-plane-after.json"
+          cmp --silent "$GITHUB_WORKSPACE/railway-control-plane-before.json" \
+            "$GITHUB_WORKSPACE/railway-control-plane-after.json"
+          node "$GITHUB_WORKSPACE/scripts/railway-remediation-interlock.mjs" \
+            > "$GITHUB_WORKSPACE/railway-interlock-after.json"
+          cmp --silent "$GITHUB_WORKSPACE/railway-interlock-before.json" \
+            "$GITHUB_WORKSPACE/railway-interlock-after.json"
+
+      - name: Revalidate exact API runtime identity after operation
+        id: runtime_after
+        if: always() && steps.runtime_before.outcome == 'success' && steps.railway_after.outcome == 'success'
+        env:
+          EXPECTED_DEPLOYED_SHA: ${{ inputs.expected_deployed_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f api-runtime-after.raw.json' EXIT
+          deployment_id="$(jq -er '.deploymentId' railway-control-plane-after.json)"
+          curl --fail-with-body --silent --show-error \
+            --proto '=https' --tlsv1.2 \
+            --connect-timeout 15 --max-time 60 \
+            --header 'Accept: application/json' \
+            --header 'Cache-Control: no-cache' \
+            "$PRODUCTION_API_ORIGIN/api/version" > api-runtime-after.raw.json
+          jq -e \
+            --arg sha "$EXPECTED_DEPLOYED_SHA" \
+            --arg deploymentId "$deployment_id" \
+            --arg environment "$RAILWAY_ENVIRONMENT_NAME" \
+            --arg service "$RAILWAY_SERVICE_NAME" '
+              .ok == true
+              and .build.service == "backend"
+              and .build.commitFull == $sha
+              and .build.deployment.railwayDeploymentId == $deploymentId
+              and .build.deployment.railwayEnvironment == $environment
+              and .build.deployment.railwayService == $service
+              and .build.deployment.nodeEnv == "production"
+              and (.build.startedAt | type == "string" and length > 0)
+              and (.app.disabled | type == "boolean")
+              and (.app.validationReadOnly | type == "boolean")
+            ' api-runtime-after.raw.json > /dev/null
+          jq -cS '{
+            ok,
+            build: {
+              service: .build.service,
+              commitFull: .build.commitFull,
+              startedAt: .build.startedAt,
+              deployment: .build.deployment
+            },
+            app: {
+              disabled: .app.disabled,
+              validationReadOnly: .app.validationReadOnly
+            }
+          }' api-runtime-after.raw.json > api-runtime-identity-after.json
+          cmp --silent api-runtime-identity-before.json api-runtime-identity-after.json
 
       - name: Download, verify, and encrypt coherent backup off-volume
-        if: inputs.mode == 'backup'
+        if: >-
+          inputs.mode == 'backup' &&
+          steps.operation.outcome == 'success' &&
+          steps.railway_after.outcome == 'success' &&
+          steps.runtime_after.outcome == 'success'
+        id: encrypt_backup
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROJECT_TOKEN }}
           BACKUP_ENCRYPTION_PASSPHRASE: ${{ secrets.PRODUCTION_SCOPE_REMEDIATION_BACKUP_ENCRYPTION_PASSPHRASE }}
         run: |
-          filename="$(jq -er '.result.receipt.filename' remediation-response.json)"
-          expected_sha="$(jq -er '.result.receipt.sha256' remediation-response.json)"
-          expected_size="$(jq -er '.result.receipt.sizeBytes' remediation-response.json)"
+          set -euo pipefail
+          umask 077
+          trap 'rm -f "$GITHUB_WORKSPACE/remediation-backup.zip" "$GITHUB_WORKSPACE/remediation-backup-verify.zip"' EXIT
+          filename="$(jq -er '.filename' remediation-backup-receipt.json)"
+          expected_sha="$(jq -er '.sha256' remediation-backup-receipt.json)"
+          expected_size="$(jq -er '.sizeBytes' remediation-backup-receipt.json)"
           cd "$RUNNER_TEMP/production-scope-remediation-target"
           railway volume \
             --project "$RAILWAY_PROJECT_ID" \
@@ -345,10 +1001,16 @@ jobs:
             --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
             --symmetric --cipher-algo AES256 \
             --output remediation-backup.zip.gpg remediation-backup.zip
+          printf '%s' "$BACKUP_ENCRYPTION_PASSPHRASE" | gpg \
+            --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --decrypt --output remediation-backup-verify.zip remediation-backup.zip.gpg
+          test "$(sha256sum remediation-backup-verify.zip | awk '{print $1}')" = "$expected_sha"
+          test "$(stat -c '%s' remediation-backup-verify.zip)" = "$expected_size"
           rm -f remediation-backup.zip
+          rm -f remediation-backup-verify.zip
 
       - name: Store encrypted off-volume backup
-        if: inputs.mode == 'backup'
+        if: inputs.mode == 'backup' && steps.encrypt_backup.outcome == 'success'
         id: backup_artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -358,15 +1020,21 @@ jobs:
           retention-days: 30
 
       - name: Create independent-copy machine evidence
-        if: inputs.mode == 'backup'
+        if: inputs.mode == 'backup' && steps.backup_artifact.outcome == 'success'
         env:
           ARTIFACT_URL: ${{ steps.backup_artifact.outputs.artifact-url }}
           ARTIFACT_DIGEST: ${{ steps.backup_artifact.outputs.artifact-digest }}
         run: |
+          set -euo pipefail
+          umask 077
+          [[ "$ARTIFACT_URL" =~ ^https://github\.com/rishatkznAI/rental-management/actions/runs/${GITHUB_RUN_ID}/artifacts/[1-9][0-9]*$ ]]
+          [[ "$ARTIFACT_DIGEST" =~ ^(sha256:)?[a-f0-9]{64}$ ]]
           encrypted_sha="$(sha256sum remediation-backup.zip.gpg | awk '{print $1}')"
           encrypted_size="$(stat -c '%s' remediation-backup.zip.gpg)"
+          [[ "$encrypted_sha" =~ ^[a-f0-9]{64}$ ]]
+          test "$encrypted_size" -gt 0
           jq -nS \
-            --argjson receipt "$(jq -c '.result.receipt' remediation-response.json)" \
+            --argjson receipt "$(jq -c '.' remediation-backup-receipt.json)" \
             --arg repository "$GITHUB_REPOSITORY" \
             --arg runId "$GITHUB_RUN_ID" \
             --arg artifactName "production-scope-remediation-backup-$GITHUB_RUN_ID" \
@@ -384,6 +1052,9 @@ jobs:
                 githubArtifactDigest: $githubArtifactDigest,
                 encryptedArchiveSha256: $encryptedArchiveSha256,
                 encryptedArchiveSizeBytes: $encryptedArchiveSizeBytes,
+                decryptabilityVerified: true,
+                decryptedArchiveSha256: $receipt.sha256,
+                decryptedArchiveSizeBytes: $receipt.sizeBytes,
                 backupId: $receipt.backupId,
                 filename: $receipt.filename,
                 backupSha256: $receipt.sha256,
@@ -393,6 +1064,8 @@ jobs:
                 userInventoryFingerprint: $receipt.userInventoryFingerprint,
                 databaseFingerprint: $receipt.databaseFingerprint,
                 sourceFileSetFingerprint: $receipt.sourceFileSetFingerprint,
+                sourceObservedFileSetFingerprint: $receipt.sourceObservedFileSetFingerprint,
+                authorityConfigChecksum: $receipt.authorityConfigChecksum,
                 canonicalCompanyId: $receipt.canonicalCompanyId,
                 bundledPlanChecksum: $receipt.bundledPlanChecksum,
                 executionPlanChecksum: $receipt.executionPlanChecksum,
@@ -405,15 +1078,58 @@ jobs:
             ' > independent-copy-machine-evidence.json
 
       - name: Store protected non-secret review evidence
+        if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: production-scope-remediation-${{ inputs.mode }}-${{ github.run_id }}
           path: |
-            remediation-response.json
+            remediation-operation-metadata.json
+            remediation-response-summary.json
+            railway-control-plane-before.json
+            railway-control-plane-after.json
+            railway-interlock-before.json
+            railway-interlock-immediate.json
+            railway-interlock-after.json
+            api-runtime-identity-before.json
+            api-runtime-identity-after.json
             independent-copy-machine-evidence.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
 
-      - name: Remove transient backup files
-        if: always() && inputs.mode == 'backup'
-        run: rm -f remediation-backup.zip remediation-backup.zip.gpg
+      - name: Remove and verify absence of transient plaintext and credentials
+        if: always()
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$RUNNER_TEMP" == /* ]]
+          target_dir="$RUNNER_TEMP/production-scope-remediation-target"
+          verification_file="$RUNNER_TEMP/authorized-bundle-verification.json"
+          authorized_bundle_path="${AUTHORIZED_BUNDLE_PATH:-}"
+          rm -f \
+            remediation-request.json \
+            remediation-response.json \
+            api-runtime-before.raw.json \
+            api-runtime-after.raw.json \
+            remediation-backup-receipt.json \
+            remediation-backup.zip \
+            remediation-backup-verify.zip \
+            remediation-backup.zip.gpg
+          rm -rf -- "$target_dir"
+          rm -f -- "$verification_file"
+          if [[ -n "$authorized_bundle_path" ]]; then
+            [[ "$authorized_bundle_path" == "$RUNNER_TEMP"/production-scope-remediation-authorized-bundle.* ]]
+            rm -f -- "$authorized_bundle_path"
+          fi
+          test ! -e remediation-request.json
+          test ! -e remediation-response.json
+          test ! -e api-runtime-before.raw.json
+          test ! -e api-runtime-after.raw.json
+          test ! -e remediation-backup-receipt.json
+          test ! -e remediation-backup.zip
+          test ! -e remediation-backup-verify.zip
+          test ! -e remediation-backup.zip.gpg
+          test ! -e "$target_dir"
+          test ! -e "$verification_file"
+          if [[ -n "$authorized_bundle_path" ]]; then
+            test ! -e "$authorized_bundle_path"
+          fi

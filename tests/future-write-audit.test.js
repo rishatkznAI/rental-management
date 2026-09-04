@@ -184,6 +184,29 @@ test('every raw app_data DML site resolves exact registry collections', () => {
   }
 });
 
+test('production remediation CAS is bounded to the current non-overlay array scope', () => {
+  const report = buildFutureWriteAudit({ rootDir: ROOT, policy });
+  const remediationCas = report.writeSites.find(site => (
+    site.file === 'server/lib/production-scope-remediation.js'
+    && site.function === 'persistCollectionDiff'
+    && site.kind === 'SQL_PREPARED_RUN'
+  ));
+  assert.ok(remediationCas);
+  const allowedCategories = new Set([
+    COLLECTION_SCOPE_CATEGORY.TENANT,
+    COLLECTION_SCOPE_CATEGORY.TENANT_TECHNICAL,
+    COLLECTION_SCOPE_CATEGORY.DERIVED_SCOPE,
+    COLLECTION_SCOPE_CATEGORY.LEGACY_HISTORY,
+  ]);
+  const expected = ALL_APP_DATA_COLLECTIONS.filter(name => (
+    allowedCategories.has(COLLECTION_SCOPE_REGISTRY[name].category)
+    && COLLECTION_SCOPE_REGISTRY[name].shape === 'ARRAY'
+  )).sort();
+  assert.deepEqual(remediationCas.collections, expected);
+  assert.equal(remediationCas.collections.includes('public_site_cms'), false);
+  assert.equal(remediationCas.collections.includes('users'), false);
+});
+
 test('clean reset dynamic bounds are the exact collection and SQL-table deletion allowlists', () => {
   const report = buildFutureWriteAudit({ rootDir: ROOT, policy });
   const appDataUpdate = report.writeSites.find(site => (
@@ -240,6 +263,16 @@ test('platform-only, connection-guard, disposable-copy, and backup artifacts are
   const localVisibility = report.writeSites.filter(site => site.file === 'server/scripts/verify-production-scope-local-visibility.js');
   assert.ok(localVisibility.length > 0);
   assert.ok(localVisibility.every(site => site.disposableOnly && /OS-temp|nlink=1/.test(site.guard)));
+  const identitySimulation = report.writeSites.filter(site => (
+    site.file === 'server/scripts/simulate-skytech-identity-bootstrap-read-only.js'
+  ));
+  assert.equal(identitySimulation.length, 2);
+  assert.ok(identitySimulation.every(site => (
+    site.kind === 'SQL_CONNECTION_GUARD'
+    && site.disposableOnly
+    && site.contributesCollectionPaths === false
+    && /source is never SQLite-opened/.test(site.guard)
+  )));
   assert.equal(report.summary.backupArtifactSiteCount, 4);
   assert.ok(report.backupArtifactPaths.every(site => site.guard && site.contributesCollectionPaths === false));
 });

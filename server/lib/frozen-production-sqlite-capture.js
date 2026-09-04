@@ -32,8 +32,20 @@ const REMOTE_DATABASE_PATHS = Object.freeze(SQLITE_FILE_NAMES.map(name => ({
 
 const RUNTIME_SNAPSHOT_SCRIPT = String.raw`
 'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
 const e = process.env;
 const exactEmpty = name => e[name] === '';
+const authorizedBundlePinPath = path.join(
+  path.dirname(e.DB_PATH || ''),
+  '.production-scope-remediation-authorized-bundle.sha256'
+);
+let authorizedBundlePinAbsent = false;
+try {
+  fs.lstatSync(authorizedBundlePinPath);
+} catch (error) {
+  authorizedBundlePinAbsent = error && error.code === 'ENOENT';
+}
 const result = {
   identity: {
     projectId: e.RAILWAY_PROJECT_ID || '',
@@ -56,15 +68,19 @@ const result = {
     gsmEnabled: e.GSM_ENABLED === 'true',
     cleanResetDisabled: e.SKYTECH_CLEAN_RESET_ENABLED === 'false' && exactEmpty('SKYTECH_CLEAN_RESET_TOKEN'),
     adminResetDisabled: exactEmpty('ADMIN_RESET_PASSWORD'),
-    allowedModesEmpty: exactEmpty('PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES') && exactEmpty('PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODE'),
+    remediationAllowedModesExact: e.PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES === 'preflight,backup,apply,verify'
+      && exactEmpty('PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODE'),
     schemaCompatibilityDisabled: e.PRODUCTION_SCOPE_REMEDIATION_SCHEMA_COMPATIBILITY === 'false',
     validationReadOnlyDisabled: e.PRODUCTION_SCOPE_REMEDIATION_VALIDATION_READ_ONLY === 'false',
     storageWriteGuardEnabled: e.PRODUCTION_SCOPE_REMEDIATION_ENABLED === 'true' && e.PRODUCTION_SCOPE_REMEDIATION_WRITE_FREEZE === 'true',
     preCompatibilityBackupDisabled: e.SKYTECH_PRE_COMPATIBILITY_BACKUP_ENABLED === 'false'
       && exactEmpty('SKYTECH_PRE_COMPATIBILITY_BACKUP_EXPECTED_SHA')
       && exactEmpty('SKYTECH_PRE_COMPATIBILITY_BACKUP_TOKEN'),
-    remediationSigningSecretEmpty: exactEmpty('PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET'),
-    expectedExecutionShaEmpty: exactEmpty('PRODUCTION_SCOPE_REMEDIATION_EXPECTED_EXECUTION_SHA')
+    remediationSigningSecretConfigured: typeof e.PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET === 'string'
+      && e.PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET.length >= 32,
+    expectedExecutionShaMatchesDeployedSha: /^[a-f0-9]{40}$/.test(e.PRODUCTION_SCOPE_REMEDIATION_EXPECTED_EXECUTION_SHA || '')
+      && e.PRODUCTION_SCOPE_REMEDIATION_EXPECTED_EXECUTION_SHA === e.RAILWAY_GIT_COMMIT_SHA,
+    authorizedBundlePinAbsent
   }
 };
 process.stdout.write(JSON.stringify(result));
@@ -283,13 +299,14 @@ const RUNTIME_CONSERVATION_EXPECTED = Object.freeze({
   gsmEnabled: false,
   cleanResetDisabled: true,
   adminResetDisabled: true,
-  allowedModesEmpty: true,
+  remediationAllowedModesExact: true,
   schemaCompatibilityDisabled: true,
   validationReadOnlyDisabled: true,
   storageWriteGuardEnabled: true,
   preCompatibilityBackupDisabled: true,
-  remediationSigningSecretEmpty: true,
-  expectedExecutionShaEmpty: true,
+  remediationSigningSecretConfigured: true,
+  expectedExecutionShaMatchesDeployedSha: true,
+  authorizedBundlePinAbsent: true,
 });
 
 function normalizeRuntimeSnapshot(raw, railway, expectedCaptureSha) {
@@ -784,12 +801,17 @@ function nextTimestamp(nowValue, afterMs = null) {
 function builderConservation(runtime) {
   return {
     adminResetDisabled: runtime.conservation.adminResetDisabled,
-    allowedModesEmpty: runtime.conservation.allowedModesEmpty,
+    authorizedBundlePinAbsent: runtime.conservation.authorizedBundlePinAbsent,
     appDisabled: runtime.conservation.appDisabled,
     botDisabled: runtime.conservation.botDisabled,
     cleanResetDisabled: runtime.conservation.cleanResetDisabled,
+    expectedExecutionShaMatchesDeployedSha:
+      runtime.conservation.expectedExecutionShaMatchesDeployedSha,
     gsmDisabled: runtime.conservation.gsmDisabled,
     gsmEnabled: runtime.conservation.gsmEnabled,
+    remediationAllowedModesExact: runtime.conservation.remediationAllowedModesExact,
+    remediationSigningSecretConfigured:
+      runtime.conservation.remediationSigningSecretConfigured,
     schemaCompatibilityDisabled: runtime.conservation.schemaCompatibilityDisabled,
     singleReplica: true,
     storageWriteGuardEnabled: runtime.conservation.storageWriteGuardEnabled,
@@ -976,7 +998,7 @@ async function acquireFrozenProductionSqliteCapture(options, injectedDependencie
     const generatedTime = nextTimestamp(dependencies.now(), roundBTime.ms);
     const classificationAuthorityFingerprint = sha256(stableJson(classificationAuthoritySnapshot()));
     const control = {
-      controlVersion: 2,
+      controlVersion: 3,
       productionWriteAuthorized: false,
       networkAccessAuthorized: false,
       rawCaptureSQLiteOpenAuthorized: false,

@@ -1,0 +1,956 @@
+{
+  "simulationVersion": 1,
+  "classification": "HISTORICAL_SIMULATION_ONLY",
+  "productionExecutionAuthorized": false,
+  "executionCapability": "NONE",
+  "writesPerformed": 0,
+  "sourcePathDisclosure": "OMITTED_FROM_SEALED_EVIDENCE",
+  "historicalSource": {
+    "captureDeployedSha": "f01ad6b1a73157096f7bbda51c15f456c30c6fb0",
+    "captureDeploymentId": "f6e441be-8a21-4b2a-b074-e923b91de94d",
+    "sourceSnapshotSha256": "7540a73f49766e1171846da5a0d13e07107b38b9b6a6a28f752207fb2edbee08",
+    "stateFingerprint": "6ff76aeb2e8c0d68398bda9c905fa43a48d229f7028b60a1540c3a62f711e658",
+    "appDataFingerprint": "3557918102195f737fcf66e6bacd6f3ef2329c86818d24cac87a279913ba71f2",
+    "userInventoryFingerprint": "793faf77ae828914692fadadd94547e90518601a34760535eb385968a08fca71",
+    "databaseContentFingerprint": "e2424e27e975e980d68296bcfda5d49593b38e99b831e7872093bc9f51ca5a5a",
+    "durableFileSetFingerprint": "d108ff1bd220a101e9296682b1add4eda6bea36ca7da0a940cd4bb3e3a060bfd",
+    "observedFileSetFingerprint": "42e2e797a8530c0dd978f12355c886c33efc997308d7713d045a61ead9c9623c",
+    "sqliteFiles": {
+      "database": {
+        "name": "app.sqlite",
+        "sizeBytes": 11927552,
+        "sha256": "cec05fa85619512049fa3c8ac8acf0375b09e944d727dd7c4864365ff6b12587"
+      },
+      "wal": {
+        "name": "app.sqlite-wal",
+        "sizeBytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "shm": {
+        "name": "app.sqlite-shm",
+        "sizeBytes": 32768,
+        "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+      }
+    }
+  },
+  "readOnlyProof": {
+    "sourceDatabaseOpenedBySqlite": false,
+    "simulationDatabaseSource": "EPHEMERAL_LOCAL_MIRROR",
+    "sqliteOpenMode": "readonly",
+    "sqliteQueryOnly": true,
+    "sqliteForeignKeys": true,
+    "totalChangesBefore": 0,
+    "totalChangesAfter": 0,
+    "totalChangesDelta": 0,
+    "quickCheck": [
+      "ok"
+    ],
+    "foreignKeyFailureCount": 0,
+    "sqliteFilesBefore": {
+      "database": {
+        "name": "app.sqlite",
+        "sizeBytes": 11927552,
+        "sha256": "cec05fa85619512049fa3c8ac8acf0375b09e944d727dd7c4864365ff6b12587"
+      },
+      "wal": {
+        "name": "app.sqlite-wal",
+        "sizeBytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "shm": {
+        "name": "app.sqlite-shm",
+        "sizeBytes": 32768,
+        "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+      }
+    },
+    "sqliteFilesAfter": {
+      "database": {
+        "name": "app.sqlite",
+        "sizeBytes": 11927552,
+        "sha256": "cec05fa85619512049fa3c8ac8acf0375b09e944d727dd7c4864365ff6b12587"
+      },
+      "wal": {
+        "name": "app.sqlite-wal",
+        "sizeBytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "shm": {
+        "name": "app.sqlite-shm",
+        "sizeBytes": 32768,
+        "sha256": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb"
+      }
+    },
+    "sqliteFilesByteIdentical": true,
+    "observedFileSetFingerprintBefore": "42e2e797a8530c0dd978f12355c886c33efc997308d7713d045a61ead9c9623c",
+    "observedFileSetFingerprintAfter": "42e2e797a8530c0dd978f12355c886c33efc997308d7713d045a61ead9c9623c",
+    "ephemeralMirrorRemoved": true
+  },
+  "appDataNonWriteEvidence": {
+    "rowCount": 70,
+    "tableFingerprint": "3557918102195f737fcf66e6bacd6f3ef2329c86818d24cac87a279913ba71f2",
+    "usersRawSha256": "5bc789a58d967335aaef561854788e29c11e6f1941aa11b066b293b6952fdb90",
+    "userInventoryFingerprint": "793faf77ae828914692fadadd94547e90518601a34760535eb385968a08fca71",
+    "userInventoryTotalCount": 14,
+    "eligibleActiveUserCount": 5,
+    "protectedPrincipalRecordSha256": {
+      "1775756913074": "0f61dcb75e71e500e3326b4bdb29c0a763482e86bfbd4a06411bde2082334cca",
+      "1776673416137": "fce3e1b72ab2135f911acb0f8f22795ceefa6697fb50032077b52fbd7ac0f0bd",
+      "1787547467703": "6b5982c649e85ced58430aeacff85a21d7e52fc214a43829fab526dfc2d59ef0",
+      "DEMO-USER-CARRIER": "e17f385ea57461f6943be811dec5fa0067765c90114140827ca53be8e2ec4af6",
+      "production-smoke-admin": "480a84e78182691e29b0fdc3e0f2f2353bb5486b036240f4f3328c2b0afbf2e2"
+    }
+  },
+  "identityPlan": {
+    "mode": "plan",
+    "ok": true,
+    "writes": 0,
+    "blockers": [],
+    "warnings": [],
+    "authorityConfigChecksum": "dcfc0c9b714d6e6aeffc2c46634b33df7f3a31e8582c00b9ed1f1e840d69ab3c",
+    "schemaFingerprint": "58fcb559e6f8d2244222d5140e052d42ed4e17d95e32a22fcef1f3ce5b88a894",
+    "usersDirectoryFingerprint": "741d05fe393449e7220a23066e58de8eff16ae116285b4911b9b4e0a224fcc16",
+    "mappedPrincipalIds": [
+      "1775756913074"
+    ],
+    "intentionallyUnmappedPrincipalIds": [
+      "1776673416137",
+      "1787547467703",
+      "DEMO-USER-CARRIER",
+      "production-smoke-admin"
+    ],
+    "eligibleActivePrincipalIds": [
+      "1775756913074",
+      "1776673416137",
+      "1787547467703",
+      "DEMO-USER-CARRIER",
+      "production-smoke-admin"
+    ],
+    "beforeCounts": {
+      "canonical_companies": 0,
+      "canonical_branches": 0,
+      "company_memberships": 0,
+      "membership_branch_access": 0,
+      "role_templates": 0,
+      "role_template_capabilities": 0,
+      "membership_capability_assignments": 0,
+      "authorization_audit_events": 0,
+      "identity_bootstrap_runs": 0
+    },
+    "afterCounts": {
+      "canonical_companies": 1,
+      "canonical_branches": 1,
+      "company_memberships": 1,
+      "membership_branch_access": 0,
+      "role_templates": 1,
+      "role_template_capabilities": 3,
+      "membership_capability_assignments": 0,
+      "authorization_audit_events": 4,
+      "identity_bootstrap_runs": 1
+    },
+    "exactChanges": {
+      "companies": 1,
+      "branches": 1,
+      "roleTemplates": 1,
+      "roleTemplateCapabilities": 3,
+      "memberships": 1,
+      "branchGrants": 0,
+      "capabilityAssignments": 0,
+      "authorizationAuditEvents": 4,
+      "bootstrapRuns": 1
+    },
+    "financialCounts": {
+      "canonical_receivables": 0,
+      "financial_audit_events": 0,
+      "canonical_payments": 0,
+      "canonical_payment_allocations": 0,
+      "canonical_receivable_adjustments": 0,
+      "canonical_approval_requests": 0
+    }
+  },
+  "deterministicExpectedPostAuthority": {
+    "capabilityCatalogVersion": 1,
+    "authoritySnapshotFingerprint": "d4c5bd8f49712e72614755c6e21c0c0a04b37b41bbd0efd29ee6bcb479657926",
+    "authorityRowCounts": {
+      "canonical_companies": 1,
+      "canonical_branches": 1,
+      "company_memberships": 1,
+      "membership_branch_access": 0,
+      "role_templates": 1,
+      "role_template_capabilities": 3,
+      "membership_capability_assignments": 0
+    }
+  },
+  "guardedIdentityOnlySimulation": {
+    "classification": "HISTORICAL_SIMULATION_ONLY",
+    "productionExecutionAuthorized": false,
+    "executionScope": "IDENTITY_ONLY",
+    "preparedGuardedPlanSha256": "da717c3e74250fb5a2c81463461e0d7183fe56d99c44de2b243c0aa1245926cd",
+    "executionPlanChecksum": "9655a3ec5739a0c9d6371fa2b0eb5d71c1904e74a71ff07b36afd035741b3c85",
+    "stateFingerprint": "6ff76aeb2e8c0d68398bda9c905fa43a48d229f7028b60a1540c3a62f711e658",
+    "readyToApplyOnHistoricalSnapshotOnly": true,
+    "writes": 0,
+    "blockers": [],
+    "targetCollections": [],
+    "appDataFingerprint": "3557918102195f737fcf66e6bacd6f3ef2329c86818d24cac87a279913ba71f2",
+    "plannedDiff": {
+      "CREATE": [
+        {
+          "type": "Company",
+          "id": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+          "value": {
+            "id": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+            "displayName": "ООО \"СКАЙТЕХ КОМПАНИ\"",
+            "receivablesTimezone": "Europe/Moscow"
+          }
+        },
+        {
+          "type": "Branch",
+          "id": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+          "value": {
+            "id": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+            "displayName": "Головной офис",
+            "isHeadOffice": true,
+            "status": "active"
+          }
+        },
+        {
+          "type": "RoleTemplate",
+          "id": "company-administrator:v1",
+          "value": {
+            "templateKey": "company-administrator",
+            "templateVersion": 1,
+            "displayName": "Company Administrator",
+            "capabilities": [
+              "branches.manage",
+              "companies.manage",
+              "members.manage"
+            ]
+          }
+        },
+        {
+          "type": "Membership",
+          "id": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q",
+          "value": {
+            "id": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q",
+            "principalId": "1775756913074",
+            "status": "active",
+            "roleTemplateKey": "company-administrator",
+            "roleTemplateVersion": 1,
+            "companyWideBranchAuthority": true,
+            "branchIds": [],
+            "capabilityAssignments": [],
+            "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ"
+          }
+        }
+      ],
+      "UPDATE": [],
+      "RELINK": [],
+      "UNRESOLVED": []
+    },
+    "expectedPostState": {
+      "companies": 1,
+      "memberships": 1,
+      "orphanCount": 0,
+      "scopeAnomalyCount": 0
+    },
+    "historicalProjectedRuntimeIds": [
+      {
+        "ordinal": 1,
+        "prefix": "authorization-audit",
+        "id": "authorization-audit-e7622c8d-4a18-4c34-aa08-6d65432a460a"
+      },
+      {
+        "ordinal": 2,
+        "prefix": "authorization-audit",
+        "id": "authorization-audit-f6b4ba37-6f74-49c6-a6a1-7214cf6c7c11"
+      },
+      {
+        "ordinal": 3,
+        "prefix": "authorization-audit",
+        "id": "authorization-audit-1071d118-6842-4846-a465-996b896a0c19"
+      },
+      {
+        "ordinal": 4,
+        "prefix": "authorization-audit",
+        "id": "authorization-audit-9f2db4dd-3995-4022-aa54-164ccc32caca"
+      },
+      {
+        "ordinal": 5,
+        "prefix": "identity-bootstrap",
+        "id": "identity-bootstrap-e6169bc9-4785-43dc-af2a-f012d2bc60c9"
+      }
+    ],
+    "executionTimeRuntimeIdsStatus": "UNRESOLVED_EXECUTION_TIME_BINDING"
+  },
+  "bundleValidation": {
+    "valid": true,
+    "reviewOnly": true,
+    "productionExecutionAuthorized": false,
+    "bundleSha256": "7ea357c247f8d3e69216efd2c9239123719579d00da5916b2c4ac5f1f6b7bc8b",
+    "bindingCompleteness": {
+      "complete": false,
+      "authorizationReady": false,
+      "unresolvedKeys": [
+        "appDataFingerprint",
+        "approvedAt",
+        "authorityConfigChecksum",
+        "authorizedExecutionSha",
+        "backupReference",
+        "captureDeployedSha",
+        "captureDeploymentId",
+        "databaseContentFingerprint",
+        "durableFileSetFingerprint",
+        "executionPlanChecksum",
+        "expectedPostStateFingerprint",
+        "freshBackupReceipt",
+        "observedFileSetFingerprint",
+        "schemaFingerprint",
+        "sourceSnapshotSha256",
+        "stateFingerprint",
+        "userInventoryFingerprint",
+        "usersDirectoryFingerprint"
+      ],
+      "nextCheckpoint": "SEPARATE_EXPLICIT_PRODUCTION_STAGE_AUTHORIZATION_REQUIRED"
+    }
+  },
+  "bundle": {
+    "bundleVersion": 1,
+    "kind": "skytech-identity-bootstrap-review",
+    "status": "REVIEW_ONLY_NON_AUTHORIZING",
+    "productionExecutionAuthorized": false,
+    "executionCapability": "NONE",
+    "writesPerformed": 0,
+    "approvalReference": "AUTHORITATIVE_PRINCIPAL_DISPOSITION_2026-09-01",
+    "authorityDecisionSha256": "00327ecd08ba955c204102080215528c2c909b8b4ddd88a5ba00b93c1a15e97d",
+    "preparedPlanSha256": "70b6eb60fb5b59a5afa3ab06c0f4335feae9743549ac1c40d5b46349bd155c05",
+    "authority": {
+      "configVersion": 1,
+      "company": {
+        "id": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+        "displayName": "ООО \"СКАЙТЕХ КОМПАНИ\"",
+        "receivablesTimezone": "Europe/Moscow"
+      },
+      "branches": [
+        {
+          "id": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+          "displayName": "Головной офис",
+          "isHeadOffice": true,
+          "status": "active"
+        }
+      ],
+      "roleTemplates": [
+        {
+          "templateKey": "company-administrator",
+          "templateVersion": 1,
+          "displayName": "Company Administrator",
+          "capabilities": [
+            "branches.manage",
+            "companies.manage",
+            "members.manage"
+          ]
+        }
+      ],
+      "memberships": [
+        {
+          "id": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q",
+          "principalId": "1775756913074",
+          "status": "active",
+          "roleTemplateKey": "company-administrator",
+          "roleTemplateVersion": 1,
+          "companyWideBranchAuthority": true,
+          "branchIds": [],
+          "capabilityAssignments": []
+        }
+      ],
+      "intentionallyUnmappedUserIds": [
+        "1776673416137",
+        "1787547467703",
+        "DEMO-USER-CARRIER",
+        "production-smoke-admin"
+      ]
+    },
+    "principalDispositions": [
+      {
+        "principalId": "1775756913074",
+        "displayName": "Хабибрахманов Ришат Ринатович",
+        "disposition": "CREATE_EXACT_MEMBERSHIP",
+        "membershipId": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q",
+        "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+        "roleTemplateId": "company-administrator:v1"
+      },
+      {
+        "principalId": "1776673416137",
+        "displayName": "Мениса",
+        "email": "kmzh@mantall.ru",
+        "disposition": "INTENTIONALLY_UNMAPPED",
+        "preserveUserRecordExactly": true,
+        "membershipAcrossAllCompanies": "NONE"
+      },
+      {
+        "principalId": "1787547467703",
+        "displayName": "Айзат",
+        "email": "mp2@mantall.ru",
+        "disposition": "INTENTIONALLY_UNMAPPED",
+        "preserveUserRecordExactly": true,
+        "membershipAcrossAllCompanies": "NONE"
+      },
+      {
+        "principalId": "DEMO-USER-CARRIER",
+        "displayName": "Demo Carrier User",
+        "disposition": "INTENTIONALLY_UNMAPPED",
+        "preserveUserRecordExactly": true,
+        "membershipAcrossAllCompanies": "NONE"
+      },
+      {
+        "principalId": "production-smoke-admin",
+        "displayName": "Production Smoke Admin",
+        "disposition": "INTENTIONALLY_UNMAPPED",
+        "preserveUserRecordExactly": true,
+        "membershipAcrossAllCompanies": "NONE"
+      }
+    ],
+    "expectedRowCountDeltas": {
+      "canonical_companies": 1,
+      "canonical_branches": 1,
+      "company_memberships": 1,
+      "membership_branch_access": 0,
+      "role_templates": 1,
+      "role_template_capabilities": 3,
+      "membership_capability_assignments": 0,
+      "authorization_audit_events": 4,
+      "identity_bootstrap_runs": 1
+    },
+    "auditEventManifest": [
+      {
+        "ordinal": 1,
+        "action": "company.authority.created",
+        "targetType": "company",
+        "targetId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+        "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+        "branchId": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+        "actorPrincipalId": "1775756913074"
+      },
+      {
+        "ordinal": 2,
+        "action": "branch.created",
+        "targetType": "branch",
+        "targetId": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+        "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+        "branchId": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+        "actorPrincipalId": "1775756913074"
+      },
+      {
+        "ordinal": 3,
+        "action": "role_template.created",
+        "targetType": "role_template",
+        "targetId": "company-administrator:v1",
+        "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+        "branchId": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+        "actorPrincipalId": "1775756913074"
+      },
+      {
+        "ordinal": 4,
+        "action": "membership.created",
+        "targetType": "membership",
+        "targetId": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q",
+        "companyId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ",
+        "branchId": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ",
+        "actorPrincipalId": "1775756913074"
+      }
+    ],
+    "writeManifest": {
+      "scope": "IDENTITY_ONLY",
+      "uniqueAffectedRowCount": 12,
+      "expectedSqliteTotalChanges": 13,
+      "collectionWriteCount": 0,
+      "businessDataMutationCount": 0,
+      "schemaMutationCount": 0,
+      "migrationMutationCount": 0,
+      "tenantGuardMutationCount": 0,
+      "environmentMutationCount": 0,
+      "smokeIdentityMutationCount": 0,
+      "operations": [
+        {
+          "sequence": 1,
+          "table": "canonical_companies",
+          "operation": "INSERT_INACTIVE",
+          "rowIdentity": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ"
+        },
+        {
+          "sequence": 2,
+          "table": "canonical_branches",
+          "operation": "INSERT",
+          "rowIdentity": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ"
+        },
+        {
+          "sequence": 3,
+          "table": "canonical_companies",
+          "operation": "UPDATE_ACTIVATE",
+          "rowIdentity": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ"
+        },
+        {
+          "sequence": 4,
+          "table": "authorization_audit_events",
+          "operation": "INSERT",
+          "rowIdentity": "runtime:audit:1",
+          "targetId": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ"
+        },
+        {
+          "sequence": 5,
+          "table": "authorization_audit_events",
+          "operation": "INSERT",
+          "rowIdentity": "runtime:audit:2",
+          "targetId": "brn_VRNOM4ABOTHKRJYODGZSPVE3WPN6CGOJITLZBD2SCYWODKFF5NYQ"
+        },
+        {
+          "sequence": 6,
+          "table": "role_templates",
+          "operation": "INSERT",
+          "rowIdentity": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ:company-administrator:v1"
+        },
+        {
+          "sequence": 7,
+          "table": "role_template_capabilities",
+          "operation": "INSERT",
+          "rowIdentity": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ:company-administrator:v1:branches.manage"
+        },
+        {
+          "sequence": 8,
+          "table": "role_template_capabilities",
+          "operation": "INSERT",
+          "rowIdentity": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ:company-administrator:v1:companies.manage"
+        },
+        {
+          "sequence": 9,
+          "table": "role_template_capabilities",
+          "operation": "INSERT",
+          "rowIdentity": "cmp_7EBGDGHTPDAZPZVFMUBVWAUZZLEENRMK5F7G7JRATQWDZJHGYQMQ:company-administrator:v1:members.manage"
+        },
+        {
+          "sequence": 10,
+          "table": "authorization_audit_events",
+          "operation": "INSERT",
+          "rowIdentity": "runtime:audit:3",
+          "targetId": "company-administrator:v1"
+        },
+        {
+          "sequence": 11,
+          "table": "company_memberships",
+          "operation": "INSERT",
+          "rowIdentity": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q"
+        },
+        {
+          "sequence": 12,
+          "table": "authorization_audit_events",
+          "operation": "INSERT",
+          "rowIdentity": "runtime:audit:4",
+          "targetId": "mbr_G2QDD6FEGGZ7TVGHUJQGJJM3JE4DM3HS43RNCDPUXXQ3BNZGAI7Q"
+        },
+        {
+          "sequence": 13,
+          "table": "identity_bootstrap_runs",
+          "operation": "INSERT",
+          "rowIdentity": "runtime:bootstrap-run:1"
+        }
+      ]
+    },
+    "nonWriteSet": {
+      "appData": {
+        "table": "app_data",
+        "allRows": "BYTE_IDENTICAL",
+        "preservedColumns": [
+          "name",
+          "json",
+          "updated_at"
+        ],
+        "mutationCount": 0
+      },
+      "userRecords": {
+        "storage": "app_data.users",
+        "allUsersByteIdentical": true,
+        "explicitlyProtectedPrincipalIds": [
+          "1775756913074",
+          "1776673416137",
+          "1787547467703",
+          "DEMO-USER-CARRIER",
+          "production-smoke-admin"
+        ],
+        "mutationCount": 0
+      },
+      "businessData": {
+        "scope": "ALL_APP_DATA_BUSINESS_AND_OPERATIONAL_COLLECTIONS",
+        "mutationCount": 0
+      },
+      "financialData": {
+        "relationalTables": [
+          "canonical_receivables",
+          "financial_audit_events",
+          "canonical_payments",
+          "canonical_payment_allocations",
+          "canonical_receivable_adjustments",
+          "canonical_approval_requests"
+        ],
+        "appDataCollections": [
+          "payments",
+          "payment_allocations",
+          "finance_accounts",
+          "finance_operations",
+          "company_expenses",
+          "equipment_finance",
+          "leasing_contracts",
+          "leasing_payment_schedule",
+          "payroll_profiles",
+          "payroll_periods",
+          "payroll_records",
+          "payroll_adjustments",
+          "payroll_audit_events"
+        ],
+        "mutationCount": 0
+      },
+      "unrelatedIdentity": {
+        "tables": [
+          "capability_catalog_versions",
+          "capability_catalog_entries",
+          "membership_branch_access",
+          "membership_capability_assignments"
+        ],
+        "mutationCount": 0
+      },
+      "schema": {
+        "sqliteMasterByteIdentical": true,
+        "schemaVersionUnchanged": true,
+        "userVersionUnchanged": true,
+        "applicationIdUnchanged": true,
+        "ddlStatementCount": 0
+      },
+      "migrations": {
+        "table": "sql_shadow_schema_migrations",
+        "allRowsByteIdentical": true,
+        "mutationCount": 0
+      },
+      "tenantGuards": {
+        "persistentAndTemporaryGuardDefinitionsUnchanged": true,
+        "mutationCount": 0
+      },
+      "environment": {
+        "railwayConfigurationChanges": 0,
+        "appDisabledChanges": 0,
+        "processEnvironmentChanges": 0,
+        "deploymentOperations": 0
+      },
+      "smokeIdentity": {
+        "transition": "FORBIDDEN",
+        "userCreateCount": 0,
+        "userUpdateCount": 0,
+        "roleTemplateCreateCount": 0,
+        "membershipCreateCount": 0
+      }
+    },
+    "deterministicRuntimeIds": {
+      "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+      "seedBinding": "executionPlanChecksum",
+      "algorithm": "sha256(`${executionPlanChecksum}:${ordinal}:${prefix}`) with UUIDv4/version and a/variant bits projected by the guarded runner",
+      "auditEventIds": [
+        {
+          "ordinal": 1,
+          "prefix": "authorization-audit",
+          "value": null
+        },
+        {
+          "ordinal": 2,
+          "prefix": "authorization-audit",
+          "value": null
+        },
+        {
+          "ordinal": 3,
+          "prefix": "authorization-audit",
+          "value": null
+        },
+        {
+          "ordinal": 4,
+          "prefix": "authorization-audit",
+          "value": null
+        }
+      ],
+      "bootstrapRunId": {
+        "ordinal": 5,
+        "prefix": "identity-bootstrap",
+        "value": null
+      },
+      "timestampBinding": "freshBackupReceipt.generatedAt"
+    },
+    "deterministicIdentityPostconditions": {
+      "authoritySnapshot": {
+        "version": 1,
+        "fingerprint": "d4c5bd8f49712e72614755c6e21c0c0a04b37b41bbd0efd29ee6bcb479657926"
+      },
+      "capabilityCatalog": {
+        "version": 1,
+        "checksum": "2edf4f8648295c89d29311089e1ee322c6c5463b716e7db8ee7192e253e0ccc6",
+        "mutationCount": 0
+      },
+      "fullDatabaseExpectedPostStateFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "future receipt-bound read-only simulation of a fresh production backup copy"
+      }
+    },
+    "historicalSimulationEvidence": {
+      "classification": "HISTORICAL_SIMULATION_ONLY",
+      "productionAuthorizationValue": "NONE",
+      "authorityConfigChecksum": "dcfc0c9b714d6e6aeffc2c46634b33df7f3a31e8582c00b9ed1f1e840d69ab3c",
+      "schemaFingerprint": "58fcb559e6f8d2244222d5140e052d42ed4e17d95e32a22fcef1f3ce5b88a894",
+      "usersDirectoryFingerprint": "741d05fe393449e7220a23066e58de8eff16ae116285b4911b9b4e0a224fcc16",
+      "approvedAt": "2026-09-01T00:00:00.000Z",
+      "backupReference": "UNRESOLVED_FRESH_PRODUCTION_BACKUP",
+      "captureDeployedSha": "f01ad6b1a73157096f7bbda51c15f456c30c6fb0",
+      "captureDeploymentId": "f6e441be-8a21-4b2a-b074-e923b91de94d",
+      "sourceSnapshotSha256": "7540a73f49766e1171846da5a0d13e07107b38b9b6a6a28f752207fb2edbee08",
+      "stateFingerprint": "6ff76aeb2e8c0d68398bda9c905fa43a48d229f7028b60a1540c3a62f711e658",
+      "appDataFingerprint": "3557918102195f737fcf66e6bacd6f3ef2329c86818d24cac87a279913ba71f2",
+      "userInventoryFingerprint": "793faf77ae828914692fadadd94547e90518601a34760535eb385968a08fca71",
+      "databaseContentFingerprint": "e2424e27e975e980d68296bcfda5d49593b38e99b831e7872093bc9f51ca5a5a",
+      "durableFileSetFingerprint": "d108ff1bd220a101e9296682b1add4eda6bea36ca7da0a940cd4bb3e3a060bfd",
+      "observedFileSetFingerprint": "42e2e797a8530c0dd978f12355c886c33efc997308d7713d045a61ead9c9623c"
+    },
+    "runtimeBindings": {
+      "approvedAt": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "future exact machine timestamp separately approved for execution"
+      },
+      "backupReference": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "freshBackupReceipt.reference"
+      },
+      "authorityConfigChecksum": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production planPlatformIdentityBootstrap.configChecksum"
+      },
+      "schemaFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production planPlatformIdentityBootstrap.schemaFingerprint"
+      },
+      "usersDirectoryFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production planPlatformIdentityBootstrap.usersDirectoryFingerprint"
+      },
+      "userInventoryFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production complete users inventory fingerprint"
+      },
+      "preparedPlanSha256": {
+        "status": "SEALED_PREPARATION_ARTIFACT",
+        "value": "70b6eb60fb5b59a5afa3ab06c0f4335feae9743549ac1c40d5b46349bd155c05",
+        "binding": "deterministic read-only identity preparation payload"
+      },
+      "captureDeployedSha": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production source-capture deployed SHA"
+      },
+      "captureDeploymentId": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production source-capture deployment identity"
+      },
+      "sourceSnapshotSha256": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production source snapshot"
+      },
+      "stateFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production guarded state/CAS fingerprint"
+      },
+      "appDataFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production exact app_data non-write fingerprint"
+      },
+      "databaseContentFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production logical database content"
+      },
+      "durableFileSetFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production durable DB/WAL file set"
+      },
+      "observedFileSetFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "fresh production observed DB/WAL/SHM file set"
+      },
+      "authorizedExecutionSha": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "future exact deployed main mechanism SHA; authorized bundle bytes stay external to Git and require an independently provisioned SHA-256 pin"
+      },
+      "executionPlanChecksum": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "receipt-bound guarded execution plan"
+      },
+      "freshBackupReceipt": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "future separately authorized coherent production backup receipt"
+      },
+      "expectedPostStateFingerprint": {
+        "status": "UNRESOLVED_EXECUTION_TIME_BINDING",
+        "value": null,
+        "binding": "read-only simulation of the receipt-bound disposable backup copy"
+      }
+    },
+    "bindingCompleteness": {
+      "complete": false,
+      "authorizationReady": false,
+      "unresolvedKeys": [
+        "appDataFingerprint",
+        "approvedAt",
+        "authorityConfigChecksum",
+        "authorizedExecutionSha",
+        "backupReference",
+        "captureDeployedSha",
+        "captureDeploymentId",
+        "databaseContentFingerprint",
+        "durableFileSetFingerprint",
+        "executionPlanChecksum",
+        "expectedPostStateFingerprint",
+        "freshBackupReceipt",
+        "observedFileSetFingerprint",
+        "schemaFingerprint",
+        "sourceSnapshotSha256",
+        "stateFingerprint",
+        "userInventoryFingerprint",
+        "usersDirectoryFingerprint"
+      ],
+      "nextCheckpoint": "SEPARATE_EXPLICIT_PRODUCTION_STAGE_AUTHORIZATION_REQUIRED"
+    },
+    "sourceProjection": {
+      "projectionVersion": 1,
+      "sourceKind": "planPlatformIdentityBootstrap",
+      "evidenceClassification": "HISTORICAL_SIMULATION_ONLY",
+      "planMode": "plan",
+      "planOk": true,
+      "reportedWrites": 0,
+      "authorityConfigChecksum": "dcfc0c9b714d6e6aeffc2c46634b33df7f3a31e8582c00b9ed1f1e840d69ab3c",
+      "schemaFingerprint": "58fcb559e6f8d2244222d5140e052d42ed4e17d95e32a22fcef1f3ce5b88a894",
+      "usersDirectoryFingerprint": "741d05fe393449e7220a23066e58de8eff16ae116285b4911b9b4e0a224fcc16",
+      "approvedBy": "1775756913074",
+      "approvalReference": "AUTHORITATIVE_PRINCIPAL_DISPOSITION_2026-09-01",
+      "historicalApprovedAt": "2026-09-01T00:00:00.000Z",
+      "historicalBackupReference": "UNRESOLVED_FRESH_PRODUCTION_BACKUP",
+      "eligibleActivePrincipalIds": [
+        "1775756913074",
+        "1776673416137",
+        "1787547467703",
+        "DEMO-USER-CARRIER",
+        "production-smoke-admin"
+      ],
+      "mappedPrincipalIds": [
+        "1775756913074"
+      ],
+      "intentionallyUnmappedPrincipalIds": [
+        "1776673416137",
+        "1787547467703",
+        "DEMO-USER-CARRIER",
+        "production-smoke-admin"
+      ],
+      "beforeIdentityCounts": {
+        "canonical_companies": 0,
+        "canonical_branches": 0,
+        "company_memberships": 0,
+        "membership_branch_access": 0,
+        "role_templates": 0,
+        "role_template_capabilities": 0,
+        "membership_capability_assignments": 0,
+        "authorization_audit_events": 0,
+        "identity_bootstrap_runs": 0
+      },
+      "afterIdentityCounts": {
+        "canonical_companies": 1,
+        "canonical_branches": 1,
+        "company_memberships": 1,
+        "membership_branch_access": 0,
+        "role_templates": 1,
+        "role_template_capabilities": 3,
+        "membership_capability_assignments": 0,
+        "authorization_audit_events": 4,
+        "identity_bootstrap_runs": 1
+      },
+      "financialCounts": {
+        "canonical_receivables": 0,
+        "financial_audit_events": 0,
+        "canonical_payments": 0,
+        "canonical_payment_allocations": 0,
+        "canonical_receivable_adjustments": 0,
+        "canonical_approval_requests": 0
+      },
+      "exactChanges": {
+        "companies": 1,
+        "branches": 1,
+        "roleTemplates": 1,
+        "roleTemplateCapabilities": 3,
+        "memberships": 1,
+        "branchGrants": 0,
+        "capabilityAssignments": 0,
+        "authorizationAuditEvents": 4,
+        "bootstrapRuns": 1
+      },
+      "sourceBindings": {
+        "captureDeployedSha": "f01ad6b1a73157096f7bbda51c15f456c30c6fb0",
+        "captureDeploymentId": "f6e441be-8a21-4b2a-b074-e923b91de94d",
+        "sourceSnapshotSha256": "7540a73f49766e1171846da5a0d13e07107b38b9b6a6a28f752207fb2edbee08",
+        "stateFingerprint": "6ff76aeb2e8c0d68398bda9c905fa43a48d229f7028b60a1540c3a62f711e658",
+        "appDataFingerprint": "3557918102195f737fcf66e6bacd6f3ef2329c86818d24cac87a279913ba71f2",
+        "userInventoryFingerprint": "793faf77ae828914692fadadd94547e90518601a34760535eb385968a08fca71",
+        "databaseContentFingerprint": "e2424e27e975e980d68296bcfda5d49593b38e99b831e7872093bc9f51ca5a5a",
+        "durableFileSetFingerprint": "d108ff1bd220a101e9296682b1add4eda6bea36ca7da0a940cd4bb3e3a060bfd",
+        "observedFileSetFingerprint": "42e2e797a8530c0dd978f12355c886c33efc997308d7713d045a61ead9c9623c"
+      }
+    },
+    "hashes": {
+      "authoritySha256": "2e42b9adfcdfa6d0fb857f3c7be91eee8f113bc7fc8068e02a93ae4a99713c2b",
+      "principalDispositionsSha256": "ffe447b1bf74ad26b8512bebec90ea5530c30ea848c88e496d67c04c4ea0df65",
+      "expectedRowCountDeltasSha256": "bcfc25179ba0b97a39403722a2cd50a8b898c5959121207fc28ed26a9df6fb2b",
+      "auditEventManifestSha256": "73be25013ca747989693b5d92d82446e80522b7456d0deb2adff86ca0664e26e",
+      "writeManifestSha256": "277b3d0858be2970d5be7fe5262a1697acdfa46b918bcb73a9c22fb2ff6adadf",
+      "nonWriteSetSha256": "a4cbcdb194883a32a7f679cfbbcfa1a0691775b77b3fc5df4d918fd35fe3541f",
+      "deterministicRuntimeIdsSha256": "c5d7c3003838d5bcd90a784795a097a610b4057dd7ef1d3cff719c3d7944f6d6",
+      "deterministicIdentityPostconditionsSha256": "4e7d125d11e122f27551736a794cd132f760172f50f25be5e19384a95f29dd1b",
+      "historicalSimulationEvidenceSha256": "8dbcd32bbf163d71d6898489e8af6ef2184bb0166c2f58fb440f34c51a05697a",
+      "runtimeBindingsSha256": "e23f4199fc254f3920fca78fee823eb7fc86e6500e242a1676a4e888d2222b77",
+      "sourceProjectionSha256": "d48035ca95358475214c4d056a08df8d9653a5b63bef38081c3fb2e73d14352e",
+      "bundleSha256": "7ea357c247f8d3e69216efd2c9239123719579d00da5916b2c4ac5f1f6b7bc8b"
+    }
+  },
+  "unresolvedExecutionTimeBindings": [
+    "appDataFingerprint",
+    "approvedAt",
+    "authorityConfigChecksum",
+    "authorizedExecutionSha",
+    "backupReference",
+    "captureDeployedSha",
+    "captureDeploymentId",
+    "databaseContentFingerprint",
+    "durableFileSetFingerprint",
+    "executionPlanChecksum",
+    "expectedPostStateFingerprint",
+    "freshBackupReceipt",
+    "observedFileSetFingerprint",
+    "schemaFingerprint",
+    "sourceSnapshotSha256",
+    "stateFingerprint",
+    "userInventoryFingerprint",
+    "usersDirectoryFingerprint"
+  ]
+}

@@ -1799,9 +1799,14 @@ test('preliminary workflow is identity-pinned, secret-isolated, and revalidates 
   assert.match(workflow, /concurrency:[\s\S]*group: production-release/);
   assert.match(deployWorkflow, /concurrency:[\s\S]*group: production-release/);
   assert.match(remediationWorkflow, /concurrency:[\s\S]*group: production-release/);
+  assert.match(workflow, /npm install --global @railway\/cli@5\.45\.0/);
+  assert.match(workflow, /test "\$\(railway --version\)" = "railway 5\.45\.0"/);
+  assert.match(remediationWorkflow, /railway-v5\.45\.0-x86_64-unknown-linux-musl\.tar\.gz/);
+  assert.match(remediationWorkflow, /RAILWAY_CLI_ARCHIVE_SHA256: [a-f0-9]{64}/);
+  assert.match(remediationWorkflow, /RAILWAY_CLI_BINARY_SHA256: [a-f0-9]{64}/);
+  assert.match(remediationWorkflow, /test "\$\("\$cli_dir\/railway" --version\)" = "railway 5\.45\.0"/);
+  assert.doesNotMatch(remediationWorkflow, /npm install --global @railway\/cli/);
   for (const protectedWorkflow of [workflow, remediationWorkflow]) {
-    assert.match(protectedWorkflow, /npm install --global @railway\/cli@5\.45\.0/);
-    assert.match(protectedWorkflow, /test "\$\(railway --version\)" = "railway 5\.45\.0"/);
     assert.doesNotMatch(protectedWorkflow, /@railway\/cli@4\.60\.0/);
     assert.doesNotMatch(protectedWorkflow, /\brailway link\b/);
   }

@@ -2,6 +2,7 @@
 
 const {
   ALL_APP_DATA_COLLECTIONS,
+  COLLECTION_SCOPE_CATEGORY,
   COLLECTION_SCOPE_REGISTRY,
 } = require('./app-data-scope-registry');
 const {
@@ -166,6 +167,20 @@ const DEMO_COLLECTIONS = Object.freeze([
   'delivery_carriers', 'owners', 'mechanics', 'service_works', 'spare_parts',
 ]);
 
+const PRODUCTION_SCOPE_REMEDIATION_CATEGORIES = new Set([
+  COLLECTION_SCOPE_CATEGORY.TENANT,
+  COLLECTION_SCOPE_CATEGORY.TENANT_TECHNICAL,
+  COLLECTION_SCOPE_CATEGORY.DERIVED_SCOPE,
+  COLLECTION_SCOPE_CATEGORY.LEGACY_HISTORY,
+]);
+
+function productionScopeRemediationCollections() {
+  return ALL_APP_DATA_COLLECTIONS.filter(name => (
+    PRODUCTION_SCOPE_REMEDIATION_CATEGORIES.has(COLLECTION_SCOPE_REGISTRY[name].category)
+    && COLLECTION_SCOPE_REGISTRY[name].shape === 'ARRAY'
+  ));
+}
+
 function buildSourceAuthorities(sites) {
   const routeAdapters = [
     exactSite(sites, { file: 'server/routes/counterparties.js', functionName: 'registerCounterpartyRoutes', sourceIncludes: 'writeData(entry.name' }),
@@ -199,6 +214,30 @@ function buildSourceAuthorities(sites) {
     callee: 'seedDemoData',
     sourceIncludes: 'reset: true',
   })];
+  const identityReadOnlySimulationGuards = [
+    exactSite(sites, {
+      file: 'server/scripts/simulate-skytech-identity-bootstrap-read-only.js',
+      kind: 'SQL_CONNECTION_GUARD',
+      sourceIncludes: 'query_only = ON',
+    }),
+    exactSite(sites, {
+      file: 'server/scripts/simulate-skytech-identity-bootstrap-read-only.js',
+      kind: 'SQL_CONNECTION_GUARD',
+      sourceIncludes: 'foreign_keys = ON',
+    }),
+  ].sort();
+  const identityAuthorizationReadOnlySimulationGuards = [
+    exactSite(sites, {
+      file: 'server/scripts/simulate-production-scope-identity-authorization-read-only.js',
+      kind: 'SQL_CONNECTION_GUARD',
+      sourceIncludes: 'query_only = ON',
+    }),
+    exactSite(sites, {
+      file: 'server/scripts/simulate-production-scope-identity-authorization-read-only.js',
+      kind: 'SQL_CONNECTION_GUARD',
+      sourceIncludes: 'foreign_keys = ON',
+    }),
+  ].sort();
   return [
     authority('sqlite-core', ['server/db.js'], {
       kinds: SQL_KINDS,
@@ -474,6 +513,34 @@ function buildSourceAuthorities(sites) {
       guard: 'Simulation constructs isolated copies and never opens the production target for mutation.',
       contributesCollectionPaths: false,
     }),
+    authority(
+      'skytech-identity-read-only-simulation',
+      ['server/scripts/simulate-skytech-identity-bootstrap-read-only.js'],
+      {
+        kinds: ['SQL_CONNECTION_GUARD'],
+        siteFingerprints: identityReadOnlySimulationGuards,
+        layer: 'DISPOSABLE_READ_ONLY_SIMULATION',
+        pathRole: 'EPHEMERAL_MIRROR_CONNECTION_GUARD_ONLY',
+        authority: 'Skytech identity bootstrap simulation inspects only an ephemeral SQLite mirror through a read-only, query-only connection.',
+        disposableOnly: true,
+        guard: 'The source is never SQLite-opened; its DB/WAL/SHM bytes and total_changes are checked while the temporary mirror remains readonly/query_only.',
+        contributesCollectionPaths: false,
+      },
+    ),
+    authority(
+      'skytech-identity-authorization-read-only-simulation',
+      ['server/scripts/simulate-production-scope-identity-authorization-read-only.js'],
+      {
+        kinds: ['SQL_CONNECTION_GUARD'],
+        siteFingerprints: identityAuthorizationReadOnlySimulationGuards,
+        layer: 'DISPOSABLE_READ_ONLY_SIMULATION',
+        pathRole: 'FRESH_PINNED_EPHEMERAL_MIRROR_CONNECTION_GUARD_ONLY',
+        authority: 'Fresh pinned Skytech identity authorization simulation inspects only an ephemeral SQLite mirror through a read-only, query-only connection.',
+        disposableOnly: true,
+        guard: 'The hash-bound frozen source is never SQLite-opened; exact DB/WAL bytes are copied to a disposable mirror, and source DB/WAL/SHM identity and bytes, total_changes, schema, app_data, and database-content fingerprints are rechecked.',
+        contributesCollectionPaths: false,
+      },
+    ),
     authority('local-visibility-simulation', ['server/scripts/verify-production-scope-local-visibility.js'], {
       kinds: SQL_KINDS,
       layer: 'DISPOSABLE_SIMULATION',
@@ -586,7 +653,9 @@ function dynamicCollectionsForSite(site) {
     return ['equipment', 'service', 'repair_work_items', 'repair_part_items'];
   }
   if (site.file === 'server/scripts/verify-production-scope-local-visibility.js') return all;
-  if (site.file === 'server/lib/production-scope-remediation.js') return all;
+  if (site.file === 'server/lib/production-scope-remediation.js') {
+    return productionScopeRemediationCollections();
+  }
   if (
     site.file === 'server/lib/skytech-clean-production-reset.js'
     && site.function === 'applyReset'

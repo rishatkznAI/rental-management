@@ -429,7 +429,7 @@ function createFixture({
   const roundBAt = new Date(generatedAt.getTime() - 1_000);
   const roundAAt = new Date(roundBAt.getTime() - 1_000);
   const control = {
-    controlVersion: 2,
+    controlVersion: 3,
     productionWriteAuthorized: false,
     networkAccessAuthorized: false,
     rawCaptureSQLiteOpenAuthorized: false,
@@ -438,12 +438,15 @@ function createFixture({
     evidenceGeneratedAt: generatedAt.toISOString(),
     conservation: {
       adminResetDisabled: true,
-      allowedModesEmpty: true,
+      authorizedBundlePinAbsent: true,
       appDisabled: true,
       botDisabled: true,
       cleanResetDisabled: true,
+      expectedExecutionShaMatchesDeployedSha: true,
       gsmDisabled: true,
       gsmEnabled: false,
+      remediationAllowedModesExact: true,
+      remediationSigningSecretConfigured: true,
       schemaCompatibilityDisabled: true,
       singleReplica: true,
       storageWriteGuardEnabled: true,
@@ -667,13 +670,37 @@ test('mixed catalog evidence classification is explicit and never infers overrid
   }).disposition, 'UNRESOLVED');
 });
 
-test('evidence source bindings include the mixed catalog state validator', () => {
+test('evidence source bindings include current overlay and identity execution sources', () => {
   assert.equal(
     REQUIRED_SOURCE_BINDING_PATHS.includes('server/lib/platform-default-tenant-overlay.js'),
     true,
   );
   assert.equal(
     REQUIRED_SOURCE_BINDING_PATHS.includes('server/scripts/verify-production-scope-local-visibility.js'),
+    true,
+  );
+  assert.equal(
+    REQUIRED_SOURCE_BINDING_PATHS.includes('server/lib/identity-bootstrap-execution-bundle.js'),
+    true,
+  );
+  assert.equal(
+    REQUIRED_SOURCE_BINDING_PATHS.includes('server/lib/production-scope-execution-authorization.js'),
+    true,
+  );
+  assert.equal(
+    REQUIRED_SOURCE_BINDING_PATHS.includes('server/scripts/simulate-skytech-identity-bootstrap-read-only.js'),
+    true,
+  );
+  assert.equal(
+    REQUIRED_SOURCE_BINDING_PATHS.includes('server/scripts/simulate-production-scope-identity-authorization-read-only.js'),
+    true,
+  );
+  assert.equal(
+    REQUIRED_SOURCE_BINDING_PATHS.includes('scripts/railway-remediation-interlock.mjs'),
+    true,
+  );
+  assert.equal(
+    REQUIRED_SOURCE_BINDING_PATHS.includes('server/routes/production-scope-remediation.js'),
     true,
   );
 });

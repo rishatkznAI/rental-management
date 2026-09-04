@@ -56,20 +56,26 @@ const REQUIRED_SOURCE_BINDING_PATHS = Object.freeze([
   'server/lib/canonical-authority-id.js',
   'server/lib/canonical-company-id.js',
   'server/lib/frozen-production-sqlite-capture.js',
+  'server/lib/identity-bootstrap-execution-bundle.js',
   'server/lib/platform-default-tenant-overlay.js',
   'server/lib/platform-identity-bootstrap-validation.js',
   'server/lib/production-scope-baseline-contract.js',
   'server/lib/production-scope-evidence-builder.js',
   'server/lib/production-scope-evidence-classification.js',
+  'server/lib/production-scope-execution-authorization.js',
   'server/lib/production-scope-execution-plan-bundle.js',
   'server/lib/production-scope-remediation-manifest.js',
   'server/lib/production-scope-remediation-runner.js',
   'server/lib/production-scope-remediation.js',
   'server/lib/production-smoke-identity.js',
   'server/lib/trusted-actor-scope.js',
+  'server/routes/production-scope-remediation.js',
+  'scripts/railway-remediation-interlock.mjs',
   'server/scripts/build-production-scope-evidence.js',
   'server/scripts/capture-frozen-production-sqlite.js',
+  'server/scripts/simulate-production-scope-identity-authorization-read-only.js',
   'server/scripts/simulate-production-scope-remediation.js',
+  'server/scripts/simulate-skytech-identity-bootstrap-read-only.js',
   'server/scripts/verify-production-scope-local-visibility.js',
 ].sort());
 const PRODUCTION_BASELINE_CONTRACT = validateBaselineContract(productionBaselineContract);
@@ -299,13 +305,13 @@ function validateControl(value, now = new Date(), {
     'sourceBindings',
   ], 'CAPTURE_CONTROL_INVALID', 'Capture control');
   if (
-    value.controlVersion !== 2
+    value.controlVersion !== 3
     || value.productionWriteAuthorized !== false
     || value.networkAccessAuthorized !== false
     || value.rawCaptureSQLiteOpenAuthorized !== false
     || !['roundA', 'roundB'].includes(value.analysisRound)
   ) {
-    fail('CAPTURE_CONTROL_INVALID', 'Capture control is not the offline read-only version-2 contract.');
+    fail('CAPTURE_CONTROL_INVALID', 'Capture control is not the offline read-only version-3 contract.');
   }
   if (
     !ISO_TIMESTAMP_PATTERN.test(text(value.captureWindowStartedAt))
@@ -315,24 +321,30 @@ function validateControl(value, now = new Date(), {
   }
   assertExactKeys(value.conservation, [
     'adminResetDisabled',
-    'allowedModesEmpty',
+    'authorizedBundlePinAbsent',
     'appDisabled',
     'botDisabled',
     'cleanResetDisabled',
+    'expectedExecutionShaMatchesDeployedSha',
     'gsmDisabled',
     'gsmEnabled',
+    'remediationAllowedModesExact',
+    'remediationSigningSecretConfigured',
     'schemaCompatibilityDisabled',
     'singleReplica',
     'storageWriteGuardEnabled',
   ], 'CAPTURE_CONTROL_INVALID', 'Conservation evidence');
   const expectedConservation = {
     adminResetDisabled: true,
-    allowedModesEmpty: true,
+    authorizedBundlePinAbsent: true,
     appDisabled: true,
     botDisabled: true,
     cleanResetDisabled: true,
+    expectedExecutionShaMatchesDeployedSha: true,
     gsmDisabled: true,
     gsmEnabled: false,
+    remediationAllowedModesExact: true,
+    remediationSigningSecretConfigured: true,
     schemaCompatibilityDisabled: true,
     singleReplica: true,
     storageWriteGuardEnabled: true,

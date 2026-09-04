@@ -41,6 +41,18 @@ const CAPTURE_IDS = [
   '55555555-5555-4555-8555-555555555555',
 ];
 
+test('capture stages exact route auth while proving the independent bundle pin is absent', () => {
+  const source = fs.readFileSync(
+    path.join(REPOSITORY_ROOT, 'server/lib/frozen-production-sqlite-capture.js'),
+    'utf8',
+  );
+  assert.match(source, /PRODUCTION_SCOPE_REMEDIATION_ALLOWED_MODES === 'preflight,backup,apply,verify'/);
+  assert.match(source, /PRODUCTION_SCOPE_REMEDIATION_SIGNING_SECRET\.length >= 32/);
+  assert.match(source, /PRODUCTION_SCOPE_REMEDIATION_EXPECTED_EXECUTION_SHA === e\.RAILWAY_GIT_COMMIT_SHA/);
+  assert.match(source, /\.production-scope-remediation-authorized-bundle\.sha256/);
+  assert.match(source, /authorizedBundlePinAbsent = error && error\.code === 'ENOENT'/);
+});
+
 function sha256(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -240,7 +252,7 @@ test('acquires two exact-instance rounds and emits a builder-compatible private 
 
     const control = JSON.parse(fs.readFileSync(result.captureControlPath, 'utf8'));
     assert.deepEqual(validateControl(control, new Date(Date.now() + 60_000)), control);
-    assert.equal(control.controlVersion, 2);
+    assert.equal(control.controlVersion, 3);
     assert.deepEqual(control.baseline, validateBaselineContract(productionBaselineContract));
     assert.equal(control.baseline.productionExecutionAuthorized, false);
     const driftedControl = structuredClone(control);
@@ -496,20 +508,29 @@ test('rejects unsafe output targets and detects hard-linking of a capture member
   });
 });
 
-test('rejects any false conservation proof before reading remote SQLite files', async () => {
-  await withOutputFixture(async ({ outputRoot }) => {
-    const headSha = gitHead();
-    const fixture = fixtureDependencies({
-      headSha,
-      runtimes: [runtimeSnapshot(headSha, { conservation: { appDisabled: false } })],
+test('rejects any false conservation or pre-authorization gate before reading SQLite', async (t) => {
+  for (const field of Object.keys(RUNTIME_CONSERVATION_EXPECTED)) {
+    await t.test(field, async () => {
+      await withOutputFixture(async ({ outputRoot }) => {
+        const headSha = gitHead();
+        const fixture = fixtureDependencies({
+          headSha,
+          runtimes: [runtimeSnapshot(headSha, {
+            conservation: { [field]: !RUNTIME_CONSERVATION_EXPECTED[field] },
+          })],
+        });
+        await assert.rejects(
+          acquireFrozenProductionSqliteCapture(
+            { expectedCaptureSha: headSha, outputRoot },
+            fixture.dependencies,
+          ),
+          error => error.code === 'CAPTURE_CONSERVATION_INVALID',
+        );
+        assert.equal(fixture.dependencies.streamCalls.length, 0);
+        assert.equal(fs.existsSync(outputRoot), false);
+      });
     });
-    await assert.rejects(
-      acquireFrozenProductionSqliteCapture({ expectedCaptureSha: headSha, outputRoot }, fixture.dependencies),
-      error => error.code === 'CAPTURE_CONSERVATION_INVALID',
-    );
-    assert.equal(fixture.dependencies.streamCalls.length, 0);
-    assert.equal(fs.existsSync(outputRoot), false);
-  });
+  }
 });
 
 test('retains distinct SHM but rejects any durable DB or WAL difference between rounds', async () => {

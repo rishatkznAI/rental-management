@@ -61,7 +61,9 @@ Railway billing warning: keep the Trial/Hobby plan active for the production ser
 
 ## Conservation Mode
 
-Production deployment is allowed during conservation. Frontend and backend may continue to update from `main`; production usage is blocked at runtime instead.
+Production deployment is normally allowed during conservation. Frontend and backend may continue to update from `main`; production usage is blocked at runtime instead.
+
+Exception: a guarded production-scope remediation or identity-bootstrap operation requires a separately authorized, externally enforced deployment freeze for its entire before/operation/after window. Native autodeploy must be disabled, and no operator, API client, workflow, or platform action may create, redeploy, restart, or remove a deployment until the post-operation Railway and API-runtime checks finish. The repository workflow can prove observed state before, immediately before, and after the request, but Railway exposes no atomic control-plane lease; the after-check can detect an overlap and cannot undo an already committed SQLite transaction. Do not authorize `apply` without explicit freeze evidence and a sole-operator handoff.
 
 Required Railway production variables during conservation:
 

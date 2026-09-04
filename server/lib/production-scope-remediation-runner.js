@@ -178,6 +178,27 @@ function normalizedText(value, maxLength = 240) {
   return String(value ?? '').trim().slice(0, maxLength);
 }
 
+function hasIdentityBootstrap(plan) {
+  const bootstrap = plan?.authority?.identityBootstrap;
+  return Boolean(bootstrap && typeof bootstrap === 'object' && !Array.isArray(bootstrap));
+}
+
+function authorityConfigChecksum(plan) {
+  if (!hasIdentityBootstrap(plan)) return null;
+  const checksum = plan.authority.identityBootstrap?.approval?.configChecksum;
+  return typeof checksum === 'string' && HEX_64.test(checksum) ? checksum : null;
+}
+
+function authorityConfigChecksumBlockers(plan, preview) {
+  if (!hasIdentityBootstrap(plan)) return [];
+  const checksum = authorityConfigChecksum(plan);
+  if (!checksum) return [{ code: 'AUTHORITY_CONFIG_CHECKSUM_REQUIRED' }];
+  if (preview?.identity?.configChecksum !== checksum) {
+    return [{ code: 'AUTHORITY_CONFIG_CHECKSUM_MISMATCH' }];
+  }
+  return [];
+}
+
 function normalizedRailwayTarget(value) {
   return Object.fromEntries([
     'projectId',
@@ -411,6 +432,8 @@ function clone(value) {
 }
 
 function buildExecutionPlan(basePlan, receipt) {
+  const requiresAuthorityConfigChecksum = hasIdentityBootstrap(basePlan);
+  const receiptAuthorityConfigChecksum = receipt?.authorityConfigChecksum;
   if (
     !receipt
     || receipt.receiptVersion !== 2
@@ -429,8 +452,22 @@ function buildExecutionPlan(basePlan, receipt) {
     || !SHA_40.test(normalizedText(receipt.deployedSha, 40))
     || !HEX_64.test(normalizedText(receipt.bundledPlanChecksum, 64))
     || !normalizedText(receipt.canonicalCompanyId, 160)
+    || (
+      (requiresAuthorityConfigChecksum || receiptAuthorityConfigChecksum != null)
+      && (typeof receiptAuthorityConfigChecksum !== 'string'
+        || !HEX_64.test(receiptAuthorityConfigChecksum))
+    )
   ) {
     fail('VERIFIED_BACKUP_REQUIRED', 'Complete verified backup receipt metadata is required.');
+  }
+  if (
+    requiresAuthorityConfigChecksum
+    && receiptAuthorityConfigChecksum !== authorityConfigChecksum(basePlan)
+  ) {
+    fail(
+      'BACKUP_RECEIPT_AUTHORITY_CONFIG_CHECKSUM_MISMATCH',
+      'The backup receipt is not bound to the approved identity authority configuration.',
+    );
   }
   const plan = clone(basePlan);
   plan.backup = {
@@ -449,12 +486,18 @@ function buildExecutionPlan(basePlan, receipt) {
     userInventoryFingerprint: receipt.userInventoryFingerprint,
     canonicalCompanyId: receipt.canonicalCompanyId,
     bundledPlanChecksum: receipt.bundledPlanChecksum,
+    authorityConfigChecksum: receipt.authorityConfigChecksum ?? null,
     railwayIdentity: receipt.railwayIdentity,
   };
   if (plan.authority?.identityBootstrap?.approval) {
     plan.authority.identityBootstrap.approval.backupReference = receipt.filename;
   }
-  return plan;
+  // Loaded lazily to avoid the intentional execution-bundle -> remediation
+  // validation dependency becoming an initialization-time cycle.
+  const {
+    inheritAuthorizedIdentityExecutionPlan,
+  } = require('./production-scope-execution-plan-bundle');
+  return inheritAuthorizedIdentityExecutionPlan(basePlan, plan);
 }
 
 function writeStoredReceipt(dbPath, receipt) {
@@ -475,7 +518,7 @@ function writeStoredReceipt(dbPath, receipt) {
   return receiptPath;
 }
 
-function loadStoredReceipt(dbPath, reference) {
+function loadStoredReceipt(dbPath, reference, plan) {
   const filename = normalizedText(reference?.filename, 120);
   const backupId = normalizedText(reference?.backupId, 36).toLowerCase();
   if (!BACKUP_FILENAME.test(filename) || !BACKUP_ID.test(backupId)) {
@@ -494,7 +537,7 @@ function loadStoredReceipt(dbPath, reference) {
   if (stored?.filename !== filename || String(stored?.backupId || '').toLowerCase() !== backupId) {
     fail('BACKUP_RECEIPT_MISMATCH', 'The stored backup receipt identity does not match.');
   }
-  buildExecutionPlan({}, stored);
+  buildExecutionPlan(plan, stored);
   if (!HEX_64.test(normalizedText(stored.executionPlanChecksum, 64))) {
     fail('BACKUP_RECEIPT_INVALID', 'The stored backup receipt has no execution plan checksum.');
   }
@@ -520,6 +563,10 @@ function assertReceiptBindings({ receipt, plan, deployedSha, railwayIdentity }) 
     || receipt.canonicalCompanyId !== plan?.authority?.companyId
     || receipt.canonicalCompanyId !== plan?.authority?.tenantId
     || receipt.bundledPlanChecksum !== planHash(plan)
+    || (
+      hasIdentityBootstrap(plan)
+      && receipt.authorityConfigChecksum !== authorityConfigChecksum(plan)
+    )
     || stableJson(receipt.railwayIdentity || null) !== stableJson(railwayIdentity || null)
   ) {
     fail('BACKUP_RECEIPT_CONTEXT_MISMATCH', 'The stored receipt belongs to another release or production context.');
@@ -580,6 +627,7 @@ function runPreflight({
   const afterFiles = sqliteFileSet(resolvedDbPath);
   const runtimeBlockers = [
     ...inventory.blockers,
+    ...authorityConfigChecksumBlockers(plan, preview),
     ...exactSourceBindingBlockers(plan, {
       databaseFingerprint,
       railwayIdentity,
@@ -607,6 +655,7 @@ function runPreflight({
     deployedSha,
     railwayIdentity: railwayIdentity || null,
     bundledPlanChecksum: planHash(plan),
+    authorityConfigChecksum: preview.identity?.configChecksum || null,
     executionPlanChecksum: preview.planChecksum,
     stateFingerprint: preview.stateFingerprint,
     databaseFingerprint,
@@ -659,6 +708,7 @@ function validateSnapshotDatabase(snapshotPath, plan, DatabaseConstructor = Data
       stateFingerprint: preview.stateFingerprint,
       databaseFingerprint: databaseContentFingerprint(db),
       sourceDbIdentity: dbIdentityHash(databaseIdentity(db)),
+      authorityConfigChecksum: preview.identity?.configChecksum || null,
       integrity: integrity[0].integrity_check,
       foreignKeyViolationCount: foreignKeyViolations.length,
     };
@@ -745,6 +795,12 @@ async function runBackup({
     if (inspected.validation.databaseFingerprint !== preflight.databaseFingerprint) {
       fail('BACKUP_SOURCE_STATE_CHANGED', 'Backup snapshot database differs from the frozen preflight.');
     }
+    if (inspected.validation.authorityConfigChecksum !== preflight.authorityConfigChecksum) {
+      fail(
+        'BACKUP_SOURCE_STATE_CHANGED',
+        'Backup snapshot identity authority checksum differs from the frozen preflight.',
+      );
+    }
     const sourceFilesAfterBackup = sqliteFileSet(dbPath);
     if (sqliteFileSetFingerprint(sourceFilesAfterBackup) !== sqliteFileSetFingerprint(sourceFilesBeforeBackup)) {
       fail('BACKUP_SOURCE_FILES_CHANGED', 'Durable SQLite DB/WAL changed while the backup was created.');
@@ -773,6 +829,7 @@ async function runBackup({
       sourceObservedFileSetFingerprint: sqliteObservedFileSetFingerprint(sourceFilesAfterBackup),
       deployedSha: preflight.deployedSha,
       bundledPlanChecksum: preflight.bundledPlanChecksum,
+      authorityConfigChecksum: preflight.authorityConfigChecksum,
       canonicalCompanyId: plan.authority.companyId,
       railwayIdentity: railwayIdentity || null,
       integrity: inspected.validation.integrity,
@@ -855,6 +912,7 @@ function validateStoredBackup({
     inspected.validation.stateFingerprint !== receipt.stateFingerprint
     || inspected.validation.stateFingerprint !== expectedStateFingerprint
     || inspected.validation.sourceDbIdentity !== receipt.sourceDbIdentity
+    || inspected.validation.authorityConfigChecksum !== (receipt.authorityConfigChecksum ?? null)
     || inspected.validation.databaseFingerprint !== receipt.databaseFingerprint
     || inspected.validation.databaseFingerprint !== expectedDatabaseFingerprint
   ) {
@@ -885,6 +943,10 @@ function assertIndependentBackupEvidence(evidence, receipt, now = new Date()) {
     && evidence?.sourceObservedFileSetFingerprint === receipt.sourceObservedFileSetFingerprint
     && evidence?.canonicalCompanyId === receipt.canonicalCompanyId
     && evidence?.bundledPlanChecksum === receipt.bundledPlanChecksum
+    && (
+      receipt.authorityConfigChecksum == null
+      || evidence?.authorityConfigChecksum === receipt.authorityConfigChecksum
+    )
     && evidence?.executionPlanChecksum === receipt.executionPlanChecksum
     && evidence?.expectedPostDatabaseFingerprint === receipt.expectedPostDatabaseFingerprint
     && stableJson(evidence?.railwayIdentity || null) === stableJson(receipt.railwayIdentity || null)
@@ -927,6 +989,7 @@ function runApply({
   receipt,
   expectedDeployedSha,
   actualDeployedSha,
+  expectedAuthorityConfigChecksum,
   expectedPlanChecksum,
   expectedStateFingerprint,
   expectedUserInventoryFingerprint,
@@ -952,6 +1015,26 @@ function runApply({
   if (approvedCompanyId !== plan?.authority?.companyId || approvedCompanyId !== plan?.authority?.tenantId) {
     fail('APPROVED_COMPANY_ID_MISMATCH', 'The approved canonical Company ID does not match the plan.');
   }
+  const plannedAuthorityConfigChecksum = authorityConfigChecksum(plan);
+  if (
+    hasIdentityBootstrap(plan)
+    && (typeof expectedAuthorityConfigChecksum !== 'string'
+      || !HEX_64.test(expectedAuthorityConfigChecksum))
+  ) {
+    fail(
+      'AUTHORITY_CONFIG_CHECKSUM_REQUIRED',
+      'The exact approved identity authority configuration checksum is required.',
+    );
+  }
+  if (
+    hasIdentityBootstrap(plan)
+    && expectedAuthorityConfigChecksum !== plannedAuthorityConfigChecksum
+  ) {
+    fail(
+      'AUTHORITY_CONFIG_CHECKSUM_MISMATCH',
+      'The approved identity authority configuration checksum does not match the plan.',
+    );
+  }
   if (!HEX_64.test(normalizedText(expectedPlanChecksum, 64))) {
     fail('PLAN_CHECKSUM_REQUIRED', 'The exact approved execution plan checksum is required.');
   }
@@ -970,8 +1053,17 @@ function runApply({
   if (!HEX_64.test(normalizedText(expectedPostDatabaseFingerprint, 64))) {
     fail('EXPECTED_POST_DATABASE_FINGERPRINT_REQUIRED', 'The exact approved post-state fingerprint is required.');
   }
-  const storedReceipt = loadStoredReceipt(dbPath, receipt);
+  const storedReceipt = loadStoredReceipt(dbPath, receipt, plan);
   assertReceiptBindings({ receipt: storedReceipt, plan, deployedSha, railwayIdentity });
+  if (
+    hasIdentityBootstrap(plan)
+    && storedReceipt.authorityConfigChecksum !== expectedAuthorityConfigChecksum
+  ) {
+    fail(
+      'BACKUP_RECEIPT_AUTHORITY_CONFIG_CHECKSUM_MISMATCH',
+      'The approved identity authority configuration checksum does not match the stored receipt.',
+    );
+  }
   if (
     storedReceipt.executionPlanChecksum !== expectedPlanChecksum
     || storedReceipt.stateFingerprint !== expectedStateFingerprint
@@ -1005,6 +1097,15 @@ function runApply({
   }
   if (preflight.executionPlanChecksum !== expectedPlanChecksum) {
     fail('PLAN_CHECKSUM_MISMATCH', 'The approved execution plan checksum does not match.');
+  }
+  if (
+    hasIdentityBootstrap(plan)
+    && preflight.authorityConfigChecksum !== expectedAuthorityConfigChecksum
+  ) {
+    fail(
+      'AUTHORITY_CONFIG_CHECKSUM_MISMATCH',
+      'The fresh apply preflight authority configuration checksum does not match.',
+    );
   }
   if (preflight.databaseFingerprint !== storedReceipt.databaseFingerprint) {
     fail('DATABASE_FINGERPRINT_MISMATCH', 'The complete production database changed after backup.');
@@ -1043,6 +1144,21 @@ function runApply({
     explicitApply: true,
     expectedPlanChecksum,
     transactionalGuard() {
+      if (hasIdentityBootstrap(executionPlan)) {
+        const transactionalPreflight = planProductionScopeRemediation({
+          db,
+          plan: executionPlan,
+        });
+        if (
+          transactionalPreflight.identity?.configChecksum !== expectedAuthorityConfigChecksum
+          || authorityConfigChecksum(executionPlan) !== expectedAuthorityConfigChecksum
+        ) {
+          fail(
+            'TRANSACTIONAL_AUTHORITY_CONFIG_CHECKSUM_MISMATCH',
+            'The transaction-local identity authority configuration checksum changed before the first write.',
+          );
+        }
+      }
       if (sqliteFileSetFingerprint(sqliteFileSet(dbPath)) !== storedReceipt.sourceFileSetFingerprint) {
         fail('TRANSACTIONAL_SQLITE_FILE_SET_MISMATCH', 'DB/WAL changed before the first write.');
       }
@@ -1065,6 +1181,7 @@ function runApply({
     collectionWrites: result.collectionWrites,
     bootstrapStatus: result.bootstrapStatus,
     planChecksum: expectedPlanChecksum,
+    authorityConfigChecksum: plannedAuthorityConfigChecksum,
     sourceStateFingerprint: expectedStateFingerprint,
     postDatabaseFingerprint: storedReceipt.expectedPostDatabaseFingerprint,
     backupId: storedReceipt.backupId,
@@ -1091,7 +1208,7 @@ function runVerify({
 }) {
   assertConservation(conservationState);
   const deployedSha = assertDeploymentSha(expectedDeployedSha, actualDeployedSha);
-  const storedReceipt = loadStoredReceipt(dbPath, receipt);
+  const storedReceipt = loadStoredReceipt(dbPath, receipt, plan);
   assertReceiptBindings({ receipt: storedReceipt, plan, deployedSha, railwayIdentity });
   const executionPlan = buildExecutionPlan(plan, storedReceipt);
   validateStoredBackup({

@@ -1250,6 +1250,13 @@ function createTenantDataBoundary({
   }
 
   function assertFullIntegrity(prepared, originalValues, explicitScopes = []) {
+    // Audit appends have already passed scope, append-only and concurrency
+    // checks in prepareTenantEntries/preparePlatformEntries. They cannot alter
+    // business relationships, so unrelated legacy damage must not prevent
+    // recording authentication or security events. Mixed batches still receive
+    // the complete relationship validation below.
+    if (prepared.length > 0 && prepared.every(entry => entry.name === 'audit_logs')) return;
+
     const state = buildIntegrityState(prepared, originalValues);
     const mixedCatalogState = Object.fromEntries(state.entries
       .filter(entry => (

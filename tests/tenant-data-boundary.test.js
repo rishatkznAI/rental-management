@@ -3358,3 +3358,51 @@ test('client INN uniqueness is tenant-local and does not reveal another company'
     error => error?.code === 'CLIENT_INN_DUPLICATE',
   );
 });
+
+
+test('login audit events remain writable with unrelated invalid legacy user profiles', t => {
+  const context = createBoundaryContext();
+  t.after(() => context.close());
+  context.state.users.push({ id: 'DEMO-USER-VIEWER', ownerId: 'LEGACY-OWNER' });
+  const originalUsers = structuredClone(context.state.users);
+  const { createAuditLogger } = require('../server/lib/security-audit.js');
+  const audit = createAuditLogger({
+    readData: context.boundary.readData,
+    writeData: context.boundary.writeData,
+    generateId: () => `AUD-${context.state.audit_logs?.length || 0}`,
+    withTenantScope: (scope, operation) => runWithTenantHistoryRepositoryScope({
+      scope, reason: 'security-audit-event', writableCollections: ['audit_logs'],
+    }, operation),
+    withSystemScope: operation => runWithPlatformSystemScope({
+      reason: 'security-audit-event', writableCollections: ['audit_logs'],
+    }, operation),
+  });
+  audit({ user: { id: 'U-A' }, actorScope: SCOPE_A }, { action: 'login.success', entityType: 'auth' });
+  audit.system({}, { action: 'login.fail', entityType: 'auth' });
+  assert.deepEqual(context.state.audit_logs.map(row => row.action), ['login.success', 'login.fail']);
+  assert.equal(context.state.audit_logs[0].companyId, SCOPE_A.companyId);
+  assert.equal(context.state.audit_logs[1].auditKind, 'GLOBAL_SYSTEM');
+  assert.deepEqual(context.state.users, originalUsers);
+
+  const before = structuredClone(context.state);
+  assert.throws(() => runWithTenantHistoryRepositoryScope({
+    scope: SCOPE_A, reason: 'security-audit-event', writableCollections: ['audit_logs'],
+  }, () => context.boundary.writeData('audit_logs', [])),
+  error => error.code === 'TENANT_APPEND_ONLY_COLLECTION_MUTATION');
+  assert.throws(() => runWithPlatformSystemScope({
+    reason: 'security-audit-event', writableCollections: ['audit_logs'],
+  }, () => context.boundary.writeData('audit_logs', [])),
+  error => error.code === 'PLATFORM_HISTORY_IMMUTABLE');
+  assert.throws(() => runWithTenantHistoryRepositoryScope({
+    scope: SCOPE_A, reason: 'security-audit-event', writableCollections: ['audit_logs'],
+  }, () => context.boundary.writeData('audit_logs', [
+    context.state.audit_logs[0], scoped(SCOPE_B, { id: 'FORGED' }),
+  ])), error => error.code === 'TENANT_SCOPE_SPOOFING_DENIED');
+  assert.throws(() => runWithPlatformSystemScope({
+    reason: 'mixed-write', writableCollections: ['audit_logs', 'users'],
+  }, () => context.boundary.writeDataBatch([
+    { name: 'audit_logs', value: context.state.audit_logs },
+    { name: 'users', value: context.state.users },
+  ])), error => error.code === 'USER_TENANT_PROFILE_SCOPE_REQUIRED');
+  assert.deepEqual(context.state, before);
+});

@@ -14,6 +14,7 @@ import {
 import { ArrowLeft, Info } from 'lucide-react';
 import { useCreateClient } from '../hooks/useClients';
 import { ApiError } from '../lib/api';
+import { businessWriteErrorMessage } from '../lib/businessWriteError';
 import { useAuth } from '../contexts/AuthContext';
 import { createAuditEntry } from '../lib/entity-history';
 import type { Client } from '../types';
@@ -85,6 +86,7 @@ export default function ClientNew() {
   const [managers, setManagers] = React.useState<{ id: string; name: string; role: string; status: string }[]>([]);
   const [duplicateClient, setDuplicateClient] = useState<{ id?: string; company?: string } | null>(null);
   const [innError, setInnError] = useState('');
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
     if (!can('create', 'clients')) navigate('/clients', { replace: true });
@@ -114,6 +116,7 @@ export default function ClientNew() {
     e.preventDefault();
     const now = new Date().toISOString();
     setDuplicateClient(null);
+    setSaveError('');
     const normalizedInn = normalizeInn(formData.inn);
     if (!isValidInn(formData.inn)) {
       setInnError(INN_ERROR);
@@ -151,6 +154,7 @@ export default function ClientNew() {
           return;
         }
         setDuplicateClient(null);
+        setSaveError(businessWriteErrorMessage(error, 'client'));
       },
     });
   };
@@ -371,8 +375,15 @@ export default function ClientNew() {
           </CardContent>
         </Card>
 
+        {saveError && (
+          <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+            {saveError}
+          </div>
+        )}
         <div className="flex gap-3">
-          <Button type="submit">Создать клиента</Button>
+          <Button type="submit" disabled={createClient.isPending}>
+            {createClient.isPending ? 'Сохранение...' : 'Создать клиента'}
+          </Button>
           <Button type="button" variant="secondary" onClick={() => navigate('/clients')}>
             Отмена
           </Button>

@@ -1239,10 +1239,11 @@ function createTenantDataBoundary({
     );
   }
 
-  function assertSystemUserIntegrity(entries, originalValues) {
+  function assertSystemUserIntegrity(entries, originalValues, principalIds = null) {
     const usersEntry = (entries || []).find(entry => entry.name === 'users');
     const users = Array.isArray(usersEntry?.value) ? usersEntry.value : [];
     for (const user of users) {
+      if (principalIds && !principalIds.has(text(user?.id))) continue;
       if (!hasUserTenantProfileLink(user)) continue;
       const scope = exactUserMembershipScope(user);
       assertUserRelationshipRecord(user, scope, entries, originalValues);
@@ -1267,7 +1268,26 @@ function createTenantDataBoundary({
     assertValidCatalogFamilyState(mixedCatalogState);
     const scopes = integrityScopes(state.entries, explicitScopes);
     assertDerivedIntegrity(state.entries, state.originalValues, scopes);
-    assertSystemUserIntegrity(state.entries, state.originalValues);
+    if (explicitScopes.length === 0) {
+      // Explicit platform/admin operations retain the database-wide directory check.
+      assertSystemUserIntegrity(state.entries, state.originalValues);
+    } else {
+      // A tenant write can affect a SYSTEM user's profile only by changing the
+      // directory or one of its authoritative parents. Membership alone selects
+      // the tenant's principals; legacy owner/carrier labels never grant scope.
+      // Resolve lazily because the relationship guard uses the boundary error type.
+      const { COLLECTION_RELATION_FIELDS } = require('./tenant-relationship-guard');
+      const userProfileCollections = new Set([
+        'users', ...Object.values(COLLECTION_RELATION_FIELDS.users).flat(),
+      ]);
+      const principalIds = new Set(scopes.map(scope => text(scope.principalId)).filter(Boolean));
+      if (prepared.some(entry => userProfileCollections.has(entry.name))) {
+        for (const scope of scopes) {
+          for (const principalId of companyPrincipalIds(scope)) principalIds.add(principalId);
+        }
+      }
+      assertSystemUserIntegrity(state.entries, state.originalValues, principalIds);
+    }
     for (const scope of scopes) {
       const recordsToValidate = new Map(state.entries.map(entry => {
         const policy = collectionPolicy(entry.name);

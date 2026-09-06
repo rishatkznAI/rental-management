@@ -78,9 +78,9 @@ import { getEquipmentPhotoGallery, isSameEquipmentPhoto, uniqueEquipmentPhotos }
 import {
   PRODUCTION_SMOKE_FIXTURE_PROTECTED_MESSAGE,
   isProductionSmokeEquipmentFixture,
-  productionSmokeFixtureErrorMessage,
   stripProductionSmokeFixtureProtectedPatch,
 } from '../lib/productionSmokeFixture';
+import { businessWriteErrorMessage } from '../lib/businessWriteError';
 
 const ownerLabels: Record<EquipmentOwnerType, string> = {
   own: 'Собственная',
@@ -5275,8 +5275,7 @@ export default function EquipmentDetail() {
             toast.success('Карточка техники сохранена');
             setShowEditModal(false);
           } catch (error) {
-            const message = productionSmokeFixtureErrorMessage(error);
-            console.error('Failed to update equipment card', error);
+            const message = businessWriteErrorMessage(error, 'equipment');
             setEquipmentSaveError(message);
             toast.error(message);
           } finally {
@@ -6421,7 +6420,7 @@ function EditEquipmentModal({
                 Поля, отмеченные <span className="text-red-500">*</span>, обязательны
               </p>
               {saveError && (
-                <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">{saveError}</p>
+                <p role="alert" className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">{saveError}</p>
               )}
             </div>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:gap-3">

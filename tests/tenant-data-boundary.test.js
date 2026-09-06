@@ -3360,6 +3360,130 @@ test('client INN uniqueness is tenant-local and does not reveal another company'
 });
 
 
+function createUserProfileIntegrityContext() {
+  const context = createBoundaryContext();
+  // A second company member proves parent/user checks are not limited to the actor.
+  context.repository.createMembership({
+    id: 'MEMBERSHIP-SECOND-A', companyId: SCOPE_A.companyId, principalId: 'U-NO-MEMBERSHIP',
+    status: 'active', roleTemplateKey: 'TEMPLATE-COMPANY-A', roleTemplateVersion: 1,
+    companyWideBranchAuthority: true, branchIds: [],
+    actorContext: testActor({ principalId: 'U-A' }), reason: 'profile-integrity-regression',
+  });
+  context.state.owners = [
+    scoped(SCOPE_A, { id: 'OWNER-A' }),
+    scoped(SCOPE_B, { id: 'OWNER-B' }),
+  ];
+  context.state.counterparties = [
+    scoped(SCOPE_A, { id: 'CP-A' }),
+    scoped(SCOPE_B, { id: 'CP-B' }),
+  ];
+  context.state.delivery_carriers = [
+    scoped(SCOPE_A, { id: 'CARRIER-A', counterpartyId: 'CP-A' }),
+    scoped(SCOPE_B, { id: 'CARRIER-B', counterpartyId: 'CP-B' }),
+  ];
+  context.state.users.push(
+    { id: 'UNRELATED-ORPHAN-OWNER', ownerId: 'MISSING-OWNER' },
+    { id: 'UNRELATED-ORPHAN-CARRIER', carrierId: 'MISSING-CARRIER' },
+  );
+  const { createTrustedActorScopeResolver } = require('../server/lib/trusted-actor-scope.js');
+  return { ...context, actorScope: createTrustedActorScopeResolver({ db: context.db })('U-A') };
+}
+
+const USER_PROFILE_RELATION_CASES = [
+  ['ownerId', 'owners', 'OWNER-A', 'OWNER-B'],
+  ['carrierId', 'delivery_carriers', 'CARRIER-A', 'CARRIER-B'],
+  ['assignedCarrierId', 'delivery_carriers', 'CARRIER-A', 'CARRIER-B'],
+  ['carrierKey', 'delivery_carriers', 'CARRIER-A', 'CARRIER-B'],
+];
+
+test('tenant parent deletion still protects linked users despite unrelated orphan profiles', t => {
+  for (const [field, collection, ownId] of USER_PROFILE_RELATION_CASES) {
+    const context = createUserProfileIntegrityContext();
+    t.after(() => context.close());
+    context.state.users.find(user => user.id === 'U-NO-MEMBERSHIP')[field] = ownId;
+    const before = structuredClone(context.state);
+    assert.throws(() => runWithTenantActorScope(context.actorScope, () => {
+      context.boundary.writeData(collection, []);
+    }), error => error?.code === 'TENANT_PARENT_MUTATION_ORPHANS_CHILD', field);
+    assert.deepEqual(context.state, before, field);
+    assert.equal(context.writes.length, 0, field);
+  }
+});
+
+test('tenant user profile patches cannot link foreign parents despite unrelated orphan profiles', t => {
+  for (const [field, _collection, ownId, foreignId] of USER_PROFILE_RELATION_CASES) {
+    const context = createUserProfileIntegrityContext();
+    t.after(() => context.close());
+    context.state.users.find(user => user.id === 'U-NO-MEMBERSHIP')[field] = ownId;
+    const before = structuredClone(context.state);
+    assert.throws(() => runWithTenantActorScope(context.actorScope, () => {
+      const users = context.boundary.readData('users');
+      context.boundary.writeData('users', users.map(user => (
+        user.id === 'U-NO-MEMBERSHIP' ? { ...user, [field]: foreignId } : user
+      )));
+    }), error => error?.code === 'CROSS_TENANT_RELATION_DENIED', field);
+    assert.deepEqual(context.state, before, field);
+    assert.equal(context.writes.length, 0, field);
+  }
+});
+
+test('ordinary business writes reject linked current actors with inactive or ambiguous membership', t => {
+  for (const [field, _collection, ownId] of USER_PROFILE_RELATION_CASES) {
+    for (const membershipState of ['inactive', 'ambiguous']) {
+      for (const collection of ['equipment', 'clients']) {
+        const context = createUserProfileIntegrityContext();
+        t.after(() => context.close());
+        context.state.users.find(user => user.id === 'U-A')[field] = ownId;
+        if (membershipState === 'inactive') {
+          context.db.prepare(`
+            UPDATE company_memberships SET status = 'inactive', version = version + 1
+            WHERE principalId = ?
+          `).run('U-A');
+        } else {
+          context.repository.createMembership({
+            id: 'AMBIGUOUS-A-IN-B', companyId: SCOPE_B.companyId, principalId: 'U-A',
+            status: 'active', roleTemplateKey: 'TEMPLATE-COMPANY-B', roleTemplateVersion: 1,
+            companyWideBranchAuthority: true, branchIds: [],
+            actorContext: testActor({ principalId: 'U-B' }), reason: 'profile-integrity-regression',
+          });
+        }
+        const before = structuredClone(context.state);
+        assert.throws(() => runWithTenantActorScope(context.actorScope, () => {
+          context.boundary.writeData(collection, [{
+            id: 'ORDINARY-BUSINESS-CREATE',
+            ...(collection === 'clients' ? { counterpartyId: 'CP-A' } : {}),
+          }]);
+        }), error => error?.code === 'USER_TENANT_PROFILE_SCOPE_REQUIRED',
+        `${collection}: ${field}, ${membershipState}`);
+        assert.deepEqual(context.state, before, `${collection}: ${field}, ${membershipState}`);
+        assert.equal(context.writes.length, 0);
+      }
+    }
+  }
+});
+
+test('ordinary business writes accept valid current actor profiles without altering unrelated orphans', t => {
+  for (const [field, _collection, ownId] of USER_PROFILE_RELATION_CASES) {
+    for (const collection of ['equipment', 'clients']) {
+      const context = createUserProfileIntegrityContext();
+      t.after(() => context.close());
+      context.state.users.find(user => user.id === 'U-A')[field] = ownId;
+      const usersBefore = structuredClone(context.state.users);
+      runWithTenantActorScope(context.actorScope, () => {
+        context.boundary.writeData(collection, [{
+          id: 'ORDINARY-BUSINESS-CREATE',
+          ...(collection === 'clients' ? { counterpartyId: 'CP-A' } : {}),
+        }]);
+      });
+      assert.equal(context.state[collection].length, 1);
+      assert.equal(context.state[collection][0].companyId, SCOPE_A.companyId);
+      assert.equal(context.state[collection][0].tenantId, SCOPE_A.tenantId);
+      assert.deepEqual(context.state.users, usersBefore);
+      assert.deepEqual(context.writes.map(write => write.name), [collection, 'audit_logs']);
+    }
+  }
+});
+
 test('login audit events remain writable with unrelated invalid legacy user profiles', t => {
   const context = createBoundaryContext();
   t.after(() => context.close());

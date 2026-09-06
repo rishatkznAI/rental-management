@@ -44,6 +44,7 @@ import {
 } from '../hooks/useClientRelations';
 import type { Client, ClientContract, ClientObject, ClientStatus } from '../types';
 import { ApiError } from '../lib/api';
+import { businessWriteErrorMessage } from '../lib/businessWriteError';
 import { isCrmEnabled } from '../lib/features';
 import { usePermissions } from '../lib/permissions';
 import { useAuth } from '../contexts/AuthContext';
@@ -591,6 +592,7 @@ export default function ClientDetail() {
   const [editData, setEditData] = useState<Partial<Client>>({});
   const [duplicateClient, setDuplicateClient] = useState<{ id?: string; company?: string } | null>(null);
   const [innError, setInnError] = useState('');
+  const [saveError, setSaveError] = useState('');
   const [deleteBlockedRentals, setDeleteBlockedRentals] = useState<ClientDeleteBlockedRental[]>([]);
   const [deleteHistoryLinks, setDeleteHistoryLinks] = useState<ClientDeleteHistoryLink[]>([]);
   const [objectForm, setObjectForm] = useState<ClientObjectDraft>(emptyClientObjectDraft);
@@ -861,6 +863,7 @@ export default function ClientDetail() {
     if (!client || !canEdit) return;
     setEditData({ ...client });
     setDuplicateClient(null);
+    setSaveError('');
     setEditing(true);
   };
 
@@ -868,10 +871,12 @@ export default function ClientDetail() {
     setEditing(false);
     setEditData({});
     setDuplicateClient(null);
+    setSaveError('');
   };
 
   const saveEdit = () => {
     if (!client || !canEdit) return;
+    setSaveError('');
     const safeEditData = { ...editData };
     delete safeEditData.debt;
     const nextClient = {
@@ -913,10 +918,14 @@ export default function ClientDetail() {
       'Обновлён клиент',
     );
     const updatedClient = appendAuditHistory(nextClient, ...historyEntries);
+    // Submit edited fields only; fetched scope and creation metadata are read-only.
+    const patch = Object.fromEntries(
+      Object.entries(updatedClient).filter(([field, value]) => value !== client[field as keyof Client]),
+    ) as Partial<Client>;
     setClient(updatedClient);
     setDuplicateClient(null);
     setInnError('');
-    updateClient.mutate({ id: updatedClient.id, data: updatedClient }, {
+    updateClient.mutate({ id: updatedClient.id, data: patch }, {
       onSuccess: (savedClient) => {
         setClient(savedClient);
         setEditing(false);
@@ -929,7 +938,8 @@ export default function ClientDetail() {
           setDuplicateClient(duplicate);
           return;
         }
-        toast.error(error instanceof Error ? error.message : 'Не удалось сохранить клиента.');
+        const message = businessWriteErrorMessage(error, 'client');
+        setSaveError(message);
       },
     });
   };
@@ -1604,6 +1614,11 @@ export default function ClientDetail() {
               </Button>
             </div>
           </div>
+          {saveError && (
+            <div role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+              {saveError}
+            </div>
+          )}
         </div>
       )}
 

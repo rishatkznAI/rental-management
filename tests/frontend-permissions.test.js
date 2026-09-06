@@ -152,8 +152,11 @@ test('frontend equipment registry RBAC separates rental sales and investor capab
   assert.match(equipmentDetailSource, /show: can\('create', 'deliveries'\)/);
 });
 
-test('equipment create form keeps selected owner aligned with loaded owners catalog', () => {
-  assert.match(equipmentNewSource, /api\.get<typeof DEFAULT_OWNERS>\('\/api\/owners'\)/);
+test('equipment create form uses persisted owners and keeps selection aligned with the loaded catalog', () => {
+  assert.match(equipmentNewSource, /\[owners, setOwners\] = React\.useState<[^>]+>\(\[\]\)/);
+  assert.match(equipmentNewSource, /api\.get<[^>]+>\('\/api\/owners'\)/);
+  assert.match(equipmentNewSource, /if \(Array\.isArray\(list\)\) setOwners\(list\)/);
+  assert.doesNotMatch(equipmentNewSource, /DEFAULT_OWNERS|id:\s*['"]own-[123]['"]/);
   assert.match(equipmentNewSource, /owners\.some\(owner => owner\.id === prev\.ownerId\)/);
   assert.match(equipmentNewSource, /return \{ \.\.\.prev, ownerId: owners\[0\]\.id \}/);
 });

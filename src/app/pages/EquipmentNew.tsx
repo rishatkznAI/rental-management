@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useCreateEquipment } from '../hooks/useEquipment';
 import { api } from '../lib/api';
+import { businessWriteErrorMessage } from '../lib/businessWriteError';
 import { useAuth } from '../contexts/AuthContext';
 import { createAuditEntry } from '../lib/entity-history';
 import { EQUIPMENT_CATEGORY_LABELS, EQUIPMENT_PRIORITY_LABELS, EQUIPMENT_SALE_PDI_LABELS, EQUIPMENT_SALE_RECEIPT_LABELS } from '../lib/equipmentClassification';
@@ -134,19 +135,13 @@ const eventTypeBadge: Record<string, string> = {
 
 // ───────────────────────────────────────────────────────────────────────────
 
-const DEFAULT_OWNERS = [
-  { id: 'own-1', name: 'ООО «Скайтех компани»' },
-  { id: 'own-2', name: 'Частный инвестор 1' },
-  { id: 'own-3', name: 'Субаренда' },
-];
-
 export default function EquipmentNew() {
   const navigate = useNavigate();
   const location = useLocation();
   const { can } = usePermissions();
   const { user } = useAuth();
   const createEquipment = useCreateEquipment();
-  const [owners, setOwners] = React.useState(DEFAULT_OWNERS);
+  const [owners, setOwners] = React.useState<{ id: string; name: string }[]>([]);
   const isSaleMode = useMemo(() => new URLSearchParams(location.search).get('sale') === '1', [location.search]);
   const equipmentTypeOptions = useEquipmentTypeCatalog();
 
@@ -155,10 +150,10 @@ export default function EquipmentNew() {
     if (!can('create', 'equipment')) navigate('/equipment', { replace: true });
   }, []);
 
-  // Загружаем собственников из API (с fallback на defaults)
+  // Only persisted owners can be referenced by a new equipment record.
   useEffect(() => {
-    api.get<typeof DEFAULT_OWNERS>('/api/owners').then(list => {
-      if (list && list.length > 0) setOwners(list);
+    api.get<{ id: string; name: string }[]>('/api/owners').then(list => {
+      if (Array.isArray(list)) setOwners(list);
     }).catch(() => {});
   }, []);
 
@@ -271,10 +266,9 @@ export default function EquipmentNew() {
     }, { onSuccess: () => navigate(isSaleMode ? '/sales' : '/equipment') });
   };
 
-  const createError =
-    createEquipment.error instanceof Error
-      ? createEquipment.error.message
-      : '';
+  const createError = createEquipment.isError
+    ? businessWriteErrorMessage(createEquipment.error, 'equipment')
+    : '';
 
   // Текущий собственник (для условных подсказок)
   const selectedOwnerName = (owners.find(o => o.id === form.ownerId)?.name ?? '').toLowerCase();
@@ -865,7 +859,7 @@ export default function EquipmentNew() {
 
         {/* Кнопки */}
         {createError && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
             {createError}
           </div>
         )}
